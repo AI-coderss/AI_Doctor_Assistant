@@ -1,0 +1,666 @@
+/*Body*/
+@import url('https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css');
+[data-testid="stAppViewContainer"] {
+  /*background-image:url("https://i.ibb.co/0GTS96m/theme3.jpg");
+    background-size: cover;*/
+    z-index: 10;
+  background: linear-gradient(to right, rgb(182, 244, 146), rgb(73, 187, 216));
+}
+[data-testid="baseButton-header"]{
+  background-color: #fff;
+  color: red;
+  border: none !important;
+  
+}
+[data-testid="baseButton-headerNoPadding"]{
+  background-color: red;
+  font-size: 0.5rem;
+  border: none !important;
+}
+[data-testid="stChatInputSubmitButton"]{
+  border: none !important;
+}
+/*header*/
+/*
+div.ezrtsby2{
+    justify-content: center;
+    align-items: center;
+    display: flex;
+    padding-left: 0px;
+    padding: 5px;
+    height: 145px;
+    margin-bottom: 40px;
+    background-color: #e0455f;
+    background-image: linear-gradient(147deg, #e0455f 0%, #44000b 74%);
+    
+}*/
+.st-emotion-cache-6qob1r.eczjsme3,
+[data-testid="stSidebar"] {
+  position: absolute;
+  margin-bottom: 40px;
+  background-color: #990033;
+  width: 400px;
+  background-image: linear-gradient(to right, #990033, rgb(46, 1, 1));
+}
+
+.st-emotion-cache-18ni7ap.ezrtsby2 {
+  background: none;
+}
+
+#mainmenu {
+  visibility: hidden;
+  display: none;
+}
+
+.profileImage {
+  width: 180px;
+  /* Adjust the width as needed */
+  height: 180px;
+  margin-right: 10px;
+  margin-left: 12px;
+  margin-top: 15px;
+  border-radius: 50%;
+  object-fit: cover;
+  border: linear-gradient(to right, rgb(88, 221, 11), rgb(51, 139, 147));
+  border-style: double;
+  animation: flip 2s infinite;
+}
+
+.textContainer {
+  margin-left: 5px;
+  color: white;
+}
+
+.textContainer p {
+  margin: 0;
+  font-family: "Puppins";
+  font-size: large;
+}
+
+div.st-emotion-cache-18ni7ap .ezrtsby2 {
+  padding: 5px;
+  margin-top: 15px;
+  font-size: 18px;
+}
+
+.textContainer .title p {
+  font-size: 24px;
+  color: white;
+  font-weight: bold;
+}
+
+/*chat message AI*/
+
+div.st-emotion-cache-4oy321.eeusbqq4 {
+  background-color: white;
+  border-radius: 20px;
+  margin-top: 5px;
+  position: relative;
+  animation: fade-in-right 2s ease-in-out both;
+}
+
+
+div.st-emotion-cache-4oy321.eeusbqq4 p {
+  color: black;
+  padding: 5px;
+  font-family: "Times New Roman";
+  font-size: 17px;
+}
+
+/*user message*/
+div.st-emotion-cache-1c7y2kd.eeusbqq4 {
+  align-self: flex-end;
+  background: #d9fdd3;
+  position: relative;
+  border-radius: 10px 3px 10px 10px;
+  padding: 10px;
+  flex-direction: row-reverse;
+}
+
+div.st-emotion-cache-1c7y2kd.eeusbqq4 p {
+  color: black;
+  font-family: "Times New Roman";
+  font-size: 18px;
+}
+
+.st-emotion-cache-10trblm.e1nzilvr1 {
+  font-family: "Times New Roman";
+  color: rgb(3, 3, 124);
+}
+
+strong {
+  font-family: "Times New Roman";
+  color: rgb(3, 3, 124);
+}
+
+/*AI shadow*/
+div.st-emotion-cache-4oy321.eeusbqq4:hover {
+  box-shadow: blue;
+}
+
+.profileImage:hover {
+  transform: scale(1.1);
+}
+
+/*User Shadow*/
+div.st-emotion-cache-1c7y2kd.eeusbqq4:hover {
+  box-shadow: blue;
+}
+
+/*AI messeges*/
+
+div.eeusbqq2 {
+  border-radius: 50%;
+}
+
+@keyframes fade-in-right {
+  0% {
+    transform: translate(-50%);
+    opacity: 0;
+  }
+
+  100% {
+    transform: translate(0%);
+    opacity: 1;
+  }
+}
+
+@keyframes fade-in-left {
+  0% {
+    transform: translate(50%);
+    opacity: 0;
+  }
+
+  100% {
+    transform: translate(0%);
+    opacity: 1;
+  }
+}
+
+/*app Botom*/
+div.st-emotion-cache-uhkwx6.ea3mdgi6 {
+  background: none;
+  border-radius: 5px 5px;
+}
+
+div.st-emotion-cache-1up18o9.e1d2x3se2 {
+  color: linear-gradient(270deg, hsl(207, 65%, 70%), hsl(207, 100%, 50%));
+}
+
+.stAudio {
+  width: 250px !important;
+  background-color: white !important;
+}
+
+.textContainer .title p:hover {
+  font-size: 25px;
+  color: rgb(188, 12, 241);
+}
+
+[data-testid="stChatInputTextArea"] {
+  align-self: self-end;
+  background: none;
+}
+
+/* For screens smaller than 768px (e.g., mobile devices) */
+@media (max-width: 767px) {
+  .st-emotion-cache-4oy321.eeusbqq4 {
+    width: 100%;
+    height: 50%;
+    align-self: self-end;
+  }
+}
+
+/* For screens larger than or equal to 768px (e.g., tablets and desktops) */
+@media (min-width: 768px) {
+  .st-emotion-cache-4oy321.eeusbqq4 {
+    width: 120%;
+    height: 100%;
+    align-self: self-end;
+  }
+}
+
+.typewriter {
+  --blue: #5c86ff;
+  --blue-dark: #275efe;
+  --key: #fff;
+  --paper: #eef0fd;
+  --text: #d3d4ec;
+  --tool: #fbc56c;
+  --duration: 3s;
+  position: relative;
+  -webkit-animation: bounce05 var(--duration) linear infinite;
+  animation: bounce05 var(--duration) linear infinite;
+}
+
+.typewriter .slide {
+  width: 92px;
+  height: 20px;
+  border-radius: 3px;
+  margin-left: 14px;
+  transform: translateX(14px);
+  background: linear-gradient(var(--blue), var(--blue-dark));
+  -webkit-animation: slide05 var(--duration) ease infinite;
+  animation: slide05 var(--duration) ease infinite;
+}
+
+.typewriter .slide:before,
+.typewriter .slide:after,
+.typewriter .slide i:before {
+  content: "";
+  position: absolute;
+  background: var(--tool);
+}
+
+.typewriter .slide:before {
+  width: 2px;
+  height: 8px;
+  top: 6px;
+  left: 100%;
+}
+
+.typewriter .slide:after {
+  left: 94px;
+  top: 3px;
+  height: 14px;
+  width: 6px;
+  border-radius: 3px;
+}
+
+.typewriter .slide i {
+  display: block;
+  position: absolute;
+  right: 100%;
+  width: 6px;
+  height: 4px;
+  top: 4px;
+  background: var(--tool);
+}
+
+.typewriter .slide i:before {
+  right: 100%;
+  top: -2px;
+  width: 4px;
+  border-radius: 2px;
+  height: 14px;
+}
+
+.typewriter .paper {
+  position: absolute;
+  left: 24px;
+  top: -26px;
+  width: 40px;
+  height: 46px;
+  border-radius: 5px;
+  background: var(--paper);
+  transform: translateY(46px);
+  -webkit-animation: paper05 var(--duration) linear infinite;
+  animation: paper05 var(--duration) linear infinite;
+}
+
+.typewriter .paper:before {
+  content: "";
+  position: absolute;
+  left: 6px;
+  right: 6px;
+  top: 7px;
+  border-radius: 2px;
+  height: 4px;
+  transform: scaleY(0.8);
+  background: var(--text);
+  box-shadow: 0 12px 0 var(--text), 0 24px 0 var(--text), 0 36px 0 var(--text);
+}
+
+.typewriter .keyboard {
+  width: 120px;
+  height: 56px;
+  margin-top: -10px;
+  z-index: 1;
+  position: relative;
+}
+
+.typewriter .keyboard:before,
+.typewriter .keyboard:after {
+  content: "";
+  position: absolute;
+}
+
+.typewriter .keyboard:before {
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  border-radius: 7px;
+  background: linear-gradient(135deg, var(--blue), var(--blue-dark));
+  transform: perspective(10px) rotateX(2deg);
+  transform-origin: 50% 100%;
+}
+
+.typewriter .keyboard:after {
+  left: 2px;
+  top: 25px;
+  width: 11px;
+  height: 4px;
+  border-radius: 2px;
+  box-shadow: 15px 0 0 var(--key), 30px 0 0 var(--key), 45px 0 0 var(--key),
+    60px 0 0 var(--key), 75px 0 0 var(--key), 90px 0 0 var(--key),
+    22px 10px 0 var(--key), 37px 10px 0 var(--key), 52px 10px 0 var(--key),
+    60px 10px 0 var(--key), 68px 10px 0 var(--key), 83px 10px 0 var(--key);
+  -webkit-animation: keyboard05 var(--duration) linear infinite;
+  animation: keyboard05 var(--duration) linear infinite;
+}
+
+@keyframes bounce05 {
+  85%,
+  92%,
+  100% {
+    transform: translateY(0);
+  }
+
+  89% {
+    transform: translateY(-4px);
+  }
+
+  95% {
+    transform: translateY(2px);
+  }
+}
+
+@keyframes slide05 {
+  5% {
+    transform: translateX(14px);
+  }
+
+  15%,
+  30% {
+    transform: translateX(6px);
+  }
+
+  40%,
+  55% {
+    transform: translateX(0);
+  }
+
+  65%,
+  70% {
+    transform: translateX(-4px);
+  }
+
+  80%,
+  89% {
+    transform: translateX(-12px);
+  }
+
+  100% {
+    transform: translateX(14px);
+  }
+}
+
+@keyframes paper05 {
+  5% {
+    transform: translateY(46px);
+  }
+
+  20%,
+  30% {
+    transform: translateY(34px);
+  }
+
+  40%,
+  55% {
+    transform: translateY(22px);
+  }
+
+  65%,
+  70% {
+    transform: translateY(10px);
+  }
+
+  80%,
+  85% {
+    transform: translateY(0);
+  }
+
+  92%,
+  100% {
+    transform: translateY(46px);
+  }
+}
+
+@keyframes keyboard05 {
+  5%,
+  12%,
+  21%,
+  30%,
+  39%,
+  48%,
+  57%,
+  66%,
+  75%,
+  84% {
+    box-shadow: 15px 0 0 var(--key), 30px 0 0 var(--key), 45px 0 0 var(--key),
+      60px 0 0 var(--key), 75px 0 0 var(--key), 90px 0 0 var(--key),
+      22px 10px 0 var(--key), 37px 10px 0 var(--key), 52px 10px 0 var(--key),
+      60px 10px 0 var(--key), 68px 10px 0 var(--key), 83px 10px 0 var(--key);
+  }
+
+  9% {
+    box-shadow: 15px 2px 0 var(--key), 30px 0 0 var(--key), 45px 0 0 var(--key),
+      60px 0 0 var(--key), 75px 0 0 var(--key), 90px 0 0 var(--key),
+      22px 10px 0 var(--key), 37px 10px 0 var(--key), 52px 10px 0 var(--key),
+      60px 10px 0 var(--key), 68px 10px 0 var(--key), 83px 10px 0 var(--key);
+  }
+
+  18% {
+    box-shadow: 15px 0 0 var(--key), 30px 0 0 var(--key), 45px 0 0 var(--key),
+      60px 2px 0 var(--key), 75px 0 0 var(--key), 90px 0 0 var(--key),
+      22px 10px 0 var(--key), 37px 10px 0 var(--key), 52px 10px 0 var(--key),
+      60px 10px 0 var(--key), 68px 10px 0 var(--key), 83px 10px 0 var(--key);
+  }
+
+  27% {
+    box-shadow: 15px 0 0 var(--key), 30px 0 0 var(--key), 45px 0 0 var(--key),
+      60px 0 0 var(--key), 75px 0 0 var(--key), 90px 0 0 var(--key),
+      22px 12px 0 var(--key), 37px 10px 0 var(--key), 52px 10px 0 var(--key),
+      60px 10px 0 var(--key), 68px 10px 0 var(--key), 83px 10px 0 var(--key);
+  }
+
+  36% {
+    box-shadow: 15px 0 0 var(--key), 30px 0 0 var(--key), 45px 0 0 var(--key),
+      60px 0 0 var(--key), 75px 0 0 var(--key), 90px 0 0 var(--key),
+      22px 10px 0 var(--key), 37px 10px 0 var(--key), 52px 12px 0 var(--key),
+      60px 12px 0 var(--key), 68px 12px 0 var(--key), 83px 10px 0 var(--key);
+  }
+
+  45% {
+    box-shadow: 15px 0 0 var(--key), 30px 0 0 var(--key), 45px 0 0 var(--key),
+      60px 0 0 var(--key), 75px 0 0 var(--key), 90px 2px 0 var(--key),
+      22px 10px 0 var(--key), 37px 10px 0 var(--key), 52px 10px 0 var(--key),
+      60px 10px 0 var(--key), 68px 10px 0 var(--key), 83px 10px 0 var(--key);
+  }
+
+  54% {
+    box-shadow: 15px 0 0 var(--key), 30px 2px 0 var(--key), 45px 0 0 var(--key),
+      60px 0 0 var(--key), 75px 0 0 var(--key), 90px 0 0 var(--key),
+      22px 10px 0 var(--key), 37px 10px 0 var(--key), 52px 10px 0 var(--key),
+      60px 10px 0 var(--key), 68px 10px 0 var(--key), 83px 10px 0 var(--key);
+  }
+
+  63% {
+    box-shadow: 15px 0 0 var(--key), 30px 0 0 var(--key), 45px 0 0 var(--key),
+      60px 0 0 var(--key), 75px 0 0 var(--key), 90px 0 0 var(--key),
+      22px 10px 0 var(--key), 37px 10px 0 var(--key), 52px 10px 0 var(--key),
+      60px 10px 0 var(--key), 68px 10px 0 var(--key), 83px 12px 0 var(--key);
+  }
+
+  72% {
+    box-shadow: 15px 0 0 var(--key), 30px 0 0 var(--key), 45px 2px 0 var(--key),
+      60px 0 0 var(--key), 75px 0 0 var(--key), 90px 0 0 var(--key),
+      22px 10px 0 var(--key), 37px 10px 0 var(--key), 52px 10px 0 var(--key),
+      60px 10px 0 var(--key), 68px 10px 0 var(--key), 83px 10px 0 var(--key);
+  }
+
+  81% {
+    box-shadow: 15px 0 0 var(--key), 30px 0 0 var(--key), 45px 0 0 var(--key),
+      60px 0 0 var(--key), 75px 0 0 var(--key), 90px 0 0 var(--key),
+      22px 10px 0 var(--key), 37px 12px 0 var(--key), 52px 10px 0 var(--key),
+      60px 10px 0 var(--key), 68px 10px 0 var(--key), 83px 10px 0 var(--key);
+  }
+}
+
+button {
+  position: relative;
+  display: inline-block;
+  padding: 10px 20px;
+  color: #990033;
+  overflow: hidden;
+  transition: 0.5s;
+  border: 2px solid;
+  transition: background-color 0.3s ease-in-out, color 0.3s ease-in-out !important;
+  border: 2px solid !important;
+  border-image: linear-gradient(to right, rgb(182, 244, 146), rgb(73, 187, 216)) 1 !important;
+}
+
+
+button:hover {
+  background-color: #990033;
+  color: #ffffff !important;
+  border-radius: 5px;
+}
+/* Target the textarea by its data-baseweb attribute */
+[data-baseweb="textarea"] {
+  border: none !important;      /* Removes any border */
+  outline: none !important;     /* Removes any outline */
+  box-shadow: none !important;  /* Removes any box shadow */
+}
+
+/* Also target the focus state in case it's adding a red border on focus */
+[data-baseweb="textarea"]:focus {
+  border: none !important;      /* Removes any border on focus */
+  outline: none !important;     /* Removes any outline on focus */
+  box-shadow: none !important;  /* Removes any shadow on focus */
+}
+
+ /* Style the chat container (based on class you provided) */
+ .stChatInput {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px;
+  border: none;
+  background: rgba(255, 255, 255, 0.1); /* Slight transparency for glass effect */
+  backdrop-filter: blur(6px); /* Apply blur for glassmorphic effect */
+  border-radius: 20px;
+  box-shadow: 0 4px 15px rgba(0, 0, 0, 0.1);
+}
+
+/* Style the chat input field */
+[data-testid="stChatInputTextArea"] {
+  border: none !important; /* Removes the default border */
+  outline: none !important; /* Removes the outline (focus highlight) */
+  flex-grow: 1;
+  padding: 10px;
+  background: rgba(255, 255, 255, 0.2); /* Transparent background for input */
+  color: black;
+  border-radius: 20px;
+  font-size: 16px;
+  box-shadow: inset 0 4px 10px rgba(0, 0, 0, 0.1); /* Inner shadow for depth */
+}
+
+/* Chat input placeholder */
+[data-testid="stChatInputTextArea"]::placeholder {
+  color: rgba(0, 0, 0, 0.7); /* Semi-transparent placeholder */
+}
+
+/* Style the mic button */
+.mic-btn {
+  background: linear-gradient(145deg, #00B0F0, #00D4FF); /* Gradient for mic button */
+  border: none;
+  border-radius: 50%;
+  color: white;
+  width: 45px;
+  height: 45px;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  cursor: pointer;
+  font-size: 20px;
+  transition: background-color 0.3s, transform 0.3s, box-shadow 0.3s;
+  margin-right: 15px; /* Add margin between mic and send button */
+}
+
+/* Mic button hover effect */
+.mic-btn:hover {
+  background: linear-gradient(145deg, #ff66b2, #ff1a75); /* Gradient hover effect */
+  box-shadow: 0 8px 20px rgba(255, 102, 178, 0.4); /* Glowing effect on hover */
+}
+
+/* Mic button active effect */
+.mic-btn:active {
+  transform: scale(1.1);
+}
+
+/* Style the send button (which is native to Streamlit) */
+[data-testid="stChatInputSubmitButton"] {
+  background: linear-gradient(145deg, #00B0F0, #00D4FF); /* Gradient to match the mic button */
+  border: none;
+  border-radius: 50%;
+  color: white;
+  width: 45px;
+  height: 45px;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  cursor: pointer;
+  font-size: 20px;
+  transition: background-color 0.3s, transform 0.3s, box-shadow 0.3s;
+  margin-right: 15px;  /* Add margin to the right side for spacing */
+  padding: 5px;  /* Add padding around the button to give it more space */
+  position: relative;  /* Ensure the button remains aligned within the container */
+}
+
+
+/* Send button hover effect */
+[data-testid="stChatInputSubmitButton"]:hover {
+  background: linear-gradient(145deg, #ff66b2, #ff1a75); /* Hover gradient for send button */
+  box-shadow: 0 8px 20px rgba(255, 102, 178, 0.4); /* Hover glow */
+  border-radius: 50%;
+}
+
+/* Send button active effect */
+[data-testid="stChatInputSubmitButton"]:active {
+  transform: scale(1.1);
+}
+
+/* Responsive adjustments */
+@media (max-width: 768px) {
+  .stChatInput {
+      padding: 8px;
+  }
+
+  [data-testid="stChatInputTextArea"] {
+      font-size: 14px;
+  }
+
+  .mic-btn, [data-testid="stChatInputSubmitButton"] {
+      width: 45px;
+      height: 45px;
+      font-size: 18px;
+  }
+}
+
+@media (max-width: 480px) {
+  .stChatInput {
+      padding: 5px;
+  }
+
+  [data-testid="stChatInputTextArea"] {
+      font-size: 12px;
+  }
+
+  .mic-btn, [data-testid="stChatInputSubmitButton"] {
+      width: 40px;
+      height: 40px;
+      font-size: 16px;
+  }
+}

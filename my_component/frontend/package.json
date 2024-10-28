@@ -8,8 +8,8 @@
     "@mui/icons-material": "^6.1.5",
     "@mui/material": "^6.1.5",
     "ajv": "^8.17.1",
-    "react": "^16.13.1",
-    "react-dom": "^16.13.1",
+    "react": "^18.2.0",
+    "react-dom": "^18.2.0",
     "react-media-recorder": "^1.7.1",
     "streamlit-component-lib": "^2.0.0"
   },
@@ -36,10 +36,12 @@
   },
   "homepage": ".",
   "devDependencies": {
-    "@types/node": "^12.0.0",
-    "@types/react": "^16.14.62",
-    "@types/react-dom": "^16.9.24",
+    "@types/node": "^16.11.0",
+    "@types/react": "^18.0.28",
+    "@types/react-dom": "^18.0.10",
     "react-scripts": "^5.0.1",
     "typescript": "^4.2.0"
   }
 }
+
+

@@ -46,8 +46,17 @@ const ChatInputWidget: React.FC = () => {
     }
   }, [mediaBlobUrl, fetchAudioAndSend]);
 
-  const handleInputChange = (event: React.ChangeEvent<HTMLInputElement>) => {
+  const handleInputChange = (event: React.ChangeEvent<HTMLTextAreaElement>) => {
     setInputText(event.target.value);
+    adjustTextAreaHeight(event.target);
+  };
+
+  const handleKeyDown = (event: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    if (event.key === 'Enter' && !event.shiftKey) {
+      event.preventDefault();  // Prevents newline on Enter
+      sendDataToStreamlit({ text: inputText });
+      setInputText("");  // Clear input after sending
+    }
   };
 
   const handleIconClick = () => {
@@ -65,14 +74,21 @@ const ChatInputWidget: React.FC = () => {
     }
   };
 
+  const adjustTextAreaHeight = (element: HTMLTextAreaElement) => {
+    element.style.height = "auto";
+    element.style.height = `${element.scrollHeight}px`;
+  };
+
   return (
     <div className="chat-container">
-      <input
-        type="text"
+      <textarea
         className="chat-input"
         placeholder="Type a message..."
         value={inputText}
         onChange={handleInputChange}
+        onKeyDown={handleKeyDown}
+        rows={1}  // Minimum rows
+        style={{ resize: 'none' }}  // Prevent manual resizing
       />
       <button className="icon-btn" onClick={handleIconClick}>
         {inputText.trim().length > 0 ? (
@@ -88,3 +104,5 @@ const ChatInputWidget: React.FC = () => {
 };
 
 export default withStreamlitConnection(ChatInputWidget);
+
+

@@ -110,7 +110,7 @@ def stream():
     return Response(
         stream_with_context(generate()),
         content_type="text/plain",
-        headers={"Access-Control-Allow-Origin": "https://ivf-virtual-training-assistant-dsah.onrender.com"}
+        headers={"Access-Control-Allow-Origin": "https://dsahdoctoraiassistantbot.onrender.com"}
     )
 
 # === /generate ===

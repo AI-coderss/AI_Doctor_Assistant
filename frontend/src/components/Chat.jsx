@@ -17,7 +17,7 @@ let localStream;
 const Chat = () => {
   const [chats, setChats] = useState([
     {
-      msg: "Hi there! How can I assist you today with your IVF Training?",
+      msg: "Hi there! How can I assist you today with your Medical questions?",
       who: "bot",
     },
   ]);

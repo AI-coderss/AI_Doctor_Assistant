@@ -1,0 +1,253 @@
+/* ===========================
+   VoiceRecorderPanel.css (refined)
+   fixes: canvas overflow, glass container, launcher text spacing
+   =========================== */
+
+:root{
+  --radius-sm: 6px;
+  --radius-md: 12px;
+  --radius-lg: 16px;
+
+  --shadow-1: 0 8px 18px rgba(0,0,0,.16);
+  --shadow-2: 0 12px 28px rgba(0,0,0,.24);
+
+  /* tokens / fallbacks */
+  --primary: #6366f1;
+  --glass-border: 1px solid rgba(255,255,255,.22);
+  --glass-ink: #0f1218;
+}
+
+/* ===========================
+   Launcher (bottom-left)
+   =========================== */
+
+@keyframes vrp-pulse {
+  0% { transform: translateY(0) scale(1); }
+  50% { transform: translateY(-1px) scale(1.06); }
+  100% { transform: translateY(0) scale(1); }
+}
+@keyframes vrp-radiation {
+  0% {
+    box-shadow:
+      0 0 0 0 rgba(57, 85, 236, 0.40),
+      0 0 0 10px rgba(57, 85, 236, 0.12),
+      0 0 0 20px rgba(57, 85, 236, 0.06);
+  }
+  100% {
+    box-shadow:
+      0 0 0 10px rgba(57, 85, 236, 0),
+      0 0 0 20px rgba(57, 85, 236, 0),
+      0 0 0 30px rgba(57, 85, 236, 0);
+  }
+}
+
+.record-case-btn-left{
+  position: fixed;
+  left: 1.25rem;
+  bottom: 1.25rem;
+  z-index: 1000;
+
+  padding: .75rem 1.25rem;
+  border: 0;
+  border-radius: var(--radius-sm);
+  color: #fff;
+
+  background: linear-gradient(45deg, var(--primary), rgba(79,70,229,1));
+  cursor: pointer;
+
+  animation: vrp-pulse 2.2s infinite ease-in-out, vrp-radiation 2.6s infinite ease-out;
+  transition: transform .18s ease, box-shadow .18s ease;
+
+  /* ensure pseudo overlay aligns nicely */
+  position: fixed;
+}
+
+/* Keep original text in DOM, but visually replace it to add gaps without JSX changes */
+.record-case-btn-left .shine-content { visibility: hidden; }
+.record-case-btn-left::after{
+  content: "Record The Case";           /* <-- spaced label */
+  position: absolute;
+  inset: 0;                             /* center it */
+  display: grid;
+  place-items: center;
+  font-weight: 500;
+  letter-spacing: .2px;
+  word-spacing: .35rem;
+  pointer-events: none;
+  color: #fff;
+}
+
+.record-case-btn-left::before{
+  content:''; position:absolute; top:-50%; left:-50%;
+  width:200%; height:200%;
+  background: linear-gradient(45deg, transparent, rgba(255,255,255,.35), transparent);
+  transform: rotate(45deg) translateY(-100%);
+  transition: transform .5s ease;
+}
+.record-case-btn-left:hover::before{ transform: rotate(45deg) translateY(100%); }
+.record-case-btn-left:hover{ transform: translateY(-1px) scale(1.03); }
+
+/* ===========================
+   Draggable overlay
+   =========================== */
+
+.audio-recorder-overlay{
+  position: fixed; /* initial left/bottom set inline from component */
+  z-index: 1100;
+
+  min-width: 360px;
+  max-width: 520px;
+  padding: 14px;
+
+  border-radius: var(--radius-lg);
+  background: transparent;      /* panel stays transparent */
+  border: var(--glass-border);
+  box-shadow: var(--shadow-2);
+  color: var(--glass-ink);
+
+  user-select: none;
+}
+
+/* header */
+.overlay-head{
+  display:flex; align-items:center; justify-content:space-between;
+  margin-bottom:10px; gap:10px;
+}
+.badge{
+  font-size:12px; padding:5px 10px; border-radius:9999px;
+  color: var(--primary);
+  border: 1px solid rgba(79,70,229,.6);
+  background: rgba(79,70,229,.12);
+}
+.badge.live{ box-shadow: 0 0 0 3px rgba(79,70,229,.28); }
+.close-x{
+  width:32px; height:32px; border-radius:8px; border:0; cursor:pointer;
+  background: rgba(79,70,229,.10);
+  color: var(--glass-ink);
+}
+
+/* ===========================
+   Wave area (contains ReactMic)
+   — prevents canvas overflow
+   — adds gentle glass look behind the white canvas
+   =========================== */
+
+.wave-wrap{
+  position: relative;
+  height: 110px;
+  border-radius: var(--radius-md);
+
+  /* containment fix: STOP OVERFLOWING */
+  overflow: hidden;             /* <- key fix */
+  box-sizing: border-box;
+
+  /* subtle glass backdrop around the canvas (canvas stays white per prop) */
+  background: linear-gradient(135deg, rgba(255,255,255,.22), rgba(255,255,255,.10));
+  backdrop-filter: blur(6px);
+  border: 1px dashed rgba(79,70,229,.35);
+
+  display: grid; place-items: center;
+  margin-bottom: 12px;
+}
+
+/* Force the ReactMic element to fit the wrapper exactly */
+.sound-wave{
+  width: 100% !important;
+  height: 100% !important;
+  display: block;
+  border-radius: inherit;       /* clip to rounded corners */
+  overflow: hidden;             /* belt-and-suspenders */
+}
+
+/* The underlying canvas created by ReactMic */
+.sound-wave canvas{
+  width: 100% !important;
+  height: 100% !important;
+  display: block;
+  border-radius: inherit;       /* match rounding */
+  /* canvas background is controlled by ReactMic prop backgroundColor="#FFFFFF"
+     so CSS cannot change it. This guarantees clean edges and no bleed. */
+}
+
+/* ===========================
+   Controls (buttons)
+   =========================== */
+
+.recorder-buttons{
+  display: grid;
+  grid-template-columns: repeat(2,1fr);
+  gap: 10px;
+  margin-top: 14px;
+  width: 100%;
+  max-width: 420px;
+}
+
+.recorder-buttons button{
+  position: relative;
+  padding: 0.8rem 1.5rem;
+  font-size: .9rem;
+  color: #fff;
+  background: linear-gradient(45deg, var(--primary), rgba(79,70,229,1));
+  border: none;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  overflow: hidden;
+  transition: transform .18s ease, box-shadow .18s ease, opacity .18s ease;
+  box-shadow: 0 3px 10px rgba(37, 99, 235, 0.40);
+}
+.recorder-buttons button .shine-content{ position: relative; z-index: 1; }
+.recorder-buttons button::before{
+  content: '';
+  position: absolute;
+  top: -50%; left: -50%;
+  width: 200%; height: 200%;
+  background: linear-gradient(45deg, transparent, rgba(255,255,255,0.35), transparent);
+  transform: rotate(45deg) translateY(-100%);
+  transition: transform 0.5s ease;
+}
+.recorder-buttons button:hover::before{ transform: rotate(45deg) translateY(100%); }
+.recorder-buttons button:hover{ transform: translateY(-1px) scale(1.02); }
+.recorder-buttons button:disabled{
+  background-color: #d1d5db;
+  color: #6b7280;
+  cursor: not-allowed;
+  box-shadow: none;
+}
+
+/* Full-width CTA */
+.recorder-buttons .analyze{
+  grid-column: 1 / -1;
+  background: linear-gradient(45deg, var(--primary), #00bcd4);
+}
+
+/* ===========================
+   Loader
+   =========================== */
+
+.loader{
+  display:grid; place-items:center; gap:8px;
+  margin-top:12px; padding:10px;
+  border-radius: var(--radius-md);
+  border: 1px solid rgba(79,70,229,.28);
+  background: rgba(79,70,229,.08);
+}
+.spinner{
+  width:22px; height:22px;
+  border:3px solid rgba(79,70,229,.18);
+  border-top-color: var(--primary);
+  border-radius:9999px;
+  animation: vrp-spin .8s linear infinite;
+}
+@keyframes vrp-spin{ to{ transform: rotate(360deg); } }
+
+/* ===========================
+   Responsive
+   =========================== */
+@media (max-width:560px){
+  .audio-recorder-overlay{
+    min-width: 94vw;
+    left: 3vw !important;
+    bottom: 120px !important;
+  }
+  .recorder-buttons{ grid-template-columns: 1fr; }
+}

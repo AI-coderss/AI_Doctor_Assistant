@@ -11,6 +11,7 @@ import "../styles/chat.css";
 import { encodeWAV } from "./pcmToWav.js";
 import useAudioStore from "../store/audioStore.js";
 import { startVolumeMonitoring } from "./audioLevelAnalyzer";
+import VoiceRecorderPanel from "./VoiceRecorderPanel";
 
 let localStream;
 
@@ -414,6 +415,28 @@ const Chat = () => {
     );
   };
 
+  // === Minimal glue for VoiceRecorderPanel streaming second opinion ===
+  const opinionBufferRef = useRef("");
+  const opinionStreamingRef = useRef(false);
+  const handleOpinionStream = (chunkOrFull, done = false) => {
+    const chunk = String(chunkOrFull || "");
+    if (!opinionStreamingRef.current) {
+      // first chunk: open a new bot message
+      opinionStreamingRef.current = true;
+      opinionBufferRef.current = "";
+      setChats((prev) => [...prev, { msg: "", who: "bot" }]);
+    }
+    opinionBufferRef.current += chunk;
+    setChats((prev) => {
+      const updated = [...prev];
+      updated[updated.length - 1].msg = opinionBufferRef.current;
+      return updated;
+    });
+    if (done) {
+      opinionStreamingRef.current = false;
+    }
+  };
+
   if (isVoiceMode) {
     return (
       <div className="voice-assistant-wrapper">
@@ -500,7 +523,18 @@ const Chat = () => {
       <button className="voice-toggle-button" onClick={handleEnterVoiceMode}>
         🎙️
       </button>
+
+      {/* === Voice Recorder Panel — no transcript shown, streams opinion into chat === */}
+      <VoiceRecorderPanel
+        transcribeUrl="https://ai-doctor-assistant-backend-server.onrender.com/transcribe"
+        opinionUrl="https://ai-doctor-assistant-backend-server.onrender.com/case-second-opinion-stream"
+        fileFieldName="audio_data"
+        anchorLeft={72}
+        anchorBottom={96}
+        onOpinion={handleOpinionStream}
+      />
     </div>
+    
   );
 };
 

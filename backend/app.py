@@ -18,7 +18,6 @@ from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
 from langchain.chains import create_history_aware_retriever, create_retrieval_chain
 from langchain.chains.combine_documents import create_stuff_documents_chain
 
-
 # Load env vars
 load_dotenv()
 
@@ -34,7 +33,6 @@ CORS(app, resources={
         "supports_credentials": True
     }
 })
-
 
 chat_sessions = {}
 collection_name = os.getenv("QDRANT_COLLECTION_NAME")
@@ -56,28 +54,113 @@ vector_store = get_vector_store()
 
 # === RAG Chain ===
 def get_context_retriever_chain():
-    llm = ChatOpenAI(model="gpt-4o")
-    retriever = vector_store.as_retriever()
-    prompt = ChatPromptTemplate.from_messages([
-        MessagesPlaceholder("chat_history"),
-        ("user", "{input}"),
-        ("user", "Given the above conversation, generate a search query to look up in order to get information relevant to the conversation"),
-    ])
-    return create_history_aware_retriever(llm, retriever, prompt)
+  llm = ChatOpenAI(model="gpt-4o")
+  retriever = vector_store.as_retriever()
+  prompt = ChatPromptTemplate.from_messages([
+      MessagesPlaceholder("chat_history"),
+      ("user", "{input}"),
+      ("user", "Given the above conversation, generate a search query to look up in order to get information relevant to the conversation"),
+  ])
+  return create_history_aware_retriever(llm, retriever, prompt)
 
 def get_conversational_rag_chain():
-    retriever_chain = get_context_retriever_chain()
-    llm = ChatOpenAI(model="gpt-4o")
-    prompt = ChatPromptTemplate.from_messages([
-        ("system", engineeredprompt),
-        MessagesPlaceholder("chat_history"),
-        ("user", "{input}"),
-    ])
-    return create_retrieval_chain(retriever_chain, create_stuff_documents_chain(llm, prompt))
+  retriever_chain = get_context_retriever_chain()
+  llm = ChatOpenAI(model="gpt-4o")
+  prompt = ChatPromptTemplate.from_messages([
+      ("system", engineeredprompt),
+      MessagesPlaceholder("chat_history"),
+      ("user", "{input}"),
+  ])
+  return create_retrieval_chain(retriever_chain, create_stuff_documents_chain(llm, prompt))
 
 conversation_rag_chain = get_conversational_rag_chain()
 
-# === /stream ===
+# ====== NEW: /transcribe ======
+@app.route("/transcribe", methods=["POST"])
+def transcribe():
+    if "audio_data" not in request.files:
+        return jsonify({"error": "No audio file provided"}), 400
+
+    audio_file = request.files["audio_data"]
+    supported = ['flac','m4a','mp3','mp4','mpeg','mpga','oga','ogg','wav','webm']
+    ext = audio_file.filename.split('.')[-1].lower()
+    if ext not in supported:
+        return jsonify({"error": f"Unsupported file format: {ext}. Supported: {supported}"}), 400
+
+    with tempfile.NamedTemporaryFile(delete=False, suffix=f".{ext}") as tmp:
+        audio_file.save(tmp.name)
+        temp_path = tmp.name
+
+    try:
+        # Whisper transcription (English)
+        with open(temp_path, "rb") as f:
+            # whisper-1 or gpt-4o-transcribe depending on availability
+            result = client.audio.transcriptions.create(
+                model="whisper-1",
+                file=f,
+                response_format="text"
+            )
+        transcript_text = result if isinstance(result, str) else str(result)
+    finally:
+        try: os.remove(temp_path)
+        except: pass
+
+    return jsonify({"transcript": transcript_text})
+
+# ====== NEW: /case-second-opinion-stream ======
+@app.route("/case-second-opinion-stream", methods=["POST"])
+def case_second_opinion_stream():
+    data = request.get_json() or {}
+    context = (data.get("context") or "").strip()
+    session_id = data.get("session_id", str(uuid4()))
+
+    if not context:
+        return jsonify({"error": "No context provided"}), 400
+
+    if session_id not in chat_sessions:
+        chat_sessions[session_id] = []
+
+    # Force a structured medical answer; English only; allows Mermaid at end if model decides
+    structured_instruction = (
+        "SECOND OPINION CASE ANALYSIS.\n"
+        "Using ONLY the transcript and retrieved clinical knowledge, respond in ENGLISH with the following exact sections:\n\n"
+        "The diagnosis:\n"
+        "The differential diagnosis:\n"
+        "The recommended lab test and investigation:\n"
+        "Drug prescriptions:\n"
+        "Recommendations to The Doctor:\n"
+        "Treatment plan:\n\n"
+        "Keep it specific and evidence-aware; include dosages when appropriate. "
+        "If helpful, you MAY append a flow pathway as a Mermaid block wrapped in ```mermaid ...```."
+    )
+
+    rag_input = (
+        f"{structured_instruction}\n\n"
+        f"Patient consultation transcript:\n{context}\n"
+    )
+
+    def generate():
+        answer_acc = ""
+        try:
+            for chunk in conversation_rag_chain.stream({
+                "chat_history": chat_sessions.get(session_id, []),
+                "input": rag_input
+            }):
+                token = chunk.get("answer", "")
+                answer_acc += token
+                yield token
+        except Exception as e:
+            yield f"\n[Vector error: {str(e)}]"
+
+        # persist into chat history after streaming completes
+        chat_sessions.setdefault(session_id, [])
+        chat_sessions[session_id].append({"role": "user", "content": "[Voice Transcript Submitted]"})
+        chat_sessions[session_id].append({"role": "assistant", "content": answer_acc})
+
+    return Response(stream_with_context(generate()), content_type="text/plain")
+
+# ===== existing endpoints (unchanged) =====
+
 @app.route("/stream", methods=["POST"])
 def stream():
     data = request.get_json()
@@ -91,8 +174,6 @@ def stream():
 
     def generate():
         answer = ""
-
-        # === Pure RAG only ===
         try:
             for chunk in conversation_rag_chain.stream(
                 {"chat_history": chat_sessions[session_id], "input": user_input}
@@ -103,17 +184,11 @@ def stream():
         except Exception as e:
             yield f"\n[Vector error: {str(e)}]"
 
-        # Save session
         chat_sessions[session_id].append({"role": "user", "content": user_input})
         chat_sessions[session_id].append({"role": "assistant", "content": answer})
 
-    return Response(
-        stream_with_context(generate()),
-        content_type="text/plain",
-        headers={"Access-Control-Allow-Origin": "https://dsahdoctoraiassistantbot.onrender.com"}
-    )
+    return Response(stream_with_context(generate()), content_type="text/plain")
 
-# === /generate ===
 @app.route("/generate", methods=["POST"])
 def generate():
     data = request.get_json()
@@ -135,18 +210,13 @@ def generate():
 
     return jsonify({"response": answer, "session_id": session_id})
 
-# === /tts ===
 @app.route("/tts", methods=["POST"])
 def tts():
     text = (request.json or {}).get("text", "").strip()
     if not text:
         return jsonify({"error": "No text supplied"}), 400
 
-    response = client.audio.speech.create(
-        model="tts-1",
-        voice="fable",
-        input=text
-    )
+    response = client.audio.speech.create(model="tts-1", voice="fable", input=text)
     audio_file = "temp_audio.mp3"
     response.stream_to_file(audio_file)
     with open(audio_file, "rb") as f:
@@ -154,7 +224,6 @@ def tts():
     audio_base64 = base64.b64encode(audio_bytes).decode("utf-8")
     return jsonify({"audio_base64": audio_base64})
 
-# === /reset ===
 @app.route("/reset", methods=["POST"])
 def reset():
     session_id = request.json.get("session_id")
@@ -162,7 +231,6 @@ def reset():
         del chat_sessions[session_id]
     return jsonify({"message": "Session reset"}), 200
 
-# === /start-quiz ===
 @app.route("/start-quiz", methods=["POST"])
 def start_quiz():
     data = request.json
@@ -173,14 +241,9 @@ def start_quiz():
     rag_prompt = (
         f"You are an IVF virtual training assistant. Generate exactly 20 multiple-choice questions on '{topic}'. "
         f"Each question must reflect '{difficulty}' difficulty level. Return them strictly as a JSON array. "
-        "Each object must follow this format:\n"
-        '{ "id": "q1", "text": "...", "options": ["A", "B", "C", "D"], "correct": "B", "difficulty": "easy" }\n'
-        "Respond ONLY with valid JSON — no markdown, commentary, or explanations."
+        'Each object must be: {"id":"q1","text":"...","options":["A","B","C","D"],"correct":"B","difficulty":"easy"}'
     )
-
-    response = conversation_rag_chain.invoke(
-        {"chat_history": chat_sessions.get(session_id, []), "input": rag_prompt}
-    )
+    response = conversation_rag_chain.invoke({"chat_history": chat_sessions.get(session_id, []), "input": rag_prompt})
     raw_answer = response["answer"]
     raw_cleaned = re.sub(r"```json|```", "", raw_answer).strip()
     questions = json.loads(raw_cleaned)
@@ -192,7 +255,6 @@ def start_quiz():
 
     return jsonify({"questions": questions, "session_id": session_id})
 
-# === /quiz-feedback-stream ===
 @app.route("/quiz-feedback-stream", methods=["POST"])
 def quiz_feedback_stream():
     data = request.get_json()
@@ -218,7 +280,6 @@ def quiz_feedback_stream():
 
     return Response(stream_with_context(generate()), content_type="text/plain")
 
-# === /submit-quiz ===
 performance_log = []
 
 @app.route("/submit-quiz", methods=["POST"])
@@ -245,11 +306,8 @@ def quiz_performance():
         "timestamp": [e["timestamp"] for e in performance_log]
     })
 
-# === /suggestions ===
 @app.route("/suggestions", methods=["GET"])
 def suggestions():
-    # --- SOLUTION ---
-    # 1. Create a list of different prompts tailored to AI Doctor Assistant
     prompt_templates = [
         "Please suggest 25 common and helpful diagnostic questions a doctor might ask when seeking a second opinion for a patient. Format them as a numbered list.",
         "Generate a list of 25 essential questions for supporting doctors in diagnosis and treatment planning. Focus on supplementing the doctor’s opinion with clinical reasoning and guidelines.",
@@ -257,55 +315,30 @@ def suggestions():
         "Suggest 25 diverse clinical questions that guide analysis from patient history to diagnosis, investigations, and treatment planning. Provide a numbered list.",
         "As an AI Doctor Assistant, list 25 insightful questions that help doctors structure decision-making: diagnostics, risk/benefit assessment, treatment pathways, and patient safety. Return as a numbered list."
     ]
-
-    # 2. Select a random prompt from the list
     random_prompt = random.choice(prompt_templates)
-
-    # 3. Invoke the RAG chain with the selected prompt
-    response = conversation_rag_chain.invoke({
-        "chat_history": [],
-        "input": random_prompt
-    })
-    
+    response = conversation_rag_chain.invoke({"chat_history": [], "input": random_prompt})
     raw = response.get("answer", "")
     lines = raw.split("\n")
-    # 4. Clean and extract questions
     questions = [re.sub(r"^[\s•\-\d\.\)]+", "", line).strip() for line in lines if line.strip()]
-    
     return jsonify({"suggested_questions": questions[:25]})
 
-
-# === /mindmap ===
 @app.route("/mindmap", methods=["POST"])
 def mindmap():
     session_id = request.json.get("session_id", str(uuid4()))
     topic = request.json.get("topic", "IVF")
-
     rag_prompt = (
         f"You are an IVF training mind map assistant. Generate a JSON mind map for topic '{topic}'. "
         f"Use a valid JSON tree structure, no markdown or comments."
     )
-
-    response = conversation_rag_chain.invoke(
-        {"chat_history": chat_sessions.get(session_id, []), "input": rag_prompt}
-    )
+    response = conversation_rag_chain.invoke({"chat_history": chat_sessions.get(session_id, []), "input": rag_prompt})
     raw_cleaned = re.sub(r"```json|```", "", response["answer"]).strip()
     nodes = json.loads(raw_cleaned)
-
     return jsonify({"nodes": nodes, "session_id": session_id})
 
-# === /diagram ===
 @app.route("/diagram", methods=["POST"])
 def diagram():
-    """
-    Generates valid Mermaid code using OpenAI,
-    extracts only the mermaid block,
-    removes numbers inside square brackets.
-    """
     session_id = request.json.get("session_id", str(uuid4()))
     topic = request.json.get("topic", "IVF Process Diagram")
-
-    # Strict prompt for Mermaid syntax only
     prompt = (
         f"You are a diagram assistant for IVF related topics and training for IVF fellowships using diagrams and flowcharts to explain concepts. "
         f"For the topic '{topic}', produce a clear Mermaid diagram in this format:\n"
@@ -316,53 +349,30 @@ def diagram():
         "Return ONLY the Mermaid block, wrapped in triple backticks. No explanations."
         "Ensure that your mermaid syntax is clean"
     )
-
-    # Call OpenAI chat completion
-    response = client.chat.completions.create(
-        model="gpt-4o",
-        messages=[{"role": "user", "content": prompt}]
-    )
+    response = client.chat.completions.create(model="gpt-4o", messages=[{"role": "user", "content": prompt}])
     raw_answer = response.choices[0].message.content
-
-    # Extract Mermaid code
     match = re.search(r"```mermaid([\s\S]+?)```", raw_answer, re.IGNORECASE)
     mermaid_code = match.group(1).strip() if match else "graph TD\nA[Error] --> B[No diagram]"
-
-    # Remove numbers inside [ ... ] brackets (e.g., [Step 1] -> [Step ])
     cleaned_mermaid = re.sub(r'\[([^\[\]]*?)\d+([^\[\]]*?)\]', r'[\1\2]', mermaid_code)
-
-    return jsonify({
-        "type": "mermaid",
-        "syntax": cleaned_mermaid,
-        "topic": topic
-    })
+    return jsonify({"type": "mermaid", "syntax": cleaned_mermaid, "topic": topic})
 
 @app.route("/websearch_trend", methods=["POST"])
 def websearch_trend():
     try:
         data = request.get_json()
         user_input = data.get("query", "")
-
         if not user_input:
             return jsonify({"error": "No query provided"}), 400
-
-        # Use OpenAI Responses API with web search tool
         stream = client.responses.create(
             model="gpt-4o",
             tools=[{"type": "web_search_preview"}],
-            input=(
-                f"For this query: '{user_input}', "
-                f"search the web and return two fields:\n"
-                f"1. A short explanation of the trend (under 400 characters).\n"
-                f"2. A valid Highcharts JSON config using column or line chart.\n\n"
-                f"Respond as a JSON object with two fields: 'explanation' and 'chartConfig'."
-            )
+            input=(f"For this query: '{user_input}', search the web and return two fields:\n"
+                   f"1. A short explanation of the trend (under 400 characters).\n"
+                   f"2. A valid Highcharts JSON config using column or line chart.\n\n"
+                   f"Respond as a JSON object with two fields: 'explanation' and 'chartConfig'.")
         )
-
-        # Convert the result to usable JSON
         raw_output = stream.output_text.strip()
         try:
-            # Attempt to parse directly
             json_match = re.search(r"{.*}", raw_output, re.DOTALL)
             if json_match:
                 parsed = json.loads(json_match.group())
@@ -371,43 +381,33 @@ def websearch_trend():
                 return jsonify({"error": "No JSON found in response", "raw": raw_output}), 400
         except json.JSONDecodeError:
             return jsonify({"error": "Malformed JSON in response", "raw": raw_output}), 400
-
     except Exception as e:
         return jsonify({"error": f"Server error: {str(e)}"}), 500
-# === /generate-followups ===
+
 @app.route("/generate-followups", methods=["POST"])
 def generate_followups():
     data = request.get_json()
     last_answer = data.get("last_answer", "")
     if not last_answer:
         return jsonify({"followups": []})
-
     followup_prompt = (
         f"Based on the following assistant response, generate 3 short and helpful follow-up questions "
         f"that the user might want to ask next, analyze the last answer :\n\n{last_answer}\n\n and provide a set of follow-up questions that are relevant to the topic discussed. "
         f"Format the response as a JSON array of strings."
     )
-
     try:
         completion = client.chat.completions.create(
             model="gpt-4o",
-            messages=[
-                {"role": "system", "content": "You are a helpful assistant."},
-                {"role": "user", "content": followup_prompt}
-            ],
+            messages=[{"role": "system","content":"You are a helpful assistant."},{"role":"user","content":followup_prompt}],
             temperature=0.7
         )
-
         text = completion.choices[0].message.content.strip()
         match = re.search(r'\[(.*?)\]', text, re.DOTALL)
         questions = json.loads(f"[{match.group(1)}]") if match else []
         return jsonify({"followups": questions})
-
     except Exception as e:
         print(f"Error generating followups: {e}")
         return jsonify({"followups": []})
 
-
-# === Run ===
 if __name__ == "__main__":
     app.run(host="127.0.0.1", port=5050, debug=True)

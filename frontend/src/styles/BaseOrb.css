@@ -1,0 +1,674 @@
+/* BaseOrb.css
+   Keep the canvas small; particles fill inside (from JS).
+   This is the canvas element inside the baseboard.
+*/
+
+.base-orb{
+  display:block;
+  width: 88%;      /* small footprint; keeps cards near the fold */
+  height:auto;
+  aspect-ratio:1 / 1;
+  border-radius:50%;
+  margin:0 auto;
+}
+
+@media (max-width:900px){
+  .base-orb{ width: 84%; }
+}
+
+@media (max-width:480px){
+  .base-orb{ width: 80%; }
+}
+/* =========================================================================
+   src/styles/voiceassistant.css
+   Drawer-style draggable cover with a CONSPICUOUS BLUE handle.
+   - No JSX changes required (your existing pointer events handle drag).
+   - Transcript box is responsive (not flat white; respects theme tokens).
+   - Glassmorphism retained; dark theme gets cyan accents automatically.
+   ========================================================================= */
+
+/* ---------- Design tokens (tweak freely) ---------- */
+:root {
+    --nav-height: 72px;
+    --page-pad: clamp(12px, 3vw, 24px);
+    --section-gap: clamp(12px, 2.4vh, 22px);
+
+    /* ORB sizing */
+    --orb-top: clamp(28px, 8vh, 72px);
+    --orb-diameter: clamp(200px, 28vw, 340px);
+    --orb-rim: 5px;
+    --orb-halo-size: calc(var(--orb-diameter) + 84px);
+
+    /* Transcript panel sizing */
+    --box-offset: clamp(10px, 2vh, 18px);
+    --transcript-maxw: clamp(520px, 52vw, 760px);
+    --transcript-minh: clamp(140px, 22vh, 240px);
+    --transcript-maxh: clamp(240px, 38vh, 380px);
+
+    /* Mic */
+    --mic-size: clamp(52px, 6.6vh, 70px);
+    --mic-font-scale: 0.30;
+
+    /* Brand blues (light theme) */
+    --brand-blue-1: #60a5fa;
+    /* light glow */
+    --brand-blue-2: #3b82f6;
+    /* primary */
+    --brand-blue-3: #2563eb;
+    /* deep */
+
+    /* Glass + card (fall back to your global tokens: --bg, --text, --panel) */
+    --card-bg: color-mix(in srgb, var(--panel, #ffffff) 84%, transparent);
+    --card-text: var(--text, #0b1220);
+    --card-radius: 18px;
+    --card-pad: clamp(12px, 2vh, 20px);
+    --card-shadow: 0 18px 40px rgba(13, 37, 62, .12), 0 6px 18px rgba(13, 37, 62, .08);
+
+    --glass-bg: color-mix(in srgb, var(--panel, #ffffff) 46%, transparent);
+    --glass-highlight: rgba(255, 255, 255, .66);
+    --glass-border: rgba(255, 255, 255, .50);
+    --glass-shadow: 0 10px 26px rgba(0, 0, 0, .22);
+
+    /* Bars color in light */
+    --bar-color: var(--brand-blue-2);
+}
+
+[data-theme="dark"] {
+    /* Cyan accents in dark */
+    --brand-blue-1: #22d3ee;
+    --brand-blue-2: #06b6d4;
+    --brand-blue-3: #0891b2;
+
+    --card-bg: color-mix(in srgb, var(--panel, #0b1220) 86%, transparent);
+    --card-text: var(--text, #e6eefb);
+    --card-shadow: 0 20px 40px rgba(0, 0, 0, .48), 0 8px 22px rgba(0, 0, 0, .28);
+
+    --glass-bg: color-mix(in srgb, var(--panel, #0b1220) 48%, transparent);
+    --glass-highlight: rgba(255, 255, 255, .18);
+    --glass-border: rgba(255, 255, 255, .18);
+    --glass-shadow: 0 14px 34px rgba(0, 0, 0, .5);
+
+    --bar-color: var(--brand-blue-2);
+}
+
+/* ---------- Page layout constraints (no scroll) ---------- */
+body:has(.voice-assistant-wrapper) {
+    overflow: hidden;
+    height: 100svh;
+}
+
+.voice-assistant-wrapper {
+    position: relative;
+    height: calc(100svh - var(--nav-height));
+    width: 100%;
+    padding: 0 var(--page-pad) var(--section-gap);
+    background: var(--bg);
+    color: var(--text);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: var(--section-gap);
+    overflow: hidden;
+    overscroll-behavior: none;
+}
+
+/* ---------- Orb container with white/black rim and halo ---------- */
+.voice-stage-orb {
+    order: 1;
+    margin-top: var(--orb-top);
+    width: min(var(--orb-diameter), 92vw);
+    aspect-ratio: 1/1;
+    position: relative;
+    border-radius: 50%;
+    border: var(--orb-rim) solid #ffffff;
+    /* light rim */
+    box-shadow:
+        0 14px 30px rgba(0, 0, 0, .24),
+        inset 0 7px 12px rgba(255, 255, 255, .34),
+        inset 0 -12px 18px rgba(0, 0, 0, .16);
+    background: radial-gradient(120% 120% at 30% 25%, rgba(255, 255, 255, .6) 0%, transparent 32%);
+}
+
+[data-theme="dark"] .voice-stage-orb {
+    border-color: #000;
+}
+
+/* black rim on dark */
+
+.voice-stage-orb::after {
+    content: "";
+    position: absolute;
+    inset: 50%;
+    width: var(--orb-halo-size);
+    height: var(--orb-halo-size);
+    transform: translate(-50%, -50%);
+    border-radius: 50%;
+    pointer-events: none;
+    background:
+        radial-gradient(60% 60% at 50% 50%, rgba(255, 255, 255, .18) 0%, color-mix(in srgb, var(--brand-blue-2) 36%, transparent) 50%, transparent 80%);
+    filter: blur(6px);
+}
+
+.voice-stage-orb>* {
+    width: 100%;
+    height: 100%;
+    display: block;
+    border-radius: 50%;
+    overflow: hidden;
+}
+
+/* ---------- Transcript panel (responsive, non-flat, theme-aware) ---------- */
+.transcript-panel {
+    order: 2;
+    position: relative;
+    width: min(var(--transcript-maxw), 92vw);
+    border-radius: var(--card-radius);
+    background:
+        linear-gradient(180deg, color-mix(in srgb, #fff 8%, transparent) 0%, transparent 60%),
+        var(--card-bg);
+    color: var(--card-text);
+    box-shadow: var(--card-shadow);
+    padding: var(--card-pad);
+    display: grid;
+    grid-template-rows: auto minmax(var(--transcript-minh), 1fr) auto;
+    gap: 10px;
+    margin-top: var(--box-offset);
+    max-height: var(--transcript-maxh);
+    overflow: hidden;
+}
+
+.transcript-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    font-weight: 600;
+}
+
+.lang-pill {
+    padding: 4px 10px;
+    border-radius: 9999px;
+    background: var(--brand-blue-2);
+    color: #fff;
+    font-size: .85rem;
+}
+
+/* Transcript text */
+.transcript-body {
+    overflow: auto;
+    line-height: 1.6;
+    font-size: 1.02rem;
+    word-wrap: break-word;
+    -webkit-font-smoothing: antialiased;
+    scrollbar-width: thin;
+}
+
+.transcript-body::-webkit-scrollbar {
+    width: 10px;
+}
+
+.transcript-body::-webkit-scrollbar-thumb {
+    background: color-mix(in srgb, var(--card-text) 16%, transparent);
+    border-radius: 9999px;
+}
+
+.transcript-seg {
+    margin: 0 0 8px 0;
+}
+
+.transcript-seg.final {
+    opacity: .98;
+}
+
+.placeholder {
+    opacity: .7;
+}
+
+/* ---------- Audio bars (below text) ---------- */
+.audio-bars {
+    width: 100%;
+    max-width: 860px;
+    height: clamp(32px, 5.2vh, 54px);
+    display: grid;
+    grid-auto-flow: column;
+    grid-auto-columns: 1fr;
+    gap: clamp(2px, 0.6vw, 6px);
+    align-items: end;
+    padding: 0 clamp(8px, 2vw, 14px);
+    box-sizing: border-box;
+}
+
+.audio-bars .bar {
+    height: 12%;
+    transform-origin: bottom center;
+    transform: scaleY(0.12);
+    border-radius: 4px;
+    background: var(--bar-color);
+    box-shadow: 0 2px 10px color-mix(in srgb, var(--bar-color) 42%, transparent);
+    transition: transform .06s linear;
+}
+
+/* ---------- GLASSMORPHIC COVER (draggable) ---------- */
+.transcript-cover.glass {
+    position: absolute;
+    inset: 0;
+    border-radius: var(--card-radius);
+    background:
+        linear-gradient(180deg, var(--glass-highlight) 0%, rgba(255, 255, 255, 0) 40%),
+        var(--glass-bg);
+    border: 1px solid var(--glass-border);
+    box-shadow: var(--glass-shadow);
+    -webkit-backdrop-filter: saturate(160%) blur(14px);
+    backdrop-filter: saturate(160%) blur(14px);
+    color: inherit;
+    touch-action: none;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    will-change: transform;
+    transition: transform .08s ease;
+    -webkit-user-select: none;
+    user-select: none;
+    pointer-events: auto;
+    z-index: 2;
+    padding: 12px 14px 16px;
+}
+
+/* ---------- BLUE DRAWER HANDLE (highly visible, responsive) ---------- */
+.cover-handle {
+    position: relative;
+    width: clamp(64px, 14vw, 120px);
+    height: 12px;
+    border-radius: 9999px;
+    /* vivid blue / cyan with sheen */
+    background:
+        linear-gradient(180deg, rgba(255, 255, 255, .85), rgba(255, 255, 255, .35)) padding-box,
+        linear-gradient(90deg, var(--brand-blue-1), var(--brand-blue-2), var(--brand-blue-3)) border-box;
+    border: 2px solid transparent;
+    box-shadow:
+        inset 0 1px 0 rgba(255, 255, 255, .85),
+        0 8px 20px color-mix(in srgb, var(--brand-blue-2) 45%, transparent);
+    margin: 6px 0 12px;
+    outline: none;
+}
+
+[data-theme="dark"] .cover-handle {
+    box-shadow:
+        inset 0 1px 0 rgba(255, 255, 255, .35),
+        0 10px 22px color-mix(in srgb, var(--brand-blue-2) 50%, transparent);
+}
+
+/* Touch-friendly grab zone (invisible but increases hit area) */
+.cover-handle::before {
+    content: "";
+    position: absolute;
+    inset: -12px -16px;
+    /* bigger hit area */
+    border-radius: 9999px;
+}
+
+/* Decorative grip lines for “drawer” affordance */
+.cover-handle::after {
+    content: "";
+    position: absolute;
+    left: 50%;
+    top: 50%;
+    width: 70%;
+    height: 50%;
+    transform: translate(-50%, -50%);
+    border-radius: 8px;
+    background:
+        repeating-linear-gradient(90deg,
+            color-mix(in srgb, #000 12%, transparent) 0 6px,
+            transparent 6px 12px);
+    opacity: .12;
+    pointer-events: none;
+}
+
+.cover-handle:focus-visible {
+    outline: 3px solid color-mix(in srgb, var(--brand-blue-2) 60%, transparent);
+    outline-offset: 3px;
+}
+
+.cover-handle:active {
+    transform: translateY(1px);
+    filter: brightness(0.98);
+}
+
+/* Center the visual (AudioWave) on the cover */
+.cover-visual {
+    width: 100%;
+    max-width: 860px;
+    display: grid;
+    place-items: center;
+    padding: clamp(6px, 1.2vh, 10px) 0;
+}
+
+/* Label under the wave */
+.cover-label {
+    margin-top: 8px;
+    font-size: .92rem;
+    color: color-mix(in srgb, var(--card-text) 62%, transparent);
+}
+
+/* ---------- Mic ---------- */
+.mic-controls {
+    order: 3;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 10px;
+}
+
+.connection-status {
+    font-size: .92rem;
+    padding: 6px 12px;
+    border-radius: 9999px;
+    background: color-mix(in srgb, var(--text) 10%, transparent);
+    color: var(--text);
+}
+
+.mic-icon-btn {
+    --size: var(--mic-size);
+    position: relative;
+    width: var(--size);
+    height: var(--size);
+    border: none;
+    outline: none;
+    border-radius: 50%;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    font-size: calc(var(--mic-size) * var(--mic-font-scale));
+    color: #fff;
+    cursor: pointer;
+    -webkit-tap-highlight-color: transparent;
+    background:
+        radial-gradient(120% 140% at 30% 25%, #ffffff 0%, rgba(255, 255, 255, .55) 8%, transparent 24%),
+        linear-gradient(135deg, #3b82f6, #2563eb);
+    box-shadow: 0 12px 26px rgba(0, 0, 0, .22), 0 5px 12px rgba(0, 0, 0, .12);
+    transition: transform .12s ease, box-shadow .18s ease, background .18s ease, filter .18s ease;
+}
+
+.mic-icon-btn.active {
+    background:
+        radial-gradient(120% 140% at 30% 25%, #ffffff 0%, rgba(255, 255, 255, .50) 10%, transparent 26%),
+        linear-gradient(135deg, #00ff66, #00cc5a);
+}
+
+.mic-icon-btn.active::after {
+    content: "";
+    position: absolute;
+    left: 50%;
+    top: 50%;
+    width: calc(var(--size)*1.4);
+    height: calc(var(--size)*1.4);
+    transform: translate(-50%, -50%);
+    border-radius: 50%;
+    box-shadow: 0 0 0 0 rgba(0, 255, 102, .26);
+    animation: micPulse 1.5s ease-out infinite;
+}
+
+@keyframes micPulse {
+    0% {
+        box-shadow: 0 0 0 0 rgba(0, 255, 102, .26);
+    }
+
+    70% {
+        box-shadow: 0 0 0 16px rgba(0, 255, 102, 0);
+    }
+
+    100% {
+        box-shadow: 0 0 0 0 rgba(0, 255, 102, 0);
+    }
+}
+
+.mic-icon-btn:hover {
+    transform: translateY(-1px);
+}
+
+.mic-icon-btn:active {
+    transform: translateY(0);
+    box-shadow: 0 7px 16px rgba(0, 0, 0, .18), 0 3px 8px rgba(0, 0, 0, .10);
+}
+
+.mic-icon-btn:disabled {
+    opacity: .6;
+    cursor: not-allowed;
+    transform: none;
+}
+
+/* ---------- Mobile tweaks ---------- */
+@media (max-width: 640px) {
+    .voice-stage-orb {
+        width: min(78vw, var(--orb-diameter));
+    }
+
+    .transcript-panel {
+        width: 92vw;
+        max-height: clamp(220px, 42vh, 380px);
+    }
+}
+
+/* Optional dark page background override for strict dark surfaces */
+[data-theme="dark"] body {
+    background-color: #06080f;
+}
+/* ============================================================
+   Mobile scale-up overrides — paste AFTER your current CSS
+   Makes the orb, transcript panel, cover handle, audio wave,
+   and mic noticeably larger on small screens.
+   ============================================================ */
+
+/* Phones & small tablets */
+@media (max-width: 640px) {
+
+  /* Bigger tokens on mobile */
+  :root{
+    /* Bring the orb up and make it larger */
+    --orb-top: clamp(20px, 6vh, 36px);
+    --orb-diameter: clamp(260px, 70vw, 460px);
+
+    /* Make transcript box taller & roomier */
+    --transcript-minh: clamp(220px, 44vh, 340px);
+    --transcript-maxh: clamp(320px, 60vh, 560px);
+
+    /* Make mic a bit larger */
+    --mic-size: clamp(64px, 8.2vh, 88px);
+    --mic-font-scale: 0.28;
+  }
+
+  /* Orb spans nearly full width on phones */
+  .voice-stage-orb{
+    width: min(var(--orb-diameter), 96vw);
+  }
+
+  /* Transcript panel stretches wider and taller */
+  .transcript-panel{
+    width: 96vw;
+    max-height: var(--transcript-maxh);
+  }
+
+  /* Increase transcript legibility */
+  .transcript-body{
+    font-size: 1.08rem;
+    line-height: 1.65;
+  }
+
+  /* Beefier blue drawer handle (easier to grab) */
+  .cover-handle{
+    width: clamp(90px, 26vw, 160px);
+    height: 14px;
+    margin: 10px 0 14px;
+    box-shadow:
+      inset 0 1px 0 rgba(255,255,255,.9),
+      0 10px 24px color-mix(in srgb, var(--brand-blue-2) 54%, transparent);
+  }
+  .cover-handle::before{
+    inset: -16px -20px; /* larger hit area on touch */
+  }
+
+  /* Make the wave taller on the cover */
+  .transcript-cover #waveCanvas{
+    height: clamp(200px, 34vh, 320px) !important;
+  }
+  .cover-visual{
+    padding: clamp(8px, 1.8vh, 14px) 0;
+  }
+
+  /* Taller bars for better visibility */
+  .audio-bars{
+    height: clamp(46px, 7.5vh, 68px);
+    gap: clamp(3px, 1vw, 6px);
+    padding: 0 clamp(10px, 3vw, 16px);
+  }
+
+  /* Give the mic a little more presence */
+  .mic-controls{
+    gap: 12px;
+  }
+}
+
+/* Ultra-small devices (older 320–380px widths) */
+@media (max-width: 380px){
+
+  :root{
+    --orb-diameter: clamp(260px, 84vw, 420px);
+
+    --mic-size: clamp(68px, 8.6vh, 92px);
+  }
+
+  .voice-stage-orb{ width: min(var(--orb-diameter), 98vw); }
+  .transcript-panel{ width: 98vw; }
+
+  .transcript-body{ font-size: 1.12rem; }
+
+  .cover-handle{
+    width: clamp(110px, 38vw, 180px);
+    height: 16px;
+  }
+
+}
+
+/* Short screens (landscape phones) — allow a bit more height */
+@media (max-height: 740px) and (max-width: 900px){
+  :root{
+    --transcript-maxh: clamp(280px, 58vh, 520px);
+    --orb-diameter: clamp(220px, 48vw, 400px);
+
+}
+}
+/* ============================================================
+   Mobile readability + mic tweak (drop-in overrides)
+   Place this block AFTER your existing voiceassistant.css
+   - Keep orb size as-is
+   - Make transcript text smaller/readable on phones
+   - Reduce mic a bit
+   - Mic base color: light = blue (unchanged), dark = cyan
+   ============================================================ */
+
+/* ---- Dark mode mic base color: CYAN (active still green) ---- */
+[data-theme="dark"] .mic-icon-btn{
+  background:
+    radial-gradient(120% 140% at 30% 25%, #ffffff 0%, rgba(255,255,255,.50) 10%, transparent 26%),
+    /* cyan base for dark theme */
+    linear-gradient(135deg, #06b6d4, #0891b2);
+  box-shadow: 0 12px 26px rgba(0,0,0,.30), 0 5px 12px rgba(0,0,0,.20);
+}
+
+/* Optional: slightly stronger cyan glow on hover in dark */
+[data-theme="dark"] .mic-icon-btn:hover{
+  filter: drop-shadow(0 0 10px rgba(6,182,212,.18));
+}
+
+/* ---- Phones & small tablets: smaller, readable type; slightly smaller mic ---- */
+@media (max-width: 640px){
+
+  /* Make transcript typography compact & readable */
+  .transcript-header{
+    font-size: 0.96rem;
+  }
+  .lang-pill{
+    font-size: 0.78rem;
+    padding: 3px 9px;
+  }
+
+  .transcript-body{
+    font-size: 0.96rem;     /* ↓ from ~1.08 */
+    line-height: 1.5;       /* a bit tighter */
+  }
+  .transcript-seg{ margin-bottom: 6px; }
+  .cover-label{
+    font-size: 0.86rem;
+  }
+
+  /* Conspicuous blue drawer handle stays large enough to grab */
+  .cover-handle{
+    width: clamp(80px, 24vw, 140px);
+    height: 12px;
+    margin: 8px 0 12px;
+  }
+
+  /* Slightly reduce mic overall */
+  :root{
+    --mic-size: clamp(56px, 7.2vh, 74px);  /* was ~64–88px */
+    --mic-font-scale: 0.28;                /* keep icon readable inside */
+  }
+
+  /* Keep bars tidy (optional: a hair shorter) */
+  .audio-bars{
+    height: clamp(40px, 6.6vh, 56px);
+  }
+}
+
+/* ---- Ultra-small devices: keep text comfy & mic modest ---- */
+@media (max-width: 380px){
+
+  .transcript-body{
+    font-size: 0.94rem;
+    line-height: 1.48;
+  }
+  .lang-pill{ font-size: 0.76rem; }
+
+  :root{
+    --mic-size: clamp(54px, 7.0vh, 70px);
+  }
+}
+/* ================== AudioWave — mobile tidy overrides ================== */
+/* Paste at the BOTTOM of src/styles/voiceassistant.css */
+
+@media (max-width: 640px){
+  /* Reduce overall footprint and add subtle rounding */
+  .transcript-cover .cover-visual{
+    padding: 4px 0 6px;
+  }
+  .transcript-cover .container-audio-wave{
+    width: 92%;
+    max-width: 520px;
+    margin: 0 auto;
+    overflow: hidden;
+    border-radius: 12px;
+  }
+  /* Make the waveform shorter on phones */
+  .transcript-cover #waveCanvas{
+    height: clamp(90px, 18vh, 150px) !important;
+  }
+}
+
+/* Ultra-small devices */
+@media (max-width: 380px){
+  .transcript-cover .container-audio-wave{
+    width: 94%;
+    max-width: 460px;
+    border-radius: 10px;
+  }
+  .transcript-cover #waveCanvas{
+    height: clamp(80px, 16vh, 130px) !important;
+  }
+}
+
+/* Short screens (landscape phones) */
+@media (max-height: 740px) and (max-width: 900px){
+  .transcript-cover #waveCanvas{
+    height: clamp(80px, 16vh, 140px) !important;
+  }
+}

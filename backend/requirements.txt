@@ -1,0 +1,23 @@
+# LangChain and LLMs
+langchain
+langchain-community
+langchain-core
+langchain-qdrant
+langchain-openai
+openai>=1.14.0
+tiktoken
+
+# Vector DB
+faiss-cpu
+PyMuPDF
+# PDF + Utils
+pypdf
+python-dotenv
+
+# Web Server
+flask
+flask-cors
+gunicorn
+
+# OCR Dependencies
+numpy

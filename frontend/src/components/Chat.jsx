@@ -49,7 +49,7 @@ const Chat = () => {
 
   useEffect(() => {
     // fetch("http://localhost:5050/suggestions")
-    fetch("https://ivf-backend-server.onrender.com/suggestions")
+    fetch("https://ai-doctor-assistant-backend-server.onrender.com/suggestions")
       .then((res) => res.json())
       .then((data) => setSuggestedQuestions(data.suggested_questions || []))
       .catch((err) => console.error("Failed to fetch suggestions:", err));
@@ -299,7 +299,7 @@ const Chat = () => {
       }
       // //console.log("📨 Sending offer to signaling server...");
       const res = await fetch(
-        "https://voiceassistant-mode-webrtc-server.onrender.com/api/rtc-connect",
+        "https://ai-doctor-assistant-voice-mode-webrtc.onrender.com/api/rtc-connect",
         {
           method: "POST",
           headers: { "Content-Type": "application/sdp" },
@@ -349,7 +349,7 @@ const Chat = () => {
     setChats((prev) => [...prev, { msg: text, who: "me" }]);
     setSuggestedQuestions((prev) => prev.filter((q) => q !== text)); // 🧼 remove from list
 
-    const res = await fetch("https://ivf-backend-server.onrender.com/stream", {
+    const res = await fetch("https://ai-doctor-assistant-backend-server.onrender.com/stream", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ message: text, session_id: sessionId }),

@@ -8,18 +8,20 @@ import "../styles/VoiceRecorderPanel.css";
  * VoiceRecorderPanel
  * - Uses react-mic with your EXACT hard-coded props.
  * - Draggable glass panel (no resize while dragging).
- * - "RecordTheCase" launcher button fixed bottom-left (near chat input).
+ * - "Record The Case" launcher button fixed bottom-left (near chat input).
  * - On Stop => POST audio to transcribeUrl (multipart, {fileFieldName}).
- * - When transcript ready => "Analyze Case" appears; clicking streams from opinionUrl.
+ * - When transcript ready => calls onTranscriptReady(transcript) and shows "Analyze Case".
+ * - "Analyze Case" streams from opinionUrl and forwards chunks to onOpinion.
  * - Transcript is kept in-memory only; never rendered.
  *
- * Props (matches your current Chat.jsx usage):
- *   transcribeUrl   : string
- *   opinionUrl      : string
- *   fileFieldName   : string   (e.g., "audio_data")
- *   anchorLeft      : number   initial X for the overlay (px)
- *   anchorBottom    : number   initial Y-from-bottom for the overlay (px)
- *   onOpinion       : (chunk: string, done?: boolean) => void
+ * Props:
+ *   transcribeUrl      : string
+ *   opinionUrl         : string
+ *   fileFieldName      : string   (e.g., "audio_data")
+ *   anchorLeft         : number   initial X for the overlay (px)
+ *   anchorBottom       : number   initial Y-from-bottom for the overlay (px)
+ *   onOpinion          : (chunk: string, done?: boolean) => void
+ *   onTranscriptReady  : (transcript: string) => void      <-- NEW
  */
 const VoiceRecorderPanel = ({
   transcribeUrl = "/transcribe",
@@ -28,6 +30,7 @@ const VoiceRecorderPanel = ({
   anchorLeft = 120,
   anchorBottom = 140,
   onOpinion,
+  onTranscriptReady, // NEW
 }) => {
   const [open, setOpen] = useState(false);
 
@@ -84,7 +87,13 @@ const VoiceRecorderPanel = ({
 
       const txt = String(data?.transcript ?? "");
       transcriptRef.current = txt;
-      setIsTranscriptReady(Boolean(txt));
+      const ready = Boolean(txt);
+      setIsTranscriptReady(ready);
+
+      // 🔔 NEW: notify parent (e.g., Chat.jsx) so WebRTC assistant can be primed
+      if (ready && typeof onTranscriptReady === "function") {
+        onTranscriptReady(txt);
+      }
     } catch (err) {
       console.error("Transcription error:", err);
       setIsTranscriptReady(false);
@@ -137,13 +146,13 @@ const VoiceRecorderPanel = ({
 
   return (
     <>
-      {/* Launcher (left, near chat input). No changes to your Chat.jsx needed. */}
+      {/* Launcher (left, near chat input). */}
       <button
         className="record-case-btn-left"
         onClick={() => setOpen(true)}
-        title="RecordTheCase"
+        title="Record The Case"
       >
-        <span className="shine-content">RecordTheCase</span>
+        <span className="shine-content">Record The Case</span>
       </button>
 
       {/* Draggable overlay panel */}
@@ -173,7 +182,7 @@ const VoiceRecorderPanel = ({
               record={isRecording}
               pause={isPaused}
               onStop={onStop}
-              strokeColor="#6366f1"
+              strokeColor="#007bff"
               visualSetting="frequencyBars"
               backgroundColor="#FFFFFF"
             />
@@ -215,5 +224,6 @@ const VoiceRecorderPanel = ({
 };
 
 export default VoiceRecorderPanel;
+
 
 

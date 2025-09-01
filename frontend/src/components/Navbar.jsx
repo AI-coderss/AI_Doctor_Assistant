@@ -4,10 +4,41 @@ import "../styles/Navbar.css";
 
 const THEME_KEY = "theme";
 
+// Safely read user's stored theme or fall back to system
+function readStoredTheme() {
+  try {
+    const v = localStorage.getItem(THEME_KEY);
+    if (v === "dark" || v === "light") return v;
+  } catch (_e) {
+    // ignore storage errors (private mode, etc.)
+  }
+  const prefersDark =
+    typeof window !== "undefined" &&
+    window.matchMedia?.("(prefers-color-scheme: dark)")?.matches;
+  return prefersDark ? "dark" : "light";
+}
+
+// Apply theme to the root immediately & consistently
+function applyTheme(t) {
+  const root = document.documentElement;
+  root.setAttribute("data-theme", t);
+  // Help OS/native UI choose proper colors for inputs/scrollbars
+  root.style.colorScheme = t;
+  // Optional: mirror on body for CSS that targets body[data-theme]
+  document.body?.setAttribute("data-theme", t);
+}
+
 const Navbar = () => {
   const location = useLocation();
   const [menuOpen, setMenuOpen] = useState(false);
-  const [theme, setTheme] = useState("light");
+
+  // 🚫 No initial "light" flash: pick & apply BEFORE first paint
+  const [theme, setTheme] = useState(() => {
+    const initial = readStoredTheme();
+    applyTheme(initial);
+    return initial;
+  });
+
   const navLinksRef = useRef(null);
   const mobileBtnRef = useRef(null);
 
@@ -19,23 +50,20 @@ const Navbar = () => {
     []
   );
 
+  // Persist on change & re-apply to be extra sure
   useEffect(() => {
-    const prefersDark = window.matchMedia?.("(prefers-color-scheme: dark)")?.matches;
-    const stored = localStorage.getItem(THEME_KEY);
-    const initial = stored || (prefersDark ? "dark" : "light");
-    setTheme(initial);
-    document.documentElement.setAttribute("data-theme", initial);
-  }, []);
-
-  useEffect(() => {
-    document.documentElement.setAttribute("data-theme", theme);
-    localStorage.setItem(THEME_KEY, theme);
+    try {
+      localStorage.setItem(THEME_KEY, theme);
+    } catch (_e) {}
+    applyTheme(theme);
   }, [theme]);
 
+  // Close mobile menu on route change
   useEffect(() => {
     setMenuOpen(false);
   }, [location.pathname]);
 
+  // Click-outside to close mobile drawer
   useEffect(() => {
     if (!menuOpen) return;
     const handleClick = (e) => {
@@ -53,6 +81,17 @@ const Navbar = () => {
     document.addEventListener("click", handleClick);
     return () => document.removeEventListener("click", handleClick);
   }, [menuOpen]);
+
+  // Sync theme across tabs/windows (stringent persistence)
+  useEffect(() => {
+    const onStorage = (e) => {
+      if (e.key === THEME_KEY && (e.newValue === "dark" || e.newValue === "light")) {
+        setTheme(e.newValue);
+      }
+    };
+    window.addEventListener("storage", onStorage);
+    return () => window.removeEventListener("storage", onStorage);
+  }, []);
 
   const toggleTheme = () => setTheme((t) => (t === "light" ? "dark" : "light"));
   const isActive = (to) => location.pathname === to;
@@ -81,19 +120,18 @@ const Navbar = () => {
               className={`nav-link ${isActive(item.to) ? "active" : ""}`}
               onClick={() => setMenuOpen(false)}
               style={{
-                animation: `navItemFade 0.5s ease forwards ${
-                  idx / 7 + 0.3
-                }s`,
+                animation: `navItemFade 0.5s ease forwards ${idx / 7 + 0.3}s`,
               }}
             >
               <span>{item.label}</span>
             </Link>
           ))}
 
-          {/* ✅ CHANGE: Theme toggle for the mobile drawer */}
+          {/* Theme toggle in mobile drawer */}
           <button
             className="theme-toggle theme-toggle-mobile"
             aria-label="Toggle theme"
+            aria-pressed={theme === "dark"}
             onClick={toggleTheme}
             type="button"
           >
@@ -104,10 +142,11 @@ const Navbar = () => {
 
         {/* Actions (right) */}
         <div className="nav-actions">
-          {/* ✅ CHANGE: Theme toggle for the desktop view */}
+          {/* Theme toggle (desktop) */}
           <button
             className="theme-toggle theme-toggle-desktop"
             aria-label="Toggle theme"
+            aria-pressed={theme === "dark"}
             onClick={toggleTheme}
             type="button"
           >
@@ -132,5 +171,6 @@ const Navbar = () => {
 };
 
 export default Navbar;
+
 
 

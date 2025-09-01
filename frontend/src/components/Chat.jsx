@@ -300,10 +300,14 @@ const Chat = () => {
       }
       // //console.log("📨 Sending offer to signaling server...");
       const res = await fetch(
-        "https://ai-doctor-assistant-voice-mode-webrtc.onrender.com/api/rtc-connect",
+        // ✅ pass the session_id so backend merges transcript context
+        `https://ai-doctor-assistant-voice-mode-webrtc.onrender.com/api/rtc-connect?session_id=${sessionId}`,
         {
           method: "POST",
-          headers: { "Content-Type": "application/sdp" },
+          headers: {
+            "Content-Type": "application/sdp",
+            "X-Session-Id": sessionId, // also supply via header (backend supports both)
+          },
           body: offer.sdp,
         }
       );
@@ -437,6 +441,21 @@ const Chat = () => {
     }
   };
 
+  // === NEW: get transcript from panel and store it for the Voice Assistant session
+  const handleAssistantContextTranscript = async (transcript) => {
+    try {
+      if (!transcript || !transcript.trim()) return;
+      await fetch("https://ai-doctor-assistant-voice-mode-webrtc.onrender.com/api/session-context", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ session_id: sessionId, transcript }),
+      });
+      // no UI render of transcript — just priming the voice assistant context
+    } catch (e) {
+      console.error("Failed to send transcript context for voice assistant:", e);
+    }
+  };
+
   if (isVoiceMode) {
     return (
       <div className="voice-assistant-wrapper">
@@ -532,6 +551,8 @@ const Chat = () => {
         anchorLeft={72}
         anchorBottom={96}
         onOpinion={handleOpinionStream}
+        /* ✅ send transcript to voice assistant context (no UI rendering of transcript) */
+        onTranscriptReady={handleAssistantContextTranscript}
       />
     </div>
     

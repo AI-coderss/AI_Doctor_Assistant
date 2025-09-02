@@ -498,7 +498,7 @@
 
     .record-case-btn-left {
         left: 1rem;
-        bottom: calc(env(safe-area-inset-bottom, 16px) + 14.5rem);
+        bottom: calc(env(safe-area-inset-bottom, 16px) + 11.5rem);
         /* raised more */
         padding: .56rem .85rem;
         font-size: .9rem;
@@ -507,7 +507,7 @@
 
     .record-timer-fixed {
         left: 1rem;
-        bottom: calc(env(safe-area-inset-bottom, 16px) + 14.5rem);
+        bottom: calc(env(safe-area-inset-bottom, 16px) + 11.5rem);
         /* match */
     }
 
@@ -558,11 +558,11 @@
     }
 
     .record-case-btn-left {
-        bottom: calc(env(safe-area-inset-bottom, 14px) + 15.5rem);
+        bottom: calc(env(safe-area-inset-bottom, 14px) + 12.5rem);
     }
 
     .record-timer-fixed {
-        bottom: calc(env(safe-area-inset-bottom, 14px) + 15.5rem);
+        bottom: calc(env(safe-area-inset-bottom, 14px) + 12.5rem);
     }
 
     .button-container {
@@ -610,11 +610,11 @@
     }
 
     .record-case-btn-left {
-        bottom: calc(env(safe-area-inset-bottom, 12px) + 16.5rem);
+        bottom: calc(env(safe-area-inset-bottom, 12px) + 13.5rem);
     }
 
     .record-timer-fixed {
-        bottom: calc(env(safe-area-inset-bottom, 12px) + 16.5rem);
+        bottom: calc(env(safe-area-inset-bottom, 12px) + 13.5rem);
     }
 
     .button-container {

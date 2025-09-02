@@ -423,9 +423,17 @@ const Chat = () => {
   const opinionBufferRef = useRef("");
   const opinionStreamingRef = useRef(false);
   const handleOpinionStream = (chunkOrFull, done = false) => {
+    // ❗ Fix duplication: the panel sends streaming chunks,
+    // and at the end also sends the FULL aggregated text with done=true.
+    // We must IGNORE the payload when done===true to avoid doubling content.
+    if (done) {
+      opinionStreamingRef.current = false;
+      return; // <-- do not append the final aggregated payload again
+    }
+
     const chunk = String(chunkOrFull || "");
     if (!opinionStreamingRef.current) {
-      // first chunk: open a new bot message
+      // first streaming chunk: open a new bot message
       opinionStreamingRef.current = true;
       opinionBufferRef.current = "";
       setChats((prev) => [...prev, { msg: "", who: "bot" }]);
@@ -436,9 +444,6 @@ const Chat = () => {
       updated[updated.length - 1].msg = opinionBufferRef.current;
       return updated;
     });
-    if (done) {
-      opinionStreamingRef.current = false;
-    }
   };
 
   // === NEW: get transcript from panel and store it for the Voice Assistant session

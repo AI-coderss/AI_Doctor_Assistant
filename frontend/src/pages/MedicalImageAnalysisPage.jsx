@@ -2,8 +2,7 @@ import React, { useCallback, useRef, useState } from "react";
 import "../styles/MedicalImageAnalysisPage.css";
 import ChatInputWidget from "../components/ChatInputWidget";
 
-const API_BASE = process.env.REACT_APP_API_BASE || ""; // e.g., "" for same origin, or "http://localhost:5000"
-
+const API_BASE = "https://ai-doctor-assistant-image-analysis-server.onrender.com"
 const MedicalImageAnalysisPage = () => {
   const [file, setFile] = useState(null);
   const [previewUrl, setPreviewUrl] = useState("");

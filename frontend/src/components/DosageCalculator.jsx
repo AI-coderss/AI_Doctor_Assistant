@@ -1,8 +1,17 @@
 /* eslint-disable react-hooks/exhaustive-deps */
+/* eslint-disable no-unused-vars */
 import React, { useEffect, useMemo, useRef, useState } from "react";
-import { motion } from "framer-motion";
+import { motion, useDragControls } from "framer-motion";
 import "../styles/DosageCalculator.css";
 import useDosageStore from "../store/dosageStore";
+
+/**
+ * Behavior:
+ *  - When this component mounts (calculator opens), it calls /context-ensure
+ *    with { session_id, transcript } to prefill condition/age/weight and drug suggestions.
+ *  - The doctor must press "Calculate" to call dosage endpoints.
+ *  - Drug can be any free text; suggestions are optional helpers.
+ */
 
 const API_BASE = "https://ai-doctor-assistant-backend-server.onrender.com";
 const URLS = {
@@ -20,136 +29,225 @@ const KEYPAD = [
 ];
 
 export default function DosageCalculator({ onClose }) {
+  // === Store wiring ===
   const {
-    sessionId,
-    transcript,
-    inputs,
-    setInputs,
-    results,
-    setResults,
-    loading,
-    setLoading,
-    error,
-    setError,
-  } = useDosageStore();
+    sessionId: storeSessionId,
+    setSessionId,
+    transcript: storeTranscript,
+  } = useDosageStore?.() || {};
 
+  // Ensure a session id (persist it in store if available)
+  const [sessionId] = useState(() => {
+    const existing = storeSessionId;
+    const gen =
+      existing ||
+      ((typeof crypto !== "undefined" && crypto.randomUUID)
+        ? crypto.randomUUID()
+        : `sess_${Date.now()}_${Math.random().toString(36).slice(2)}`);
+    if (!existing && typeof setSessionId === "function") setSessionId(gen);
+    return gen;
+  });
+
+  const transcript = (storeTranscript || "").trim();
+
+  // === Local UI state ===
+  const [condition, setCondition] = useState("");
   const [drugSuggestions, setDrugSuggestions] = useState([]);
+  const [drug, setDrug] = useState("");
+  const [age, setAge] = useState("");       // keypad-friendly text
+  const [weight, setWeight] = useState(""); // keypad-friendly text
+
   const [useStream, setUseStream] = useState(true);
   const [streaming, setStreaming] = useState(false);
+  const [loading, setLoading] = useState(false);
   const [screenText, setScreenText] = useState("0");
+  const [error, setError] = useState(null);
+  const [results, setResults] = useState({ dosage: "", regimen: "", notes: "" });
   const [activeField, setActiveField] = useState("age");
   const abortRef = useRef(null);
 
-  // Fetch context (triggered once calculator is opened)
-  useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      try {
-        setLoading(true);
-        const res = await fetch(URLS.contextEnsure, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ session_id: sessionId, transcript }),
-        });
-        const j = await res.json();
-        if (!cancelled && j && j.success) {
-          const ctx = j.context || {};
-          setInputs({
-            drug: inputs.drug || (ctx.drug_suggestions?.[0] || ""),
-            age: ctx.age_years ? String(ctx.age_years) : inputs.age,
-            weight: ctx.weight_kg ? String(ctx.weight_kg) : inputs.weight,
-            condition: ctx.condition || inputs.condition,
-          });
-          setDrugSuggestions(ctx.drug_suggestions || []);
-        }
-      } catch (e) {
-        console.error("Context fetch failed:", e);
-      } finally {
-        setLoading(false);
-      }
-    })();
-    return () => { cancelled = true; };
-  }, [sessionId, transcript]); // run when calculator mounts
+  // === Framer Motion drag controls (drag by header only) ===
+  const dragControls = useDragControls();
+  const onHeaderPointerDown = (e) => dragControls.start(e);
 
-  // Validation
-  const validate = () => {
-    if (!inputs.drug) return "Please select or enter a valid drug.";
-    const ageNum = inputs.age === "" ? null : Number(inputs.age);
-    const weightNum = inputs.weight === "" ? null : Number(inputs.weight);
-    if (ageNum !== null && (!ageNum || ageNum <= 0)) return "Age must be positive.";
-    if (weightNum !== null && (!weightNum || weightNum <= 0)) return "Weight must be positive.";
-    return null;
-  };
-
+  // ------------- Helpers -------------
   const extractJsonDict = (text) => {
     if (!text) return null;
     const cleaned = text.replace(/```json|```/gi, "").trim();
     try { return JSON.parse(cleaned); } catch (_) {}
     const m = cleaned.match(/\{[\s\S]*\}/);
     if (m) {
-      try { return JSON.parse(m[0]); } catch (_) {}
+      const candidate = m[0];
+      try { return JSON.parse(candidate); } catch (_) {
+        try {
+          const fixed = candidate
+            .replace(/(\w+)\s*:/g, '"$1":')
+            .replace(/,\s*}/g, "}");
+          return JSON.parse(fixed);
+        } catch (_) {}
+      }
     }
     return null;
   };
 
-  // Handle Calculate click
-  const handleCalculate = async () => {
-    const v = validate();
-    if (v) { setError(v); return; }
-    setError(null);
-    setLoading(true);
-    setResults({ dosage: "", regimen: "", notes: "" });
-    setScreenText("…");
-
-    if (useStream && "ReadableStream" in window) await runStreaming();
-    else await runNonStream();
+  const handle400Error = async (res) => {
+    try {
+      const txt = await res.text();
+      const data = JSON.parse(txt);
+      const missing = Array.isArray(data?.missing) ? data.missing.join(", ") : null;
+      const detail = missing ? `Missing: ${missing}` : (data?.error || txt);
+      setError(detail || "Bad Request");
+      setScreenText("Err");
+    } catch {
+      setError("Bad Request");
+      setScreenText("Err");
+    }
   };
 
-  const runNonStream = async () => {
+  const suggestionOptions = useMemo(
+    () => (drugSuggestions || []).slice(0, 12),
+    [drugSuggestions]
+  );
+
+  // ------------- Fetch context ON MOUNT (open) -------------
+  useEffect(() => {
+    let cancelled = false;
+
+    (async () => {
+      try {
+        setLoading(true);
+        // 1) Strict extraction
+        const r = await fetch(URLS.contextEnsure, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            session_id: sessionId,
+            transcript: transcript || null,
+          }),
+        });
+        const ctx = await r.json();
+        if (cancelled) return;
+
+        // Apply context into the UI
+        if (ctx?.condition) setCondition(ctx.condition);
+        if (ctx?.age_years != null && age === "") setAge(String(ctx.age_years));
+        if (ctx?.weight_kg != null && weight === "") setWeight(String(ctx.weight_kg));
+        if (Array.isArray(ctx?.drug_suggestions) && ctx.drug_suggestions.length) {
+          setDrugSuggestions(ctx.drug_suggestions);
+          if (!drug) setDrug(ctx.drug_suggestions[0] || "");
+        }
+
+        // 2) If we still have no suggestions but do have a condition, ask for them
+        const haveSuggestions = Array.isArray(ctx?.drug_suggestions) && ctx.drug_suggestions.length;
+        const cnd = (ctx?.condition || condition || "").trim();
+        if (!haveSuggestions && cnd) {
+          const sd = await fetch(URLS.suggestDrugs, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              session_id: sessionId,
+              condition: cnd,
+              transcript: transcript || null,
+            }),
+          });
+          const sj = await sd.json();
+          if (!cancelled && Array.isArray(sj?.drugs) && sj.drugs.length) {
+            setDrugSuggestions(sj.drugs);
+            if (!drug) setDrug(sj.drugs[0] || "");
+          }
+        }
+      } catch (e) {
+        // Keep UI usable if context fails
+        console.error("Context fetch failed:", e);
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    })();
+
+    return () => { cancelled = true; };
+    // re-run if a new session or new transcript is applied
+  }, [sessionId, transcript]);
+
+  // ------------- Validation -------------
+  const validate = () => {
+    const d = drug || (drugSuggestions?.[0] || "");
+    if (!d) return "Please select or enter a valid drug.";
+    const ageNum = age === "" ? null : Number(age);
+    const weightNum = weight === "" ? null : Number(weight);
+    if (ageNum !== null && (!ageNum || ageNum <= 0)) return "Age must be a positive number.";
+    if (weightNum !== null && (!weightNum || weightNum <= 0)) return "Weight must be a positive number.";
+    return null;
+  };
+
+  // ------------- Calculate (button press) -------------
+  const handleCalculate = async () => {
+    setError(null);
+    setResults({ dosage: "", regimen: "", notes: "" });
+    setScreenText("…");
+    setLoading(true);
+
     try {
-      const res = await fetch(URLS.calc, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          session_id: sessionId,
-          drug: inputs.drug,
-          age: inputs.age === "" ? null : Number(inputs.age),
-          weight: inputs.weight === "" ? null : Number(inputs.weight),
-          condition: inputs.condition || null,
-        }),
-      });
-      if (!res.ok) throw new Error(await res.text());
-      const data = await res.json();
-      setResults({
-        dosage: data?.dosage || "",
-        regimen: data?.regimen || "",
-        notes: data?.notes || "",
-      });
-      setScreenText(data?.dosage ? data.dosage : "0");
+      const v = validate();
+      if (v) { setError(v); setLoading(false); setScreenText("Err"); return; }
+
+      if (useStream && "ReadableStream" in window) await runStreaming();
+      else await runNonStream();
     } catch (e) {
-      setError(e.message || "Error calculating dosage.");
+      setError(e.message || "Something went wrong.");
       setScreenText("Err");
     } finally {
       setLoading(false);
     }
   };
 
+  // ------------- Non-streaming -------------
+  const runNonStream = async () => {
+    const res = await fetch(URLS.calc, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        session_id: sessionId,
+        drug: drug || (drugSuggestions?.[0] || ""),
+        age: age === "" ? null : Number(age),
+        weight: weight === "" ? null : Number(weight),
+        condition: condition || null,
+        transcript: transcript || null, // optional, harmless for context-aware endpoint
+      }),
+    });
+
+    if (res.status === 400) return handle400Error(res);
+    if (!res.ok) throw new Error(await res.text());
+
+    const data = await res.json();
+    setResults({
+      dosage: data?.dosage || "",
+      regimen: data?.regimen || "",
+      notes: data?.notes || "",
+    });
+    setScreenText(data?.dosage ? data.dosage : "0");
+  };
+
+  // ------------- Streaming -------------
   const runStreaming = async () => {
     setStreaming(true);
     abortRef.current = new AbortController();
+
     try {
       const res = await fetch(URLS.calcStream, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           session_id: sessionId,
-          drug: inputs.drug,
-          age: inputs.age === "" ? null : Number(inputs.age),
-          weight: inputs.weight === "" ? null : Number(inputs.weight),
-          condition: inputs.condition || null,
+          drug: drug || (drugSuggestions?.[0] || ""),
+          age: age === "" ? null : Number(age),
+          weight: weight === "" ? null : Number(weight),
+          condition: condition || null,
+          transcript: transcript || null, // optional
         }),
         signal: abortRef.current.signal,
       });
+
+      if (res.status === 400) { await handle400Error(res); return; }
       if (!res.ok || !res.body) { await runNonStream(); return; }
 
       const reader = res.body.getReader();
@@ -159,21 +257,23 @@ export default function DosageCalculator({ onClose }) {
       while (true) {
         const { done, value } = await reader.read();
         if (done) break;
-        acc += decoder.decode(value, { stream: true });
+        const chunk = decoder.decode(value, { stream: true });
+        acc += chunk;
+        // Show only a short tail in the LCD screen
         setScreenText(acc.slice(-28));
       }
 
       const parsed = extractJsonDict(acc);
-      if (parsed) {
+      if (!parsed) {
+        setError("The model did not return valid JSON.");
+        setScreenText("Err");
+      } else {
         setResults({
-          dosage: parsed.dosage || "",
-          regimen: parsed.regimen || "",
-          notes: parsed.notes || "",
+          dosage: String(parsed.dosage || "").trim(),
+          regimen: String(parsed.regimen || "").trim(),
+          notes: String(parsed.notes || "").trim(),
         });
         setScreenText(parsed.dosage || "0");
-      } else {
-        setError("Invalid JSON response.");
-        setScreenText("Err");
       }
     } catch (e) {
       if (e.name !== "AbortError") {
@@ -182,119 +282,163 @@ export default function DosageCalculator({ onClose }) {
       }
     } finally {
       setStreaming(false);
-      setLoading(false);
     }
   };
 
-  // Keypad handler
+  // ------------- Keypad -------------
   const onKey = (k) => {
-    const field = activeField === "age" ? "age" : "weight";
-    const val = inputs[field] || "";
-    if (k === "AC") {
-      setInputs({ ...inputs, [field]: "" });
-      setScreenText("0");
-      return;
-    }
-    if (k === "." && val.includes(".")) return;
-    const next = val + k;
-    setInputs({ ...inputs, [field]: next });
-    setScreenText(next || "0");
+    const setFn = activeField === "age" ? setAge : setWeight;
+    const val = activeField === "age" ? age : weight;
+    if (k === "AC") { setFn(""); setScreenText("0"); return; }
+    if (k === "." && String(val).includes(".")) return;
+    const next = String(val || "") + k;
+    setFn(next);
+    setScreenText(next.length ? next : "0");
   };
 
-  const canCalculate = !loading && !streaming && !!inputs.drug;
-  const suggestionOptions = useMemo(
-    () => (drugSuggestions || []).slice(0, 12),
-    [drugSuggestions]
-  );
+  const canCalculate = !loading && !streaming;
 
   return (
-    <motion.div className="dosage-calculator" initial={{ opacity: 0 }} animate={{ opacity: 1 }}>
-      <div className="dc-header">
+    <motion.div
+      className="dosage-calculator"
+      initial={{ opacity: 0, scale: 0.98, y: 6 }}
+      animate={{ opacity: 1, scale: 1, y: 0 }}
+      whileDrag={{ scale: 1.01 }}
+      drag
+      dragControls={dragControls}
+      dragListener={false}
+      dragMomentum={false}
+      dragElastic={0.06}
+      role="dialog"
+      aria-modal="true"
+      aria-label="Dosage Calculator"
+    >
+      {/* Header (drag handle) */}
+      <div
+        className="dc-header"
+        data-drag-handle
+        onPointerDown={onHeaderPointerDown}
+        style={{ touchAction: "none" }} // enables smooth touch-drag
+      >
         <div className="dc-title">Dosage Calculator</div>
         <div className="dc-actions">
-          <button onClick={() => setUseStream(!useStream)} className="dc-icon-btn">
+          <button
+            className="dc-icon-btn"
+            onClick={() => setUseStream(v => !v)}
+            aria-pressed={useStream}
+            title={useStream ? "Streaming ON" : "Streaming OFF"}
+          >
             {useStream ? "Stream: ON" : "Stream: OFF"}
           </button>
-          <button onClick={() => { setInputs({ ...inputs, age: "", weight: "" }); setScreenText("0"); }} className="dc-icon-btn">
+          <button
+            className="dc-icon-btn"
+            onClick={() => { setAge(""); setWeight(""); setScreenText("0"); }}
+            title="All Clear"
+          >
             AC
           </button>
-          <button onClick={() => { try { abortRef.current?.abort(); } catch {} onClose?.(); }} className="dc-icon-btn">
+          <button
+            className="dc-icon-btn"
+            onClick={() => { try { abortRef.current?.abort(); } catch {} onClose?.(); }}
+            title="Close"
+          >
             Close
           </button>
         </div>
       </div>
 
-      <div className="dc-screen">{screenText}</div>
-
-      <div className="dc-badges">
-        <span className="dc-badge">Condition: {inputs.condition || "—"}</span>
+      {/* LCD-like calculator SCREEN (single-line, right aligned) */}
+      <div className="dc-screen" aria-live="polite">
+        {screenText}
       </div>
 
+      {/* Context badge (read-only condition) */}
+      <div className="dc-badges">
+        <span className="dc-badge" title="Condition from context">
+          Condition: {condition || "—"}
+        </span>
+      </div>
+
+      {/* Body */}
       <div className="dc-body">
         {error && <div className="dc-callout dc-error">⚠️ {error}</div>}
 
         <div className="dc-grid">
+          {/* Drug (dynamic suggestions) */}
           <div className="dc-field" style={{ gridColumn: "1 / -1" }}>
             <label className="dc-label" htmlFor="drug">Drug</label>
             <input
               id="drug"
               className="dc-input"
               list="drug-suggestions"
-              placeholder="Select or type a drug"
-              value={inputs.drug}
-              onChange={(e) => setInputs({ ...inputs, drug: e.target.value })}
+              placeholder="Select or type suggested drug"
+              value={drug}
+              onChange={(e) => setDrug(e.target.value)}
             />
             <datalist id="drug-suggestions">
               {suggestionOptions.map((d) => <option key={d} value={d}>{d}</option>)}
             </datalist>
           </div>
 
+          {/* Age / Weight */}
           <div className="dc-field">
-            <label className="dc-label" htmlFor="age">Age</label>
+            <label className="dc-label" htmlFor="age">Age (years)</label>
             <input
               id="age"
-              className="dc-input"
+              className={`dc-input ${activeField === "age" ? "dc-focus" : ""}`}
               type="text"
               inputMode="decimal"
-              value={inputs.age}
+              placeholder="e.g. 45"
+              value={age}
               onFocus={() => setActiveField("age")}
-              onChange={(e) => setInputs({ ...inputs, age: e.target.value })}
+              onChange={(e) => setAge(e.target.value.replace(/[^\d.]/g, ""))}
             />
           </div>
 
           <div className="dc-field">
-            <label className="dc-label" htmlFor="weight">Weight</label>
+            <label className="dc-label" htmlFor="weight">Weight (kg)</label>
             <input
               id="weight"
-              className="dc-input"
+              className={`dc-input ${activeField === "weight" ? "dc-focus" : ""}`}
               type="text"
               inputMode="decimal"
-              value={inputs.weight}
+              placeholder="e.g. 70"
+              value={weight}
               onFocus={() => setActiveField("weight")}
-              onChange={(e) => setInputs({ ...inputs, weight: e.target.value })}
+              onChange={(e) => setWeight(e.target.value.replace(/[^\d.]/g, ""))}
             />
           </div>
         </div>
 
+        {/* Calculator keypad (compact height, 3D-ish keys) */}
         <div className="dc-keypad">
           {KEYPAD.map((row, idx) => (
             <div className="dc-keypad-row" key={idx}>
               {row.map((k) => (
-                <button key={k} className={`dc-key ${k === "AC" ? "danger" : ""}`} onClick={() => onKey(k)}>
+                <button
+                  key={k}
+                  className={`dc-key ${k === "AC" ? "danger" : ""}`}
+                  onClick={() => onKey(k)}
+                >
                   {k}
                 </button>
               ))}
             </div>
           ))}
           <div className="dc-keypad-row">
-            <button className="dc-btn-primary wide" onClick={handleCalculate} disabled={!canCalculate}>
+            <button
+              className="dc-btn-primary wide"
+              onClick={handleCalculate}
+              disabled={!canCalculate}
+            >
               {streaming ? "Streaming…" : loading ? "Calculating…" : "Calculate"}
             </button>
           </div>
         </div>
 
+        {/* Results (compact) */}
         {(results.dosage || results.regimen || results.notes) && (
-          <div className="dc-callout dc-success">
+          <div className="dc-callout dc-success" aria-live="polite">
             {results.dosage && <p><strong>Dosage:</strong> {results.dosage}</p>}
             {results.regimen && <p><strong>Regimen:</strong> {results.regimen}</p>}
             {results.notes && <p><strong>Notes:</strong> {results.notes}</p>}

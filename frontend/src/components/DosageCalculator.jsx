@@ -1,20 +1,25 @@
-import React, { useEffect, useMemo, useRef, useState } from "react";
+/* eslint-disable no-unused-vars */
+import React, { useMemo, useRef, useState } from "react";
 import { motion } from "framer-motion";
 import "../styles/DosageCalculator.css";
+import useDosageStore from "../store/dosageStore";
 
 /**
  * Classic calculator UI (NOT fixed). Glassmorphic, compact height,
- * LCD-like screen where streamed text appears. Condition is taken from context
- * (no manual entry). Drug suggestions are dynamic from backend.
+ * LCD-like screen where streamed text appears.
+ * Condition is extracted by the backend (no manual entry).
+ * Drug suggestions come from backend based on extracted condition.
  *
- * Props:
- *  - onClose?: () => void
- *  - transcript?: string   // optional: pass the latest case transcript to auto-extract context
+ * Trigger model:
+ *  - Pressing "Calculate" will:
+ *      1) read transcript from Zustand store
+ *      2) POST /context-ensure (strict extraction)
+ *      3) fill condition/age/weight/drug suggestions
+ *      4) call /calculate-dosage-(stream)-with-context
  */
 
 const API_BASE = "https://ai-doctor-assistant-backend-server.onrender.com";
 const URLS = {
-  contextGet: (sid) => `${API_BASE}/context?session_id=${encodeURIComponent(sid)}`,
   contextEnsure: `${API_BASE}/context-ensure`,
   suggestDrugs: `${API_BASE}/suggest-drugs`,
   calcStream: `${API_BASE}/calculate-dosage-stream-with-context`,
@@ -28,112 +33,47 @@ const KEYPAD = [
   ["0", ".", "AC"],
 ];
 
-export default function DosageCalculator({ onClose, transcript }) {
-  const [sessionId] = useState(() =>
-    (typeof crypto !== "undefined" && crypto.randomUUID)
-      ? crypto.randomUUID()
-      : `sess_${Date.now()}_${Math.random().toString(36).slice(2)}`
-  );
+export default function DosageCalculator({ onClose }) {
+  // === Store wiring ===
+  // Expecting your Zustand store to expose these (gracefully degrade if not).
+  const {
+    sessionId: storeSessionId,
+    setSessionId,
+    transcript: storeTranscript,
+    setTranscript: setStoreTranscript,
+  } = useDosageStore?.() || {};
 
-  // Context-driven values (condition cannot be entered manually)
+  // Ensure a session id (persist it in store if available)
+  const [sessionId] = useState(() => {
+    const existing = storeSessionId;
+    const gen =
+      existing ||
+      ((typeof crypto !== "undefined" && crypto.randomUUID)
+        ? crypto.randomUUID()
+        : `sess_${Date.now()}_${Math.random().toString(36).slice(2)}`);
+    if (!existing && typeof setSessionId === "function") setSessionId(gen);
+    return gen;
+  });
+
+  const transcript = (storeTranscript || "").trim();
+
+  // === Local UI state ===
   const [condition, setCondition] = useState("");
   const [drugSuggestions, setDrugSuggestions] = useState([]);
-
-  // Inputs
   const [drug, setDrug] = useState("");
   const [age, setAge] = useState("");       // keypad-friendly text
   const [weight, setWeight] = useState(""); // keypad-friendly text
 
-  // UI state
   const [useStream, setUseStream] = useState(true);
   const [streaming, setStreaming] = useState(false);
   const [loading, setLoading] = useState(false);
   const [screenText, setScreenText] = useState("0");
   const [error, setError] = useState(null);
   const [results, setResults] = useState({ dosage: "", regimen: "", notes: "" });
-  const [activeField, setActiveField] = useState("age"); // "age" | "weight"
+  const [activeField, setActiveField] = useState("age");
   const abortRef = useRef(null);
 
-  /** Helper to apply server context to local fields */
-  const applyContext = (ctx) => {
-    if (!ctx) return;
-    if (ctx.condition) setCondition(ctx.condition);
-    if (ctx.age_years != null && ctx.age_years !== "") setAge(String(ctx.age_years));
-    if (ctx.weight_kg != null && ctx.weight_kg !== "") setWeight(String(ctx.weight_kg));
-    if (Array.isArray(ctx.drug_suggestions) && ctx.drug_suggestions.length) {
-      setDrugSuggestions(ctx.drug_suggestions);
-      setDrug((prev) => prev || ctx.drug_suggestions[0] || "");
-    }
-  };
-
-  /** On mount: ensure context if transcript is provided; else read existing context */
-  useEffect(() => {
-    let cancelled = false;
-
-    (async () => {
-      try {
-        if (transcript && transcript.trim()) {
-          // Strict extraction on-demand
-          const r = await fetch(URLS.contextEnsure, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ session_id: sessionId, transcript }),
-          });
-          const j = await r.json();
-          if (!cancelled && j) applyContext(j);
-        } else {
-          // Fallback to any existing stored context
-          const r = await fetch(URLS.contextGet(sessionId));
-          const j = await r.json();
-          if (!cancelled && j && j.exists) applyContext(j);
-        }
-      } catch (e) {
-        // swallow; UI will still be usable
-      }
-    })();
-
-    return () => { cancelled = true; };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [sessionId, transcript]);
-
-  /** If condition becomes available, (re)fetch drug suggestions (include transcript for robustness) */
-  useEffect(() => {
-    const c = (condition || "").trim();
-    if (!c) return;
-    let cancelled = false;
-    (async () => {
-      try {
-        const r = await fetch(URLS.suggestDrugs, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ session_id: sessionId, condition: c, transcript: transcript || null }),
-        });
-        const j = await r.json();
-        if (!cancelled && Array.isArray(j.drugs)) {
-          setDrugSuggestions(j.drugs);
-          setDrug(prev => prev || j.drugs[0] || "");
-        }
-      } catch (_) {}
-    })();
-    return () => { cancelled = true; };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [condition]);
-
-  // Validation allows age/weight empty (they’ll be filled by backend context)
-  const validate = () => {
-    // If no drug chosen but we have suggestions, auto-pick the first
-    if (!drug && drugSuggestions?.length) {
-      setDrug(drugSuggestions[0]);
-      return null;
-    }
-    if (!drug) return "Please select or enter a valid drug.";
-    const ageNum = age === "" ? null : Number(age);
-    const weightNum = weight === "" ? null : Number(weight);
-    if (ageNum !== null && (!ageNum || ageNum <= 0)) return "Age must be a positive number.";
-    if (weightNum !== null && (!weightNum || weightNum <= 0)) return "Weight must be a positive number.";
-    return null;
-  };
-
+  // ---------- Helpers ----------
   const extractJsonDict = (text) => {
     if (!text) return null;
     const cleaned = text.replace(/```json|```/gi, "").trim();
@@ -153,18 +93,6 @@ export default function DosageCalculator({ onClose, transcript }) {
     return null;
   };
 
-  const handleCalculate = async () => {
-    const v = validate();
-    if (v) { setError(v); return; }
-    setError(null);
-    setLoading(true);
-    setResults({ dosage: "", regimen: "", notes: "" });
-    setScreenText("…");
-
-    if (useStream && "ReadableStream" in window) await runStreaming();
-    else await runNonStream();
-  };
-
   const handle400Error = async (res) => {
     try {
       const txt = await res.text();
@@ -179,32 +107,89 @@ export default function DosageCalculator({ onClose, transcript }) {
     }
   };
 
-  const runNonStream = async () => {
-    try {
-      const res = await fetch(URLS.calc, {
+  const suggestionOptions = useMemo(
+    () => (drugSuggestions || []).slice(0, 12),
+    [drugSuggestions]
+  );
+
+  // ---------- PREP STEP on Calculate: ensure context & fill fields ----------
+  const ensureContextAndPrefill = async () => {
+    // 1) Strict extraction
+    const r = await fetch(URLS.contextEnsure, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        session_id: sessionId,
+        transcript: transcript || null,
+      }),
+    });
+    const ctx = await r.json();
+
+    // Apply context into the UI
+    if (ctx?.condition) setCondition(ctx.condition);
+    if (ctx?.age_years != null && age === "") setAge(String(ctx.age_years));
+    if (ctx?.weight_kg != null && weight === "") setWeight(String(ctx.weight_kg));
+    if (Array.isArray(ctx?.drug_suggestions) && ctx.drug_suggestions.length) {
+      setDrugSuggestions(ctx.drug_suggestions);
+      if (!drug) setDrug(ctx.drug_suggestions[0] || "");
+    }
+
+    // 2) If we still have no suggestions but do have a condition, ask for them
+    const haveSuggestions = Array.isArray(ctx?.drug_suggestions) && ctx.drug_suggestions.length;
+    const cnd = (ctx?.condition || condition || "").trim();
+    if (!haveSuggestions && cnd) {
+      const sd = await fetch(URLS.suggestDrugs, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           session_id: sessionId,
-          drug,
-          // let backend fill from context if these are null/empty
-          age: age === "" ? null : Number(age),
-          weight: weight === "" ? null : Number(weight),
-          condition: condition || null,
-          transcript: transcript || null,     // ✅ pass transcript
+          condition: cnd,
+          transcript: transcript || null,
         }),
       });
+      const sj = await sd.json();
+      if (Array.isArray(sj?.drugs) && sj.drugs.length) {
+        setDrugSuggestions(sj.drugs);
+        if (!drug) setDrug(sj.drugs[0] || "");
+      }
+    }
 
-      if (res.status === 400) return handle400Error(res);
-      if (!res.ok) throw new Error(await res.text());
+    // Now we have the best-possible fields before calling dosage
+    return true;
+  };
 
-      const data = await res.json();
-      setResults({
-        dosage: data?.dosage || "",
-        regimen: data?.regimen || "",
-        notes: data?.notes || "",
-      });
-      setScreenText(data?.dosage ? data.dosage : "0");
+  // ---------- Validation ----------
+  const validate = () => {
+    const d = drug || (drugSuggestions?.[0] || "");
+    if (!d) return "Please select or enter a valid drug.";
+    const ageNum = age === "" ? null : Number(age);
+    const weightNum = weight === "" ? null : Number(weight);
+    if (ageNum !== null && (!ageNum || ageNum <= 0)) return "Age must be a positive number.";
+    if (weightNum !== null && (!weightNum || weightNum <= 0)) return "Weight must be a positive number.";
+    return null;
+  };
+
+  // ---------- Calculate (single trigger) ----------
+  const handleCalculate = async () => {
+    setError(null);
+    setResults({ dosage: "", regimen: "", notes: "" });
+    setScreenText("…");
+    setLoading(true);
+
+    try {
+      // A) Prepare context and prefill fields from backend (strict)
+      await ensureContextAndPrefill();
+
+      // B) Validate UI inputs after prefill
+      const v = validate();
+      if (v) { setError(v); setLoading(false); setScreenText("Err"); return; }
+
+      // C) If drug was still empty, auto-pick first suggestion
+      if (!drug && drugSuggestions?.length) setDrug(drugSuggestions[0]);
+
+      // D) Run calculation (stream or not)
+      if (useStream && "ReadableStream" in window) await runStreaming();
+      else await runNonStream();
     } catch (e) {
       setError(e.message || "Something went wrong.");
       setScreenText("Err");
@@ -213,21 +198,49 @@ export default function DosageCalculator({ onClose, transcript }) {
     }
   };
 
+  // ---------- Non-streaming ----------
+  const runNonStream = async () => {
+    const res = await fetch(URLS.calc, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        session_id: sessionId,
+        drug: drug || (drugSuggestions?.[0] || ""),
+        age: age === "" ? null : Number(age),
+        weight: weight === "" ? null : Number(weight),
+        condition: condition || null,
+        transcript: transcript || null,
+      }),
+    });
+
+    if (res.status === 400) return handle400Error(res);
+    if (!res.ok) throw new Error(await res.text());
+
+    const data = await res.json();
+    setResults({
+      dosage: data?.dosage || "",
+      regimen: data?.regimen || "",
+      notes: data?.notes || "",
+    });
+    setScreenText(data?.dosage ? data.dosage : "0");
+  };
+
+  // ---------- Streaming ----------
   const runStreaming = async () => {
     setStreaming(true);
     abortRef.current = new AbortController();
+
     try {
       const res = await fetch(URLS.calcStream, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           session_id: sessionId,
-          drug,
-          // let backend fill from context if these are null/empty
+          drug: drug || (drugSuggestions?.[0] || ""),
           age: age === "" ? null : Number(age),
           weight: weight === "" ? null : Number(weight),
           condition: condition || null,
-          transcript: transcript || null,     // ✅ pass transcript
+          transcript: transcript || null,
         }),
         signal: abortRef.current.signal,
       });
@@ -244,8 +257,8 @@ export default function DosageCalculator({ onClose, transcript }) {
         if (done) break;
         const chunk = decoder.decode(value, { stream: true });
         acc += chunk;
-        // Show a short tail of the stream in the "LCD" screen only
-        setScreenText(acc.slice(-28)); // tight, single-line feel
+        // Show only a short tail in the LCD screen
+        setScreenText(acc.slice(-28));
       }
 
       const parsed = extractJsonDict(acc);
@@ -267,10 +280,10 @@ export default function DosageCalculator({ onClose, transcript }) {
       }
     } finally {
       setStreaming(false);
-      setLoading(false);
     }
   };
 
+  // ---------- Keypad ----------
   const onKey = (k) => {
     const setFn = activeField === "age" ? setAge : setWeight;
     const val = activeField === "age" ? age : weight;
@@ -281,12 +294,7 @@ export default function DosageCalculator({ onClose, transcript }) {
     setScreenText(next.length ? next : "0");
   };
 
-  const canCalculate = !loading && !streaming && (!!drug || drugSuggestions.length > 0);
-
-  const suggestionOptions = useMemo(
-    () => (drugSuggestions || []).slice(0, 12),
-    [drugSuggestions]
-  );
+  const canCalculate = !loading && !streaming;
 
   return (
     <motion.div

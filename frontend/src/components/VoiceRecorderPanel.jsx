@@ -1,4 +1,4 @@
-import React, { useRef, useState } from "react";
+import React, { useRef, useState, useEffect } from "react";
 import { ReactMic } from "react-mic";
 import { motion } from "framer-motion";
 import axios from "axios";
@@ -8,9 +8,9 @@ import "../styles/VoiceRecorderPanel.css";
  * VoiceRecorderPanel
  * - Uses react-mic with your EXACT hard-coded props.
  * - Draggable glass panel (no resize while dragging).
- * - "Record The Case" launcher button fixed bottom-left (near chat input).
+ * - "Record The Case" launcher fixed bottom-left, turns into a timer while recording.
  * - On Stop => POST audio to transcribeUrl (multipart, {fileFieldName}).
- * - When transcript ready => calls onTranscriptReady(transcript) and shows "Analyze Case".
+ * - When transcript ready => calls onTranscriptReady(transcript) + shows "Analyze Case".
  * - "Analyze Case" streams from opinionUrl and forwards chunks to onOpinion.
  * - Transcript is kept in-memory only; never rendered.
  *
@@ -21,7 +21,7 @@ import "../styles/VoiceRecorderPanel.css";
  *   anchorLeft         : number   initial X for the overlay (px)
  *   anchorBottom       : number   initial Y-from-bottom for the overlay (px)
  *   onOpinion          : (chunk: string, done?: boolean) => void
- *   onTranscriptReady  : (transcript: string) => void      <-- NEW
+ *   onTranscriptReady  : (transcript: string) => void
  */
 const VoiceRecorderPanel = ({
   transcribeUrl = "/transcribe",
@@ -30,7 +30,7 @@ const VoiceRecorderPanel = ({
   anchorLeft = 120,
   anchorBottom = 140,
   onOpinion,
-  onTranscriptReady, // NEW
+  onTranscriptReady,
 }) => {
   const [open, setOpen] = useState(false);
 
@@ -45,7 +45,68 @@ const VoiceRecorderPanel = ({
   // keep transcript in memory (not rendered)
   const transcriptRef = useRef("");
 
-  // controls
+  // ---- TIMER (for launcher while recording) ----
+  const [elapsedMs, setElapsedMs] = useState(0);
+  const rafRef = useRef(null);
+  const startAtRef = useRef(0);
+  const pausedAccumRef = useRef(0);
+  const wasRecordingRef = useRef(false);
+
+  const formatTime = (ms) => {
+    const h = Math.floor(ms / 3600000);
+    const m = Math.floor((ms % 3600000) / 60000);
+    const s = Math.floor((ms % 60000) / 1000);
+    const cs = Math.floor((ms % 1000) / 10); // centiseconds
+    const pad = (n) => (n < 10 ? "0" + n : String(n));
+    return `${pad(h)}:${pad(m)}:${pad(s)}:${pad(cs)}`;
+  };
+
+  const tick = () => {
+    if (isRecording && !isPaused) {
+      const now = performance.now();
+      setElapsedMs(pausedAccumRef.current + (now - startAtRef.current));
+      rafRef.current = requestAnimationFrame(tick);
+    }
+  };
+
+  // manage timer lifecyle when recording/pause changes
+  useEffect(() => {
+    // recording started
+    if (isRecording && !wasRecordingRef.current) {
+      wasRecordingRef.current = true;
+      pausedAccumRef.current = 0;
+      startAtRef.current = performance.now();
+      setElapsedMs(0);
+      rafRef.current = requestAnimationFrame(tick);
+    }
+
+    // pause / resume
+    if (isRecording && isPaused) {
+      // pause: freeze elapsed and store accum
+      cancelAnimationFrame(rafRef.current);
+      rafRef.current = null;
+      pausedAccumRef.current = elapsedMs;
+    } else if (isRecording && !isPaused) {
+      // resume
+      startAtRef.current = performance.now();
+      if (!rafRef.current) rafRef.current = requestAnimationFrame(tick);
+    }
+
+    // cleanup when stop
+    if (!isRecording && wasRecordingRef.current) {
+      cancelAnimationFrame(rafRef.current);
+      rafRef.current = null;
+      wasRecordingRef.current = false;
+    }
+
+    return () => {
+      // safeguard on unmount
+      if (rafRef.current) cancelAnimationFrame(rafRef.current);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isRecording, isPaused]);
+
+  // ---- controls ----
   const startRecording = () => {
     transcriptRef.current = "";
     setIsPaused(false);
@@ -68,6 +129,8 @@ const VoiceRecorderPanel = ({
     setIsPaused(false);
     setIsTranscriptReady(false);
     transcriptRef.current = "";
+    setElapsedMs(0);
+    pausedAccumRef.current = 0;
   };
 
   // transcription (fires when recording stops)
@@ -90,7 +153,7 @@ const VoiceRecorderPanel = ({
       const ready = Boolean(txt);
       setIsTranscriptReady(ready);
 
-      // 🔔 NEW: notify parent (e.g., Chat.jsx) so WebRTC assistant can be primed
+      // notify parent (for WebRTC priming, etc.)
       if (ready && typeof onTranscriptReady === "function") {
         onTranscriptReady(txt);
       }
@@ -146,14 +209,27 @@ const VoiceRecorderPanel = ({
 
   return (
     <>
-      {/* Launcher (left, near chat input). */}
-      <button
-        className="record-case-btn-left"
-        onClick={() => setOpen(true)}
-        title="Record The Case"
-      >
-        <span className="shine-content">Record The Case</span>
-      </button>
+      {/* Launcher area:
+          - Normal button when idle
+          - Converts into small circular TIMER while recording
+      */}
+      {!isRecording ? (
+        <button
+          className="record-case-btn-left"
+          onClick={() => setOpen(true)}
+          title="Record The Case"
+        >
+          <span className="shine-content">Record The Case</span>
+        </button>
+      ) : (
+        <div className="record-timer-fixed" aria-live="polite">
+          <div className={`button-container ${isPaused ? "paused" : "running"}`}>
+            {/* Decorative inner "button" animates shape; not clickable while recording */}
+            <div className={`button ${isRecording ? "square" : ""}`} />
+          </div>
+          <h2 className={`timeroutput show`}>{formatTime(elapsedMs)}</h2>
+        </div>
+      )}
 
       {/* Draggable overlay panel */}
       {open && (
@@ -168,10 +244,14 @@ const VoiceRecorderPanel = ({
           style={{ left: anchorLeft, bottom: anchorBottom, position: "fixed" }}
         >
           <div className="overlay-head" style={{ cursor: "move" }}>
-            <span className="badge">
+            <span className={`badge ${isRecording ? "live" : ""}`}>
               {isRecording ? "Voice Recorder • LIVE" : "Voice Recorder"}
             </span>
-            <button className="close-x" onClick={() => setOpen(false)} aria-label="Close">
+            <button
+              className="close-x"
+              onClick={() => setOpen(false)}
+              aria-label="Close"
+            >
               ×
             </button>
           </div>
@@ -182,9 +262,10 @@ const VoiceRecorderPanel = ({
               record={isRecording}
               pause={isPaused}
               onStop={onStop}
-              strokeColor="#007bff"
+              strokeColor="#6366f1"
               visualSetting="frequencyBars"
               backgroundColor="#FFFFFF"
+              className="sound-wave"
             />
           </div>
 

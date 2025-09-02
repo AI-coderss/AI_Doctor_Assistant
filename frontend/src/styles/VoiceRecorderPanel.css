@@ -1,253 +1,640 @@
-/* ===========================
-   VoiceRecorderPanel.css (refined)
-   fixes: canvas overflow, glass container, launcher text spacing
-   =========================== */
+/* =========================================
+   VoiceRecorderPanel.css — mobile-tuned
+   • Smaller timer circle
+   • Digital digits (light/dark aware)
+   • Numbers lowered & themed
+   • ReactMic canvas: transparent + glass
+   • Full responsive
+   ========================================= */
 
-:root{
-  --radius-sm: 6px;
-  --radius-md: 12px;
-  --radius-lg: 16px;
+/* Optional: use your own digital font file in /public/fonts and uncomment:
+@font-face{
+  font-family: "DS-Digital";
+  src: url("/fonts/DS-DIGI.woff2") format("woff2");
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+*/
 
-  --shadow-1: 0 8px 18px rgba(0,0,0,.16);
-  --shadow-2: 0 12px 28px rgba(0,0,0,.24);
+:root {
+    --radius-sm: 6px;
+    --radius-md: 12px;
+    --radius-lg: 16px;
 
-  /* tokens / fallbacks */
-  --primary: #6366f1;
-  --glass-border: 1px solid rgba(255,255,255,.22);
-  --glass-ink: #0f1218;
+    --shadow-1: 0 8px 18px rgba(0, 0, 0, .16);
+    --shadow-2: 0 12px 28px rgba(0, 0, 0, .24);
+
+    /* brand defaults / fallbacks */
+    --primary: #6366f1;
+    --glass-border: 1px solid rgba(255, 255, 255, .22);
+    --glass-ink: #0f1218;
+
+    /* timer color default (light) */
+    --timer-ink: #0d0f14;
+}
+
+:root[data-theme="dark"] {
+    --timer-ink: #f5f8ff;
 }
 
 /* ===========================
-   Launcher (bottom-left)
+   Launcher (idle) OR Timer (recording)
    =========================== */
 
 @keyframes vrp-pulse {
-  0% { transform: translateY(0) scale(1); }
-  50% { transform: translateY(-1px) scale(1.06); }
-  100% { transform: translateY(0) scale(1); }
+    0% {
+        transform: translateY(0) scale(1);
+    }
+
+    50% {
+        transform: translateY(-1px) scale(1.06);
+    }
+
+    100% {
+        transform: translateY(0) scale(1);
+    }
 }
+
 @keyframes vrp-radiation {
-  0% {
-    box-shadow:
-      0 0 0 0 rgba(57, 85, 236, 0.40),
-      0 0 0 10px rgba(57, 85, 236, 0.12),
-      0 0 0 20px rgba(57, 85, 236, 0.06);
-  }
-  100% {
-    box-shadow:
-      0 0 0 10px rgba(57, 85, 236, 0),
-      0 0 0 20px rgba(57, 85, 236, 0),
-      0 0 0 30px rgba(57, 85, 236, 0);
-  }
+    0% {
+        box-shadow:
+            0 0 0 0 rgba(57, 85, 236, 0.40),
+            0 0 0 10px rgba(57, 85, 236, 0.12),
+            0 0 0 20px rgba(57, 85, 236, 0.06);
+    }
+
+    100% {
+        box-shadow:
+            0 0 0 10px rgba(57, 85, 236, 0),
+            0 0 0 20px rgba(57, 85, 236, 0),
+            0 0 0 30px rgba(57, 85, 236, 0);
+    }
 }
 
-.record-case-btn-left{
-  position: fixed;
-  left: 1.25rem;
-  bottom: 1.25rem;
-  z-index: 1000;
+/* Idle launcher button (text) */
+.record-case-btn-left {
+    position: fixed;
+    left: 1.25rem;
+    bottom: 5.5rem;
+    /* raised higher */
+    z-index: 1000;
 
-  padding: .75rem 1.25rem;
-  border: 0;
-  border-radius: var(--radius-sm);
-  color: #fff;
+    padding: .72rem 1.15rem;
+    border: 0;
+    border-radius: var(--radius-sm);
+    color: #fff;
+    background: linear-gradient(45deg, var(--primary), rgba(79, 70, 229, 1));
+    cursor: pointer;
 
-  background: linear-gradient(45deg, var(--primary), rgba(79,70,229,1));
-  cursor: pointer;
-
-  animation: vrp-pulse 2.2s infinite ease-in-out, vrp-radiation 2.6s infinite ease-out;
-  transition: transform .18s ease, box-shadow .18s ease;
-
-  /* ensure pseudo overlay aligns nicely */
-  position: fixed;
+    animation: vrp-pulse 2.2s infinite ease-in-out, vrp-radiation 2.6s infinite ease-out;
+    transition: transform .18s ease, box-shadow .18s ease;
 }
 
-/* Keep original text in DOM, but visually replace it to add gaps without JSX changes */
-.record-case-btn-left .shine-content { visibility: hidden; }
-.record-case-btn-left::after{
-  content: "Record The Case";           /* <-- spaced label */
-  position: absolute;
-  inset: 0;                             /* center it */
-  display: grid;
-  place-items: center;
-  font-weight: 500;
-  letter-spacing: .2px;
-  word-spacing: .35rem;
-  pointer-events: none;
-  color: #fff;
+.record-case-btn-left .shine-content {
+    visibility: hidden;
 }
 
-.record-case-btn-left::before{
-  content:''; position:absolute; top:-50%; left:-50%;
-  width:200%; height:200%;
-  background: linear-gradient(45deg, transparent, rgba(255,255,255,.35), transparent);
-  transform: rotate(45deg) translateY(-100%);
-  transition: transform .5s ease;
+.record-case-btn-left::after {
+    content: "Record The Case";
+    position: absolute;
+    inset: 0;
+    display: grid;
+    place-items: center;
+    font-weight: 500;
+    letter-spacing: .2px;
+    word-spacing: .35rem;
+    color: #fff;
+    pointer-events: none;
 }
-.record-case-btn-left:hover::before{ transform: rotate(45deg) translateY(100%); }
-.record-case-btn-left:hover{ transform: translateY(-1px) scale(1.03); }
+
+.record-case-btn-left::before {
+    content: '';
+    position: absolute;
+    top: -50%;
+    left: -50%;
+    width: 200%;
+    height: 200%;
+    background: linear-gradient(45deg, transparent, rgba(255, 255, 255, .35), transparent);
+    transform: rotate(45deg) translateY(-100%);
+    transition: transform .5s ease;
+}
+
+.record-case-btn-left:hover::before {
+    transform: rotate(45deg) translateY(100%);
+}
+
+.record-case-btn-left:hover {
+    transform: translateY(-1px) scale(1.03);
+}
+
+/* Timer container replaces launcher while recording */
+.record-timer-fixed {
+    position: fixed;
+    left: 1.25rem;
+    bottom: 5.5rem;
+    /* match raised */
+    z-index: 1000;
+    display: grid;
+    justify-items: center;
+    gap: .25rem;
+}
+
+/* ===== Smaller circle (reduced more) ===== */
+.button-container {
+    border: 3px solid #fff;
+    border-radius: 50%;
+    width: 70px;
+    /* was 88 -> smaller */
+    height: 70px;
+    /* was 88 -> smaller */
+    position: relative;
+    margin: 0 auto;
+    pointer-events: none;
+    /* not clickable during recording */
+    background: linear-gradient(45deg, var(--primary), rgba(79, 70, 229, 1));
+    animation: vrp-pulse 2.2s infinite ease-in-out, vrp-radiation 2.6s infinite ease-out;
+}
+
+/* Inner blob */
+.button {
+    background-color: #ff3b3b;
+    display: block;
+    border-radius: 50%;
+    width: 52px;
+    /* was 66 -> smaller */
+    height: 52px;
+    /* was 66 -> smaller */
+    margin: 9px auto 0 auto;
+    /* keep centered */
+    transition: border-radius .3s ease, width .3s ease, height .3s ease, transform .3s ease, margin .3s ease;
+}
+
+.button.square {
+    border-radius: 7px;
+    width: 40px;
+    height: 40px;
+    /* smaller square */
+    margin-top: 14px;
+    transform: scale(1.02);
+}
+
+/* Digital time — lowered & themed */
+.timeroutput {
+    margin-top: .15rem;
+    /* bring digits slightly DOWN so they sit below the circle */
+    text-align: center;
+    color: var(--timer-ink);
+    /* black in light, white in dark */
+    font-weight: 800;
+    font-size: 13px;
+    letter-spacing: .08em;
+
+    /* digital-looking stack (top entries if you added fonts) */
+    font-family:
+        "DS-Digital",
+        "Digital-7 Mono",
+        "Segment7Standard",
+        "Orbitron",
+        "Share Tech Mono",
+        "Roboto Mono",
+        "Courier New",
+        monospace;
+
+    text-shadow:
+        0 0 2px rgba(0, 0, 0, 0.06);
+}
 
 /* ===========================
    Draggable overlay
    =========================== */
 
-.audio-recorder-overlay{
-  position: fixed; /* initial left/bottom set inline from component */
-  z-index: 1100;
+.audio-recorder-overlay {
+    position: fixed;
+    /* left/bottom set inline */
+    z-index: 1100;
 
-  min-width: 360px;
-  max-width: 520px;
-  padding: 14px;
+    min-width: 320px;
+    max-width: 460px;
+    padding: 12px;
 
-  border-radius: var(--radius-lg);
-  background: transparent;      /* panel stays transparent */
-  border: var(--glass-border);
-  box-shadow: var(--shadow-2);
-  color: var(--glass-ink);
+    border-radius: var(--radius-lg);
+    background: transparent;
+    border: var(--glass-border);
+    box-shadow: var(--shadow-2);
+    color: var(--glass-ink);
 
-  user-select: none;
+    user-select: none;
 }
 
 /* header */
-.overlay-head{
-  display:flex; align-items:center; justify-content:space-between;
-  margin-bottom:10px; gap:10px;
+.overlay-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 10px;
+    gap: 10px;
 }
-.badge{
-  font-size:12px; padding:5px 10px; border-radius:9999px;
-  color: var(--primary);
-  border: 1px solid rgba(79,70,229,.6);
-  background: rgba(79,70,229,.12);
+
+.badge {
+    font-size: 12px;
+    padding: 5px 10px;
+    border-radius: 9999px;
+    color: var(--primary);
+    border: 1px solid rgba(79, 70, 229, .6);
+    background: rgba(79, 70, 229, .12);
 }
-.badge.live{ box-shadow: 0 0 0 3px rgba(79,70,229,.28); }
-.close-x{
-  width:32px; height:32px; border-radius:8px; border:0; cursor:pointer;
-  background: rgba(79,70,229,.10);
-  color: var(--glass-ink);
+
+.badge.live {
+    box-shadow: 0 0 0 3px rgba(79, 70, 229, .28);
+}
+
+.close-x {
+    width: 30px;
+    height: 30px;
+    border-radius: 8px;
+    border: 0;
+    cursor: pointer;
+    background: rgba(79, 70, 229, .10);
+    color: var(--glass-ink);
 }
 
 /* ===========================
-   Wave area (contains ReactMic)
-   — prevents canvas overflow
-   — adds gentle glass look behind the white canvas
+   Wave area (ReactMic)
+   - transparent canvas + glassmorphism (with !important as requested)
    =========================== */
 
-.wave-wrap{
-  position: relative;
-  height: 110px;
-  border-radius: var(--radius-md);
+.wave-wrap {
+    position: relative;
+    height: 96px;
+    border-radius: var(--radius-md);
 
-  /* containment fix: STOP OVERFLOWING */
-  overflow: hidden;             /* <- key fix */
-  box-sizing: border-box;
+    overflow: hidden;
+    /* contain any overflow */
+    box-sizing: border-box;
 
-  /* subtle glass backdrop around the canvas (canvas stays white per prop) */
-  background: linear-gradient(135deg, rgba(255,255,255,.22), rgba(255,255,255,.10));
-  backdrop-filter: blur(6px);
-  border: 1px dashed rgba(79,70,229,.35);
+    /* GLASS behind the canvas */
+    background: linear-gradient(135deg, rgba(255, 255, 255, .22), rgba(255, 255, 255, .10)) !important;
+    backdrop-filter: blur(8px) !important;
+    border: 1px dashed rgba(79, 70, 229, .35) !important;
 
-  display: grid; place-items: center;
-  margin-bottom: 12px;
+    display: grid;
+    place-items: center;
+    margin-bottom: 12px;
 }
 
-/* Force the ReactMic element to fit the wrapper exactly */
-.sound-wave{
-  width: 100% !important;
-  height: 100% !important;
-  display: block;
-  border-radius: inherit;       /* clip to rounded corners */
-  overflow: hidden;             /* belt-and-suspenders */
+/* Force ReactMic node to fill */
+.sound-wave {
+    width: 100% !important;
+    height: 100% !important;
+    display: block;
+    border-radius: inherit;
+    overflow: hidden;
 }
 
-/* The underlying canvas created by ReactMic */
-.sound-wave canvas{
-  width: 100% !important;
-  height: 100% !important;
-  display: block;
-  border-radius: inherit;       /* match rounding */
-  /* canvas background is controlled by ReactMic prop backgroundColor="#FFFFFF"
-     so CSS cannot change it. This guarantees clean edges and no bleed. */
+/* The actual <canvas> ReactMic draws on.
+   Make it TRANSPARENT & let the glass show through. */
+.wave-wrap canvas,
+.sound-wave canvas {
+    width: 100% !important;
+    height: 100% !important;
+    display: block;
+    border-radius: inherit;
+    background: transparent !important;
+    /* canvas transparent */
 }
 
 /* ===========================
    Controls (buttons)
    =========================== */
 
-.recorder-buttons{
-  display: grid;
-  grid-template-columns: repeat(2,1fr);
-  gap: 10px;
-  margin-top: 14px;
-  width: 100%;
-  max-width: 420px;
+.recorder-buttons {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 10px;
+    margin-top: 12px;
+    width: 100%;
+    max-width: 400px;
+    margin-inline: auto;
 }
 
-.recorder-buttons button{
-  position: relative;
-  padding: 0.8rem 1.5rem;
-  font-size: .9rem;
-  color: #fff;
-  background: linear-gradient(45deg, var(--primary), rgba(79,70,229,1));
-  border: none;
-  border-radius: var(--radius-sm);
-  cursor: pointer;
-  overflow: hidden;
-  transition: transform .18s ease, box-shadow .18s ease, opacity .18s ease;
-  box-shadow: 0 3px 10px rgba(37, 99, 235, 0.40);
+.recorder-buttons button {
+    position: relative;
+    padding: 0.64rem 1rem;
+    font-size: .86rem;
+    color: #fff;
+    background: linear-gradient(45deg, var(--primary), rgba(79, 70, 229, 1));
+    border: none;
+    border-radius: var(--radius-sm);
+    cursor: pointer;
+    overflow: hidden;
+    transition: transform .18s ease, box-shadow .18s ease, opacity .18s ease;
+    box-shadow: 0 3px 10px rgba(37, 99, 235, 0.40);
 }
-.recorder-buttons button .shine-content{ position: relative; z-index: 1; }
-.recorder-buttons button::before{
-  content: '';
-  position: absolute;
-  top: -50%; left: -50%;
-  width: 200%; height: 200%;
-  background: linear-gradient(45deg, transparent, rgba(255,255,255,0.35), transparent);
-  transform: rotate(45deg) translateY(-100%);
-  transition: transform 0.5s ease;
+
+.recorder-buttons button .shine-content {
+    position: relative;
+    z-index: 1;
 }
-.recorder-buttons button:hover::before{ transform: rotate(45deg) translateY(100%); }
-.recorder-buttons button:hover{ transform: translateY(-1px) scale(1.02); }
-.recorder-buttons button:disabled{
-  background-color: #d1d5db;
-  color: #6b7280;
-  cursor: not-allowed;
-  box-shadow: none;
+
+.recorder-buttons button::before {
+    content: '';
+    position: absolute;
+    top: -50%;
+    left: -50%;
+    width: 200%;
+    height: 200%;
+    background: linear-gradient(45deg, transparent, rgba(255, 255, 255, 0.35), transparent);
+    transform: rotate(45deg) translateY(-100%);
+    transition: transform 0.5s ease;
+}
+
+.recorder-buttons button:hover::before {
+    transform: rotate(45deg) translateY(100%);
+}
+
+.recorder-buttons button:hover {
+    transform: translateY(-1px) scale(1.02);
+}
+
+.recorder-buttons button:disabled {
+    background-color: #d1d5db;
+    color: #6b7280;
+    cursor: not-allowed;
+    box-shadow: none;
 }
 
 /* Full-width CTA */
-.recorder-buttons .analyze{
-  grid-column: 1 / -1;
-  background: linear-gradient(45deg, var(--primary), #00bcd4);
+.recorder-buttons .analyze {
+    grid-column: 1 / -1;
+    background: linear-gradient(45deg, var(--primary), #00bcd4);
 }
 
 /* ===========================
    Loader
    =========================== */
 
-.loader{
-  display:grid; place-items:center; gap:8px;
-  margin-top:12px; padding:10px;
-  border-radius: var(--radius-md);
-  border: 1px solid rgba(79,70,229,.28);
-  background: rgba(79,70,229,.08);
+.loader {
+    display: grid;
+    place-items: center;
+    gap: 8px;
+    margin-top: 12px;
+    padding: 10px;
+    border-radius: var(--radius-md);
+    border: 1px solid rgba(79, 70, 229, .28);
+    background: rgba(79, 70, 229, .08);
 }
-.spinner{
-  width:22px; height:22px;
-  border:3px solid rgba(79,70,229,.18);
-  border-top-color: var(--primary);
-  border-radius:9999px;
-  animation: vrp-spin .8s linear infinite;
+
+.spinner {
+    width: 18px;
+    height: 18px;
+    border: 3px solid rgba(79, 70, 229, .18);
+    border-top-color: var(--primary);
+    border-radius: 9999px;
+    animation: vrp-spin .8s linear infinite;
 }
-@keyframes vrp-spin{ to{ transform: rotate(360deg); } }
+
+@keyframes vrp-spin {
+    to {
+        transform: rotate(360deg);
+    }
+}
 
 /* ===========================
-   Responsive
+   Responsive — higher placement & smaller timer on phones
    =========================== */
-@media (max-width:560px){
-  .audio-recorder-overlay{
-    min-width: 94vw;
-    left: 3vw !important;
-    bottom: 120px !important;
-  }
-  .recorder-buttons{ grid-template-columns: 1fr; }
+
+@media (max-width: 900px) {
+    .audio-recorder-overlay {
+        max-width: 86vw;
+        min-width: 64vw;
+        padding: 10px;
+    }
+
+    .wave-wrap {
+        height: 84px;
+    }
+
+    .recorder-buttons {
+        gap: 8px;
+        max-width: 92%;
+    }
+
+    .recorder-buttons button {
+        padding: .58rem .9rem;
+        font-size: .84rem;
+    }
+
+    .record-case-btn-left {
+        bottom: 6.5rem;
+    }
+
+    .record-timer-fixed {
+        bottom: 6.5rem;
+    }
+
+    .button-container {
+        width: 64px;
+        height: 64px;
+    }
+
+    .button {
+        width: 48px;
+        height: 48px;
+        margin-top: 8px;
+    }
+
+    .button.square {
+        width: 36px;
+        height: 36px;
+        margin-top: 12px;
+    }
+
+    .timeroutput {
+        font-size: 12.5px;
+    }
+}
+
+@media (max-width: 680px) {
+    .audio-recorder-overlay {
+        min-width: 86vw;
+        max-width: 86vw;
+        left: 7vw !important;
+        bottom: 168px !important;
+        padding: 9px;
+        border-radius: 14px;
+    }
+
+    .overlay-head {
+        margin-bottom: 8px;
+    }
+
+    .badge {
+        font-size: 10.5px;
+        padding: 4px 8px;
+    }
+
+    .close-x {
+        width: 26px;
+        height: 26px;
+    }
+
+    .wave-wrap {
+        height: 72px;
+        margin-bottom: 9px;
+    }
+
+    .recorder-buttons {
+        grid-template-columns: 1fr;
+        gap: 8px;
+        max-width: 100%;
+    }
+
+    .recorder-buttons button {
+        padding: .5rem .8rem;
+        font-size: .82rem;
+        border-radius: 8px;
+    }
+
+    .record-case-btn-left {
+        left: 1rem;
+        bottom: calc(env(safe-area-inset-bottom, 16px) + 14.5rem);
+        /* raised more */
+        padding: .56rem .85rem;
+        font-size: .9rem;
+        border-radius: 10px;
+    }
+
+    .record-timer-fixed {
+        left: 1rem;
+        bottom: calc(env(safe-area-inset-bottom, 16px) + 14.5rem);
+        /* match */
+    }
+
+    .button-container {
+        width: 58px;
+        height: 58px;
+    }
+
+    .button {
+        width: 44px;
+        height: 44px;
+        margin-top: 7px;
+    }
+
+    .button.square {
+        width: 34px;
+        height: 34px;
+        margin-top: 11px;
+    }
+
+    .timeroutput {
+        font-size: 11.5px;
+    }
+}
+
+@media (max-width: 480px) {
+    .audio-recorder-overlay {
+        min-width: 92vw;
+        max-width: 92vw;
+        left: 4vw !important;
+        bottom: 178px !important;
+        padding: 8px;
+        border-radius: 12px;
+    }
+
+    .wave-wrap {
+        height: 66px;
+    }
+
+    .recorder-buttons button {
+        padding: .48rem .75rem;
+        font-size: .8rem;
+    }
+
+    .spinner {
+        width: 16px;
+        height: 16px;
+    }
+
+    .record-case-btn-left {
+        bottom: calc(env(safe-area-inset-bottom, 14px) + 15.5rem);
+    }
+
+    .record-timer-fixed {
+        bottom: calc(env(safe-area-inset-bottom, 14px) + 15.5rem);
+    }
+
+    .button-container {
+        width: 54px;
+        height: 54px;
+    }
+
+    .button {
+        width: 40px;
+        height: 40px;
+        margin-top: 6px;
+    }
+
+    .button.square {
+        width: 32px;
+        height: 32px;
+        margin-top: 10px;
+    }
+
+    .timeroutput {
+        font-size: 11px;
+    }
+}
+
+@media (max-width: 380px) {
+    .audio-recorder-overlay {
+        min-width: 94vw;
+        max-width: 94vw;
+        left: 3vw !important;
+        bottom: 188px !important;
+        padding: 7px;
+    }
+
+    .wave-wrap {
+        height: 60px;
+    }
+
+    .recorder-buttons {
+        gap: 7px;
+    }
+
+    .recorder-buttons button {
+        padding: .46rem .7rem;
+        font-size: .78rem;
+    }
+
+    .record-case-btn-left {
+        bottom: calc(env(safe-area-inset-bottom, 12px) + 16.5rem);
+    }
+
+    .record-timer-fixed {
+        bottom: calc(env(safe-area-inset-bottom, 12px) + 16.5rem);
+    }
+
+    .button-container {
+        width: 50px;
+        height: 50px;
+    }
+
+    .button {
+        width: 36px;
+        height: 36px;
+        margin-top: 6px;
+    }
+
+    .button.square {
+        width: 30px;
+        height: 30px;
+        margin-top: 10px;
+    }
+
+    .timeroutput {
+        font-size: 10.8px;
+    }
 }

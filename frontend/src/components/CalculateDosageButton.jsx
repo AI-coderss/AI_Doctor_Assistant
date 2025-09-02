@@ -1,38 +1,42 @@
-import React from "react";
+import React, { useState } from "react";
 import { motion } from "framer-motion";
-import useDosageStore from "../store/dosageStore";
 import DosageCalculator from "./DosageCalculator";
 import "../styles/DosageButton.css";
 
-const CalculateDosageButton = () => {
-  const isOpen = useDosageStore((s) => s.isOpen);
-  const toggleOpen = useDosageStore((s) => s.toggleOpen);
+/**
+ * Small pill toggle that sits beside your "Record The Case" button.
+ * The calculator renders inline (NOT fixed) below your toolbar/content.
+ */
+export default function CalculateDosageButton() {
+  const [open, setOpen] = useState(false);
 
   return (
     <>
-      {/* Put this wrapper next to your existing "Record The Case" button */}
       <div className="left-rail-actions">
-        {/* Your existing record button remains where it is */}
+        {/* Your existing Record button can live here too */}
         {/* <button className="record-btn">Record The Case</button> */}
 
         <motion.button
+          type="button"
           className="calc-dose-btn"
-          onClick={() => toggleOpen(true)}
-          initial={{ opacity: 0, y: 6 }}
+          onClick={() => setOpen(v => !v)}
+          initial={{ opacity: 0, y: 0 }}
           animate={{ opacity: 1, y: 0 }}
           whileHover={{ scale: 1.02 }}
           whileTap={{ scale: 0.98 }}
           aria-label="Open dosage calculator"
           title="Open dosage calculator"
         >
-          CalculateDosage
+          <span className="calc-dose-btn__label">
+            {open ? "Close Calculator" : "Calculate Dosage"}
+          </span>
         </motion.button>
       </div>
 
-      {isOpen && <DosageCalculator />}
+      {/* Place this exactly where you want the calculator to appear in-flow */}
+      {open && <DosageCalculator onClose={() => setOpen(false)} />}
     </>
   );
-};
+}
 
-export default CalculateDosageButton;
 

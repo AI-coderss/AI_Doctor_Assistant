@@ -12,8 +12,9 @@ const API_BASE = "https://ai-doctor-assistant-backend-server.onrender.com";
 const URLS = {
   contextGet: (sid) => `${API_BASE}/context?session_id=${encodeURIComponent(sid)}`,
   suggestDrugs: `${API_BASE}/suggest-drugs`,
-  calcStream: `${API_BASE}/calculate-dosage-stream`,
-  calc: `${API_BASE}/calculate-dosage`,
+  // ✅ switched to context-aware endpoints
+  calcStream: `${API_BASE}/calculate-dosage-stream-with-context`,
+  calc: `${API_BASE}/calculate-dosage-with-context`,
 };
 
 const KEYPAD = [
@@ -94,7 +95,13 @@ export default function DosageCalculator({ onClose }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [condition]);
 
+  // Validation allows age/weight empty (they’ll be filled by backend context)
   const validate = () => {
+    // If no drug chosen but we have suggestions, auto-pick the first
+    if (!drug && drugSuggestions?.length) {
+      setDrug(drugSuggestions[0]);
+      return null;
+    }
     if (!drug) return "Please select or enter a valid drug.";
     const ageNum = age === "" ? null : Number(age);
     const weightNum = weight === "" ? null : Number(weight);
@@ -142,6 +149,7 @@ export default function DosageCalculator({ onClose }) {
         body: JSON.stringify({
           session_id: sessionId,
           drug,
+          // let backend fill from context if these are null/empty
           age: age === "" ? null : Number(age),
           weight: weight === "" ? null : Number(weight),
           condition: condition || null,
@@ -173,6 +181,7 @@ export default function DosageCalculator({ onClose }) {
         body: JSON.stringify({
           session_id: sessionId,
           drug,
+          // let backend fill from context if these are null/empty
           age: age === "" ? null : Number(age),
           weight: weight === "" ? null : Number(weight),
           condition: condition || null,
@@ -227,7 +236,7 @@ export default function DosageCalculator({ onClose }) {
     setScreenText(next.length ? next : "0");
   };
 
-  const canCalculate = !loading && !streaming && !!drug;
+  const canCalculate = !loading && !streaming && (!!drug || drugSuggestions.length > 0);
 
   const suggestionOptions = useMemo(
     () => (drugSuggestions || []).slice(0, 12),

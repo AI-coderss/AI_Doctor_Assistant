@@ -336,7 +336,6 @@
 
 /* Hover Effect */
 .chat-message:hover .avatar {
-  transform: scale(1.4);
   transition: transform 0.3s ease-in-out;
 }
 

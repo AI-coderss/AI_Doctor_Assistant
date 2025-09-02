@@ -13,10 +13,12 @@
   display:inline-flex;
   align-items:center;
   justify-content:center;
-  padding:8px 14px;
+  padding:12px 14px;
+  border-radius: 12px;
   font-weight:700;
   font-size:.92rem;
-  line-height:1;              /* keeps height tight */
+  line-height:1; 
+  border: none !important;             /* keeps height tight */
   cursor:pointer;
   white-space:nowrap;
   color:#ffffff;              /* visible text */

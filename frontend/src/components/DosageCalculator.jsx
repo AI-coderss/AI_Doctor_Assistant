@@ -6,13 +6,17 @@ import "../styles/DosageCalculator.css";
  * Classic calculator UI (NOT fixed). Glassmorphic, compact height,
  * LCD-like screen where streamed text appears. Condition is taken from context
  * (no manual entry). Drug suggestions are dynamic from backend.
+ *
+ * Props:
+ *  - onClose?: () => void
+ *  - transcript?: string   // optional: pass the latest case transcript to auto-extract context
  */
 
 const API_BASE = "https://ai-doctor-assistant-backend-server.onrender.com";
 const URLS = {
   contextGet: (sid) => `${API_BASE}/context?session_id=${encodeURIComponent(sid)}`,
+  contextEnsure: `${API_BASE}/context-ensure`,
   suggestDrugs: `${API_BASE}/suggest-drugs`,
-  // ✅ switched to context-aware endpoints
   calcStream: `${API_BASE}/calculate-dosage-stream-with-context`,
   calc: `${API_BASE}/calculate-dosage-with-context`,
 };
@@ -24,7 +28,7 @@ const KEYPAD = [
   ["0", ".", "AC"],
 ];
 
-export default function DosageCalculator({ onClose }) {
+export default function DosageCalculator({ onClose, transcript }) {
   const [sessionId] = useState(() =>
     (typeof crypto !== "undefined" && crypto.randomUUID)
       ? crypto.randomUUID()
@@ -50,29 +54,49 @@ export default function DosageCalculator({ onClose }) {
   const [activeField, setActiveField] = useState("age"); // "age" | "weight"
   const abortRef = useRef(null);
 
-  // Load context on mount
+  /** Helper to apply server context to local fields */
+  const applyContext = (ctx) => {
+    if (!ctx) return;
+    if (ctx.condition) setCondition(ctx.condition);
+    if (ctx.age_years != null && ctx.age_years !== "") setAge(String(ctx.age_years));
+    if (ctx.weight_kg != null && ctx.weight_kg !== "") setWeight(String(ctx.weight_kg));
+    if (Array.isArray(ctx.drug_suggestions) && ctx.drug_suggestions.length) {
+      setDrugSuggestions(ctx.drug_suggestions);
+      setDrug((prev) => prev || ctx.drug_suggestions[0] || "");
+    }
+  };
+
+  /** On mount: ensure context if transcript is provided; else read existing context */
   useEffect(() => {
     let cancelled = false;
+
     (async () => {
       try {
-        const r = await fetch(URLS.contextGet(sessionId));
-        const j = await r.json();
-        if (!cancelled && j && j.exists) {
-          if (j.condition) setCondition(j.condition);
-          if (j.age_years != null) setAge(String(j.age_years));
-          if (j.weight_kg != null) setWeight(String(j.weight_kg));
-          if (Array.isArray(j.drug_suggestions) && j.drug_suggestions.length) {
-            setDrugSuggestions(j.drug_suggestions);
-            setDrug(prev => prev || j.drug_suggestions[0]);
-          }
+        if (transcript && transcript.trim()) {
+          // Strict extraction on-demand
+          const r = await fetch(URLS.contextEnsure, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ session_id: sessionId, transcript }),
+          });
+          const j = await r.json();
+          if (!cancelled && j) applyContext(j);
+        } else {
+          // Fallback to any existing stored context
+          const r = await fetch(URLS.contextGet(sessionId));
+          const j = await r.json();
+          if (!cancelled && j && j.exists) applyContext(j);
         }
-      } catch (_) {}
+      } catch (e) {
+        // swallow; UI will still be usable
+      }
     })();
+
     return () => { cancelled = true; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [sessionId, transcript]);
 
-  // If condition appears later (e.g., context arrives), refresh suggestions
+  /** If condition becomes available, (re)fetch drug suggestions (include transcript for robustness) */
   useEffect(() => {
     const c = (condition || "").trim();
     if (!c) return;
@@ -82,7 +106,7 @@ export default function DosageCalculator({ onClose }) {
         const r = await fetch(URLS.suggestDrugs, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ session_id: sessionId, condition: c }),
+          body: JSON.stringify({ session_id: sessionId, condition: c, transcript: transcript || null }),
         });
         const j = await r.json();
         if (!cancelled && Array.isArray(j.drugs)) {
@@ -141,6 +165,20 @@ export default function DosageCalculator({ onClose }) {
     else await runNonStream();
   };
 
+  const handle400Error = async (res) => {
+    try {
+      const txt = await res.text();
+      const data = JSON.parse(txt);
+      const missing = Array.isArray(data?.missing) ? data.missing.join(", ") : null;
+      const detail = missing ? `Missing: ${missing}` : (data?.error || txt);
+      setError(detail || "Bad Request");
+      setScreenText("Err");
+    } catch {
+      setError("Bad Request");
+      setScreenText("Err");
+    }
+  };
+
   const runNonStream = async () => {
     try {
       const res = await fetch(URLS.calc, {
@@ -153,9 +191,13 @@ export default function DosageCalculator({ onClose }) {
           age: age === "" ? null : Number(age),
           weight: weight === "" ? null : Number(weight),
           condition: condition || null,
+          transcript: transcript || null,     // ✅ pass transcript
         }),
       });
+
+      if (res.status === 400) return handle400Error(res);
       if (!res.ok) throw new Error(await res.text());
+
       const data = await res.json();
       setResults({
         dosage: data?.dosage || "",
@@ -185,9 +227,12 @@ export default function DosageCalculator({ onClose }) {
           age: age === "" ? null : Number(age),
           weight: weight === "" ? null : Number(weight),
           condition: condition || null,
+          transcript: transcript || null,     // ✅ pass transcript
         }),
         signal: abortRef.current.signal,
       });
+
+      if (res.status === 400) { await handle400Error(res); return; }
       if (!res.ok || !res.body) { await runNonStream(); return; }
 
       const reader = res.body.getReader();

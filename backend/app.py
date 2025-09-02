@@ -452,77 +452,178 @@ def calculate_dosage():
 
     except Exception as e:
         return jsonify({"error": f"Server error: {str(e)}"}), 500
-# ========== ADDITIONS: CONTEXT & SMART DOSAGE (APPEND ONLY) ==========
+# ========== STRICT CONTEXT EXTRACTION & ROBUST CONTEXT-AWARE ENDPOINTS ==========
 
 # Per-session structured context extracted from transcript
 # session_context[session_id] = {
-#   "transcript": str,
+#   "transcript": str|None,
 #   "condition": str|None,
 #   "description": str|None,
 #   "age_years": float|None,
 #   "weight_kg": float|None,
 #   "drug_suggestions": list[str]
 # }
-session_context = {}
+session_context = globals().get("session_context", {})
+if session_context is None:
+    session_context = {}
 
-def _build_context_extraction_prompt(transcript: str, topn: int = 10) -> str:
+def _coerce_float(x):
+    try:
+        if x in (None, "", "null"):
+            return None
+        return float(x)
+    except Exception:
+        return None
+
+def _extract_numbers_fallback(transcript: str):
     """
-    Ask the RAG chain to extract a tiny, strict-JSON summary from the transcript.
+    Heuristic fallback if LLM JSON missed numbers.
+    Looks for age (years) and weight (kg).
+    """
+    if not transcript:
+        return {}
+    t = transcript.lower()
+
+    age = None
+    weight = None
+
+    # Age patterns
+    # e.g., "45 years", "45 yrs", "45 y/o", "age 45"
+    age_patterns = [
+        r'age\s*[:\-]?\s*(\d{1,3}(?:\.\d+)?)',
+        r'(\d{1,3}(?:\.\d+)?)\s*(?:years?|yrs?|y/o)\b',
+    ]
+    for pat in age_patterns:
+        m = re.search(pat, t)
+        if m:
+            age = _coerce_float(m.group(1))
+            break
+
+    # Weight patterns
+    # e.g., "70 kg", "wt 70 kg", "weight: 72.5 kg"
+    weight_patterns = [
+        r'weight\s*[:\-]?\s*(\d{1,3}(?:\.\d+)?)\s*kg',
+        r'wt\s*[:\-]?\s*(\d{1,3}(?:\.\d+)?)\s*kg',
+        r'\b(\d{1,3}(?:\.\d+)?)\s*kg\b',
+    ]
+    for pat in weight_patterns:
+        m = re.search(pat, t)
+        if m:
+            weight = _coerce_float(m.group(1))
+            break
+
+    return {"age_years": age, "weight_kg": weight}
+
+def _build_context_extraction_prompt_strict(transcript: str, topn: int = 12) -> str:
+    """
+    Very strict JSON-only extraction with fixed keys.
     """
     return (
-        "From the following patient consultation transcript, extract STRICT JSON only:\n"
+        "You are a clinical information extractor. Return STRICT JSON ONLY.\n"
+        "Schema:\n"
         "{\n"
-        '  "condition": "primary condition or working diagnosis (short)",\n'
-        '  "description": "1-2 sentence summary of the case (English)",\n'
+        '  "condition": "short primary condition/working diagnosis in English (no ICD code)",\n'
+        '  "description": "one short sentence summary in English",\n'
         '  "age_years": number | null,\n'
         '  "weight_kg": number | null,\n'
-        f'  "drug_suggestions": ["top {topn} plausible generic drugs for this condition"]\n'
+        f'  "drug_suggestions": ["top {topn} plausible generic drugs (lowercase generic names)"]\n'
         "}\n"
-        "If unknown, use null or an empty list. Do not invent values.\n\n"
+        "Rules:\n"
+        "- Use null when unknown; do NOT invent values.\n"
+        "- drug_suggestions must be an array; items must be unique, generic names only.\n"
+        "- No markdown, no additional text.\n\n"
         f"Transcript:\n{transcript}\n"
     )
 
-def _build_drug_suggestion_prompt(condition: str, topn: int = 12) -> str:
+def _strict_llm_json(prompt: str):
     """
-    Get a list of drug suggestions for a given condition. Strict JSON.
+    Calls your LangChain RAG chain, tries hard to parse strict JSON out.
     """
-    return (
-        "Return STRICT JSON with key 'drugs' as an array of strings (generic names only).\n"
-        f"Condition: {condition}\n"
-        f"Top {topn} commonly used evidence-based candidates.\n"
-        '{ "drugs": ["...", "..."] }'
-    )
+    try:
+        response = conversation_rag_chain.invoke({
+            "chat_history": [],
+            "input": prompt
+        })
+        raw = (response.get("answer") or "").strip()
+        parsed = _extract_json_dict(raw)
+        if isinstance(parsed, dict):
+            return parsed
+    except Exception:
+        pass
+    return {}
+
+def _extract_case_fields_strict(transcript: str, topn: int = 12):
+    """
+    Combines strict LLM JSON with regex fallback for age/weight.
+    """
+    data = _strict_llm_json(_build_context_extraction_prompt_strict(transcript, topn=topn)) or {}
+    # Normalize
+    condition = (data.get("condition") or "").strip() or None
+    description = (data.get("description") or "").strip() or None
+    age_years = _coerce_float(data.get("age_years"))
+    weight_kg = _coerce_float(data.get("weight_kg"))
+    drug_suggestions = list(dict.fromkeys([*(data.get("drug_suggestions") or [])]))  # unique-preserving
+
+    # Fallback for numbers
+    if age_years is None or weight_kg is None:
+        nums = _extract_numbers_fallback(transcript or "")
+        age_years = age_years if age_years is not None else nums.get("age_years")
+        weight_kg = weight_kg if weight_kg is not None else nums.get("weight_kg")
+
+    return {
+        "transcript": transcript or None,
+        "condition": condition,
+        "description": description,
+        "age_years": age_years,
+        "weight_kg": weight_kg,
+        "drug_suggestions": drug_suggestions,
+    }
 
 def _merge_with_context(session_id: str, data: dict) -> dict:
     """
-    Merge incoming payload with saved session context (if any) so we can
-    call your existing strict validator without changing it.
+    Merge incoming payload with saved session context.
     """
     ctx = session_context.get(session_id, {})
     merged = {
-        "drug": data.get("drug"),
-        "age": data.get("age", ctx.get("age_years")),
-        "weight": data.get("weight", ctx.get("weight_kg")),
-        "condition": data.get("condition", ctx.get("condition")),
+        "drug": (data.get("drug") or "").strip() or None,
+        "age": _coerce_float(data.get("age")) if data.get("age") not in (None, "") else ctx.get("age_years"),
+        "weight": _coerce_float(data.get("weight")) if data.get("weight") not in (None, "") else ctx.get("weight_kg"),
+        "condition": (data.get("condition") or ctx.get("condition") or None),
     }
-    # Normalize numeric strings
-    try:
-        if merged["age"] not in (None, ""):
-            merged["age"] = float(merged["age"])
-    except Exception:
-        pass
-    try:
-        if merged["weight"] not in (None, ""):
-            merged["weight"] = float(merged["weight"])
-    except Exception:
-        pass
     return merged
+
+def _ensure_context(session_id: str, transcript: str = None, topn: int = 12):
+    """
+    Ensures we have a usable context; if missing or incomplete and transcript
+    is available, extract and store it.
+    """
+    ctx = session_context.get(session_id, {})
+    need_extract = (
+        not ctx
+        or ctx.get("condition") in (None, "")
+        or ctx.get("age_years") is None
+        or ctx.get("weight_kg") is None
+        or not ctx.get("drug_suggestions")
+    )
+    if need_extract and (transcript or ctx.get("transcript")):
+        source_transcript = transcript or ctx.get("transcript")
+        new_ctx = _extract_case_fields_strict(source_transcript, topn=topn)
+        # Merge (prefer new non-empty values)
+        merged = {
+            **ctx,
+            **{k: v for k, v in new_ctx.items() if v not in (None, "", [])}
+        }
+        session_context[session_id] = merged
+        return merged
+    # Ensure dict exists
+    session_context.setdefault(session_id, ctx)
+    return session_context[session_id]
 
 @app.route("/set-context", methods=["POST"])
 def set_context():
     """
     Body: { session_id?, transcript }
-    Stores transcript-derived context for later auto-fill.
+    Performs strict extraction and stores context.
     """
     data = request.get_json() or {}
     session_id = data.get("session_id", str(uuid4()))
@@ -530,32 +631,14 @@ def set_context():
     if not transcript:
         return jsonify({"error": "No transcript provided"}), 400
 
-    try:
-        response = conversation_rag_chain.invoke({
-            "chat_history": chat_sessions.get(session_id, []),
-            "input": _build_context_extraction_prompt(transcript)
-        })
-        raw = (response.get("answer") or "").strip()
-        parsed = _extract_json_dict(raw) or {}
-    except Exception as e:
-        parsed = {}
-
-    context_obj = {
-        "transcript": transcript,
-        "condition": parsed.get("condition"),
-        "description": parsed.get("description"),
-        "age_years": parsed.get("age_years"),
-        "weight_kg": parsed.get("weight_kg"),
-        "drug_suggestions": parsed.get("drug_suggestions") or [],
-    }
-    session_context[session_id] = context_obj
-    return jsonify({"session_id": session_id, **context_obj}), 200
+    ctx = _extract_case_fields_strict(transcript)
+    session_context[session_id] = ctx
+    return jsonify({"session_id": session_id, **ctx}), 200
 
 @app.route("/context", methods=["GET"])
 def get_context():
     """
-    Query params: ?session_id=...
-    Returns stored context (if any) so the front-end can prefill the calculator.
+    Query: ?session_id=...
     """
     session_id = request.args.get("session_id", "")
     ctx = session_context.get(session_id)
@@ -563,36 +646,58 @@ def get_context():
         return jsonify({"exists": False}), 200
     return jsonify({"exists": True, "session_id": session_id, **ctx}), 200
 
-@app.route("/suggest-drugs", methods=["POST"])
-def suggest_drugs():
+@app.route("/context-ensure", methods=["POST"])
+def context_ensure():
     """
-    Body: { session_id?, condition? }
-    Uses provided condition, otherwise from session context.
+    Body: { session_id?, transcript? }
+    If context missing/incomplete, extract it (uses transcript if given).
+    Returns final context.
     """
     data = request.get_json() or {}
     session_id = data.get("session_id", str(uuid4()))
-    condition = (data.get("condition") or (session_context.get(session_id, {}) or {}).get("condition") or "").strip()
+    transcript = (data.get("transcript") or "").strip() or None
+    ctx = _ensure_context(session_id, transcript=transcript)
+    return jsonify({"session_id": session_id, **ctx, "exists": bool(ctx)}), 200
+
+@app.route("/suggest-drugs", methods=["POST"])
+def suggest_drugs():
+    """
+    Body: { session_id?, condition?, transcript? }
+    Uses provided condition or stored/extracted one; returns candidate drugs.
+    """
+    data = request.get_json() or {}
+    session_id = data.get("session_id", str(uuid4()))
+    transcript = (data.get("transcript") or "").strip() or None
+
+    # Ensure context (may extract from transcript)
+    ctx = _ensure_context(session_id, transcript=transcript)
+    condition = (data.get("condition") or ctx.get("condition") or "").strip()
     if not condition:
         return jsonify({"error": "No condition available"}), 400
 
     try:
+        prompt = (
+            "Return STRICT JSON with key 'drugs' as an array of strings (generic names only, lowercase).\n"
+            f"Condition: {condition}\n"
+            'Example: {"drugs":["amoxicillin","azithromycin"]}'
+        )
         response = conversation_rag_chain.invoke({
-            "chat_history": chat_sessions.get(session_id, []),
-            "input": _build_drug_suggestion_prompt(condition)
+            "chat_history": [],
+            "input": prompt
         })
         raw = (response.get("answer") or "").strip()
         parsed = _extract_json_dict(raw) or {}
-        drugs = parsed.get("drugs") or []
+        drugs = [*dict.fromkeys([*(parsed.get("drugs") or [])])]  # unique
     except Exception:
         drugs = []
 
-    # Merge with previously stored suggestions for that session
-    ctx = session_context.setdefault(session_id, {})
-    prev = ctx.get("drug_suggestions") or []
+    # Merge into session context
+    session_context.setdefault(session_id, {})
+    prev = session_context[session_id].get("drug_suggestions") or []
     merged = list(dict.fromkeys([*drugs, *prev]))[:15]
-    ctx["drug_suggestions"] = merged
-    if "condition" not in ctx:
-        ctx["condition"] = condition
+    session_context[session_id]["drug_suggestions"] = merged
+    if not session_context[session_id].get("condition"):
+        session_context[session_id]["condition"] = condition
 
     return jsonify({"session_id": session_id, "condition": condition, "drugs": merged}), 200
 
@@ -600,8 +705,7 @@ def suggest_drugs():
 def summarize_case():
     """
     Body: { session_id?, transcript? }
-    Returns a compact English summary + key fields for UI display.
-    If transcript omitted, uses stored transcript (if available).
+    Returns compact summary and updates stored context strictly.
     """
     data = request.get_json() or {}
     session_id = data.get("session_id", str(uuid4()))
@@ -609,44 +713,51 @@ def summarize_case():
     if not transcript:
         return jsonify({"error": "No transcript available"}), 400
 
-    # Reuse the same extraction prompt to keep things consistent
-    try:
-        response = conversation_rag_chain.invoke({
-            "chat_history": chat_sessions.get(session_id, []),
-            "input": _build_context_extraction_prompt(transcript, topn=8)
-        })
-        raw = (response.get("answer") or "").strip()
-        parsed = _extract_json_dict(raw) or {}
-    except Exception:
-        parsed = {}
-
-    # Update stored context (non-destructive)
-    ctx = session_context.setdefault(session_id, {})
-    for k in ("condition", "description", "age_years", "weight_kg"):
-        if parsed.get(k) not in (None, "", []):
-            ctx[k] = parsed.get(k)
-    if parsed.get("drug_suggestions"):
-        ctx["drug_suggestions"] = parsed["drug_suggestions"]
-
-    return jsonify({"session_id": session_id, **ctx}), 200
+    ctx = _extract_case_fields_strict(transcript, topn=10)
+    # merge non-empty
+    base = session_context.get(session_id, {})
+    for k, v in ctx.items():
+        if v not in (None, "", []):
+            base[k] = v
+    session_context[session_id] = base
+    return jsonify({"session_id": session_id, **base}), 200
 
 @app.route("/calculate-dosage-with-context", methods=["POST"])
 def calculate_dosage_with_context():
     """
-    Body: { session_id?, drug?, age?, weight?, condition? }
-    Fills any missing fields from stored session context, then delegates to your
-    existing validation + RAG logic (unchanged).
+    Body: { session_id?, drug?, age?, weight?, condition?, transcript? }
+    Auto-extracts context (strict) if missing and a transcript is provided.
+    Auto-picks first suggested drug if drug is missing but suggestions exist.
     """
     data = request.get_json() or {}
     session_id = data.get("session_id", str(uuid4()))
+    transcript = (data.get("transcript") or "").strip() or None
+
+    # Ensure we have context (may extract from transcript)
+    ctx = _ensure_context(session_id, transcript=transcript)
+
     merged = _merge_with_context(session_id, data)
 
-    # Ensure all required fields exist before calling your strict validator
+    # If drug missing, try first suggestion
+    if not merged.get("drug"):
+        suggestions = ctx.get("drug_suggestions") or []
+        if suggestions:
+            merged["drug"] = suggestions[0]
+
+    # Validate required fields now
     missing = [k for k in ("drug", "age", "weight", "condition") if merged.get(k) in (None, "")]
     if missing:
-        return jsonify({"error": f"Missing field(s): {', '.join(missing)}"}), 400
+        return jsonify({
+            "error": "Missing required fields after extraction",
+            "missing": missing,
+            "context": {
+                "condition": ctx.get("condition"),
+                "age_years": ctx.get("age_years"),
+                "weight_kg": ctx.get("weight_kg"),
+                "drug_suggestions": ctx.get("drug_suggestions"),
+            }
+        }), 400
 
-    # Now call your existing builder & chain (exactly as in /calculate-dosage)
     try:
         prompt = _build_dosage_prompt(
             str(merged["drug"]).strip(),
@@ -669,7 +780,6 @@ def calculate_dosage_with_context():
         if not (dosage and regimen):
             return jsonify({"error": "Incomplete dosage JSON from model.", "raw": raw_answer[:2000]}), 502
 
-        # Persist to history similar to your existing pattern
         chat_sessions.setdefault(session_id, [])
         chat_sessions[session_id].append({"role": "user", "content": f"[Dosage+Ctx] {merged}"})
         chat_sessions[session_id].append({"role": "assistant", "content": raw_answer})
@@ -682,16 +792,33 @@ def calculate_dosage_with_context():
 @app.route("/calculate-dosage-stream-with-context", methods=["POST"])
 def calculate_dosage_stream_with_context():
     """
-    Streaming variant that auto-fills from context before building the prompt.
-    Body: { session_id?, drug?, age?, weight?, condition? }
+    Streaming variant; same auto-extraction behavior.
+    Body: { session_id?, drug?, age?, weight?, condition?, transcript? }
     """
     data = request.get_json() or {}
     session_id = data.get("session_id", str(uuid4()))
+    transcript = (data.get("transcript") or "").strip() or None
+
+    ctx = _ensure_context(session_id, transcript=transcript)
     merged = _merge_with_context(session_id, data)
+
+    if not merged.get("drug"):
+        suggestions = ctx.get("drug_suggestions") or []
+        if suggestions:
+            merged["drug"] = suggestions[0]
 
     missing = [k for k in ("drug", "age", "weight", "condition") if merged.get(k) in (None, "")]
     if missing:
-        return jsonify({"error": f"Missing field(s): {', '.join(missing)}"}), 400
+        return jsonify({
+            "error": "Missing required fields after extraction",
+            "missing": missing,
+            "context": {
+                "condition": ctx.get("condition"),
+                "age_years": ctx.get("age_years"),
+                "weight_kg": ctx.get("weight_kg"),
+                "drug_suggestions": ctx.get("drug_suggestions"),
+            }
+        }), 400
 
     if session_id not in chat_sessions:
         chat_sessions[session_id] = []
@@ -719,7 +846,7 @@ def calculate_dosage_stream_with_context():
         chat_sessions[session_id].append({"role": "assistant", "content": acc})
 
     return Response(stream_with_context(generate()), content_type="text/plain")
-# ========== END ADDITIONS ==========
+# ========== END STRICT CONTEXT EXTRACTION ==========
 
 
 

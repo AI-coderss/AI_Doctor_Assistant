@@ -33,13 +33,13 @@
   --lcd-text:#10251c;
 }
 
-/* NOT fixed; compact height overall */
+/* NOT fixed; compact height overall (HEIGHT KEPT) */
 .dosage-calculator{
   position: relative;
   width: min(460px, 100%);
-  height: 600px;
+  height: 600px;                        /* ← fixed height preserved */
   margin: 12px 0;
-  padding: 14px 14px 10px; /* tighter bottom to reduce total height */
+  padding: 14px 14px 10px;
   border-radius: 18px;
   background: var(--glass-bg);
   border: 1px solid var(--glass-border);
@@ -47,7 +47,8 @@
   -webkit-backdrop-filter: blur(14px);
   box-shadow: var(--glass-shadow);
   color: var(--text);
-z-index: 888888;
+  z-index: 888888;
+  overflow: hidden;                     /* keeps interior tidy when compacting */
 }
 
 /* Subtle gradient rim */
@@ -78,12 +79,11 @@ z-index: 888888;
 
 /* LCD-like calculator SCREEN */
 .dc-screen{
-  height: 72px; /* slightly taller as requested */
+  height: 72px;
   border-radius: 12px;
   margin-bottom: 10px;
   padding: 6px 10px;
-  background:
-    linear-gradient(to bottom, var(--lcd-bg-top), var(--lcd-bg-bottom));
+  background: linear-gradient(to bottom, var(--lcd-bg-top), var(--lcd-bg-bottom));
   border: 1px solid rgba(0,0,0,.18);
   display:flex; align-items:center; justify-content:flex-end;
   font-family: "SFMono-Regular", ui-monospace, Menlo, Consolas, monospace;
@@ -170,8 +170,90 @@ z-index: 888888;
 .dc-error{ border-color:rgba(255,80,80,.5); color:#ffb3b3; }
 .dc-success{ border-color:rgba(110,255,110,.3); }
 
-/* Responsive (keeps height tight) */
+/* =========================
+   RESPONSIVE: REDUCE PROPORTIONS ONLY
+   (height: 600px is preserved)
+   ========================= */
+
+/* Tablets down */
 @media (max-width: 900px){
-  .dosage-calculator{ width:100%; }
-  .dc-grid{ grid-template-columns:1fr; }
+  .dosage-calculator{
+    width: 380px;              /* narrower while keeping height */
+    padding: 12px;
+  }
+  .dc-grid{ grid-template-columns: 1fr; }
+  .dc-screen{
+    height: 56px;
+    font-size: 1rem;
+    padding: 6px 8px;
+  }
+  .dc-input{ padding:8px 9px; font-size:.92rem; }
+  .dc-key{ padding:9px 0; font-size:.96rem; }
+  .dc-btn-primary{ padding:10px 11px; font-size:.96rem; }
+}
+
+/* Phones */
+@media (max-width: 640px){
+  .dosage-calculator{
+    width: 320px;              /* small footprint */
+    height: 600px;             /* ← still fixed */
+    margin: 10px auto;
+    padding: 10px;
+  }
+  .dc-title{ font-size:.95rem; }
+  .dc-icon-btn{ padding:5px 8px; font-size:.8rem; }
+
+  .dc-screen{
+    height: 44px;              /* smaller “LCD” */
+    font-size: .9rem;
+    padding: 4px 8px;
+  }
+
+  .dc-badges{ gap:4px; margin-bottom:6px; }
+  .dc-badge{ padding:3px 6px; font-size:.72rem; }
+
+  .dc-body{ gap:8px; }
+  .dc-grid{ gap:6px; grid-template-columns: 1fr; }
+  .dc-field{ gap:4px; }
+  .dc-label{ font-size:.76rem; }
+  .dc-input{
+    padding:7px 8px;
+    font-size:.88rem;
+    border-radius:9px;
+  }
+
+  .dc-keypad{ gap:4px; margin-top:2px; }
+  .dc-keypad-row{ gap:4px; }
+  .dc-key{
+    padding:8px 0;
+    font-size:.9rem;
+    border-radius:9px;
+  }
+
+  .dc-btn-primary{
+    padding:9px 10px;
+    font-size:.92rem;
+    border-radius:9px;
+  }
+
+  .dc-callout{
+    padding:7px 8px; font-size:.86rem;
+  }
+}
+
+/* Very small phones */
+@media (max-width: 360px){
+  .dosage-calculator{
+    width: 290px;              /* extra compact */
+    height: 600px;             /* ← still fixed */
+    padding: 8px;
+  }
+  .dc-screen{
+    height: 40px;
+    font-size: .86rem;
+    padding: 4px 6px;
+  }
+  .dc-input{ padding:6px 7px; font-size:.86rem; }
+  .dc-key{ padding:7px 0; font-size:.88rem; }
+  .dc-btn-primary{ padding:8px 9px; font-size:.9rem; }
 }

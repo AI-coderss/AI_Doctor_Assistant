@@ -1,16 +1,21 @@
-/* eslint-disable react-hooks/exhaustive-deps */
 /* eslint-disable no-unused-vars */
-import React, { useEffect, useMemo, useRef, useState } from "react";
-import { motion, useDragControls } from "framer-motion";
+import React, { useMemo, useRef, useState } from "react";
+import { motion } from "framer-motion";
 import "../styles/DosageCalculator.css";
 import useDosageStore from "../store/dosageStore";
 
 /**
- * Behavior:
- *  - When this component mounts (calculator opens), it calls /context-ensure
- *    with { session_id, transcript } to prefill condition/age/weight and drug suggestions.
- *  - The doctor must press "Calculate" to call dosage endpoints.
- *  - Drug can be any free text; suggestions are optional helpers.
+ * Classic calculator UI (NOT fixed). Glassmorphic, compact height,
+ * LCD-like screen where streamed text appears.
+ * Condition is extracted by the backend (no manual entry).
+ * Drug suggestions come from backend based on extracted condition.
+ *
+ * Trigger model:
+ *  - Pressing "Calculate" will:
+ *      1) read transcript from Zustand store
+ *      2) POST /context-ensure (strict extraction)
+ *      3) fill condition/age/weight/drug suggestions
+ *      4) call /calculate-dosage-(stream)-with-context
  */
 
 const API_BASE = "https://ai-doctor-assistant-backend-server.onrender.com";
@@ -30,10 +35,12 @@ const KEYPAD = [
 
 export default function DosageCalculator({ onClose }) {
   // === Store wiring ===
+  // Expecting your Zustand store to expose these (gracefully degrade if not).
   const {
     sessionId: storeSessionId,
     setSessionId,
     transcript: storeTranscript,
+    setTranscript: setStoreTranscript,
   } = useDosageStore?.() || {};
 
   // Ensure a session id (persist it in store if available)
@@ -66,11 +73,7 @@ export default function DosageCalculator({ onClose }) {
   const [activeField, setActiveField] = useState("age");
   const abortRef = useRef(null);
 
-  // === Framer Motion drag controls (drag by header only) ===
-  const dragControls = useDragControls();
-  const onHeaderPointerDown = (e) => dragControls.start(e);
-
-  // ------------- Helpers -------------
+  // ---------- Helpers ----------
   const extractJsonDict = (text) => {
     if (!text) return null;
     const cleaned = text.replace(/```json|```/gi, "").trim();
@@ -109,66 +112,53 @@ export default function DosageCalculator({ onClose }) {
     [drugSuggestions]
   );
 
-  // ------------- Fetch context ON MOUNT (open) -------------
-  useEffect(() => {
-    let cancelled = false;
+  // ---------- PREP STEP on Calculate: ensure context & fill fields ----------
+  const ensureContextAndPrefill = async () => {
+    // 1) Strict extraction
+    const r = await fetch(URLS.contextEnsure, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        session_id: sessionId,
+        transcript: transcript || null,
+      }),
+    });
+    const ctx = await r.json();
 
-    (async () => {
-      try {
-        setLoading(true);
-        // 1) Strict extraction
-        const r = await fetch(URLS.contextEnsure, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            session_id: sessionId,
-            transcript: transcript || null,
-          }),
-        });
-        const ctx = await r.json();
-        if (cancelled) return;
+    // Apply context into the UI
+    if (ctx?.condition) setCondition(ctx.condition);
+    if (ctx?.age_years != null && age === "") setAge(String(ctx.age_years));
+    if (ctx?.weight_kg != null && weight === "") setWeight(String(ctx.weight_kg));
+    if (Array.isArray(ctx?.drug_suggestions) && ctx.drug_suggestions.length) {
+      setDrugSuggestions(ctx.drug_suggestions);
+      if (!drug) setDrug(ctx.drug_suggestions[0] || "");
+    }
 
-        // Apply context into the UI
-        if (ctx?.condition) setCondition(ctx.condition);
-        if (ctx?.age_years != null && age === "") setAge(String(ctx.age_years));
-        if (ctx?.weight_kg != null && weight === "") setWeight(String(ctx.weight_kg));
-        if (Array.isArray(ctx?.drug_suggestions) && ctx.drug_suggestions.length) {
-          setDrugSuggestions(ctx.drug_suggestions);
-          if (!drug) setDrug(ctx.drug_suggestions[0] || "");
-        }
-
-        // 2) If we still have no suggestions but do have a condition, ask for them
-        const haveSuggestions = Array.isArray(ctx?.drug_suggestions) && ctx.drug_suggestions.length;
-        const cnd = (ctx?.condition || condition || "").trim();
-        if (!haveSuggestions && cnd) {
-          const sd = await fetch(URLS.suggestDrugs, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              session_id: sessionId,
-              condition: cnd,
-              transcript: transcript || null,
-            }),
-          });
-          const sj = await sd.json();
-          if (!cancelled && Array.isArray(sj?.drugs) && sj.drugs.length) {
-            setDrugSuggestions(sj.drugs);
-            if (!drug) setDrug(sj.drugs[0] || "");
-          }
-        }
-      } catch (e) {
-        // Keep UI usable if context fails
-        console.error("Context fetch failed:", e);
-      } finally {
-        if (!cancelled) setLoading(false);
+    // 2) If we still have no suggestions but do have a condition, ask for them
+    const haveSuggestions = Array.isArray(ctx?.drug_suggestions) && ctx.drug_suggestions.length;
+    const cnd = (ctx?.condition || condition || "").trim();
+    if (!haveSuggestions && cnd) {
+      const sd = await fetch(URLS.suggestDrugs, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          session_id: sessionId,
+          condition: cnd,
+          transcript: transcript || null,
+        }),
+      });
+      const sj = await sd.json();
+      if (Array.isArray(sj?.drugs) && sj.drugs.length) {
+        setDrugSuggestions(sj.drugs);
+        if (!drug) setDrug(sj.drugs[0] || "");
       }
-    })();
+    }
 
-    return () => { cancelled = true; };
-    // re-run if a new session or new transcript is applied
-  }, [sessionId, transcript]);
+    // Now we have the best-possible fields before calling dosage
+    return true;
+  };
 
-  // ------------- Validation -------------
+  // ---------- Validation ----------
   const validate = () => {
     const d = drug || (drugSuggestions?.[0] || "");
     if (!d) return "Please select or enter a valid drug.";
@@ -179,7 +169,7 @@ export default function DosageCalculator({ onClose }) {
     return null;
   };
 
-  // ------------- Calculate (button press) -------------
+  // ---------- Calculate (single trigger) ----------
   const handleCalculate = async () => {
     setError(null);
     setResults({ dosage: "", regimen: "", notes: "" });
@@ -187,9 +177,17 @@ export default function DosageCalculator({ onClose }) {
     setLoading(true);
 
     try {
+      // A) Prepare context and prefill fields from backend (strict)
+      await ensureContextAndPrefill();
+
+      // B) Validate UI inputs after prefill
       const v = validate();
       if (v) { setError(v); setLoading(false); setScreenText("Err"); return; }
 
+      // C) If drug was still empty, auto-pick first suggestion
+      if (!drug && drugSuggestions?.length) setDrug(drugSuggestions[0]);
+
+      // D) Run calculation (stream or not)
       if (useStream && "ReadableStream" in window) await runStreaming();
       else await runNonStream();
     } catch (e) {
@@ -200,7 +198,7 @@ export default function DosageCalculator({ onClose }) {
     }
   };
 
-  // ------------- Non-streaming -------------
+  // ---------- Non-streaming ----------
   const runNonStream = async () => {
     const res = await fetch(URLS.calc, {
       method: "POST",
@@ -211,7 +209,7 @@ export default function DosageCalculator({ onClose }) {
         age: age === "" ? null : Number(age),
         weight: weight === "" ? null : Number(weight),
         condition: condition || null,
-        transcript: transcript || null, // optional, harmless for context-aware endpoint
+        transcript: transcript || null,
       }),
     });
 
@@ -227,7 +225,7 @@ export default function DosageCalculator({ onClose }) {
     setScreenText(data?.dosage ? data.dosage : "0");
   };
 
-  // ------------- Streaming -------------
+  // ---------- Streaming ----------
   const runStreaming = async () => {
     setStreaming(true);
     abortRef.current = new AbortController();
@@ -242,7 +240,7 @@ export default function DosageCalculator({ onClose }) {
           age: age === "" ? null : Number(age),
           weight: weight === "" ? null : Number(weight),
           condition: condition || null,
-          transcript: transcript || null, // optional
+          transcript: transcript || null,
         }),
         signal: abortRef.current.signal,
       });
@@ -285,7 +283,7 @@ export default function DosageCalculator({ onClose }) {
     }
   };
 
-  // ------------- Keypad -------------
+  // ---------- Keypad ----------
   const onKey = (k) => {
     const setFn = activeField === "age" ? setAge : setWeight;
     const val = activeField === "age" ? age : weight;
@@ -303,10 +301,7 @@ export default function DosageCalculator({ onClose }) {
       className="dosage-calculator"
       initial={{ opacity: 0, scale: 0.98, y: 6 }}
       animate={{ opacity: 1, scale: 1, y: 0 }}
-      whileDrag={{ scale: 1.01 }}
       drag
-      dragControls={dragControls}
-      dragListener={false}
       dragMomentum={false}
       dragElastic={0.06}
       role="dialog"
@@ -314,12 +309,7 @@ export default function DosageCalculator({ onClose }) {
       aria-label="Dosage Calculator"
     >
       {/* Header (drag handle) */}
-      <div
-        className="dc-header"
-        data-drag-handle
-        onPointerDown={onHeaderPointerDown}
-        style={{ touchAction: "none" }} // enables smooth touch-drag
-      >
+      <div className="dc-header" data-drag-handle>
         <div className="dc-title">Dosage Calculator</div>
         <div className="dc-actions">
           <button

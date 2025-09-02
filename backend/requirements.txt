@@ -6,7 +6,9 @@ langchain-qdrant
 langchain-openai
 openai>=1.14.0
 tiktoken
-
+google-cloud-aiplatform
+protobuf
+requests
 # Vector DB
 faiss-cpu
 PyMuPDF

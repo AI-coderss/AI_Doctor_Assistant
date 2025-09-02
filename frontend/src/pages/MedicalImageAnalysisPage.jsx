@@ -1,5 +1,8 @@
 import React, { useCallback, useRef, useState } from "react";
 import "../styles/MedicalImageAnalysisPage.css";
+import ChatInputWidget from "../components/ChatInputWidget";
+
+const API_BASE = process.env.REACT_APP_API_BASE || ""; // e.g., "" for same origin, or "http://localhost:5000"
 
 const MedicalImageAnalysisPage = () => {
   const [file, setFile] = useState(null);
@@ -9,6 +12,10 @@ const MedicalImageAnalysisPage = () => {
   const [notes, setNotes] = useState("");
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [result, setResult] = useState(null);
+  const [sessionId, setSessionId] = useState(null);
+  const [chatLoading, setChatLoading] = useState(false);
+  const [messages, setMessages] = useState([]); // {role:"user"|"assistant", text:string}
+
   const dropRef = useRef(null);
 
   const onFilePicked = (f) => {
@@ -16,6 +23,8 @@ const MedicalImageAnalysisPage = () => {
     setFile(f);
     setPreviewUrl(URL.createObjectURL(f));
     setResult(null);
+    setSessionId(null);
+    setMessages([]);
   };
 
   const onInputChange = (e) => {
@@ -47,35 +56,27 @@ const MedicalImageAnalysisPage = () => {
     if (!file) return;
     setIsAnalyzing(true);
     setResult(null);
+    setSessionId(null);
+    setMessages([]);
 
     try {
-      // TODO: Replace with your real backend endpoint.
-      // const form = new FormData();
-      // form.append("image", file);
-      // form.append("modality", modality);
-      // form.append("body_region", bodyRegion);
-      // form.append("notes", notes);
-      // const res = await fetch("/api/medimg/analyze", { method: "POST", body: form });
-      // const data = await res.json();
+      const form = new FormData();
+      form.append("image", file);
+      form.append("modality", modality === "xray" ? "radiology" : modality);
+      form.append("body_region", bodyRegion);
+      form.append("notes", notes);
 
-      // Mocked response for now:
-      await new Promise((r) => setTimeout(r, 1200));
-      const data = {
-        findings: [
-          { label: "Possible Infiltrate", confidence: 0.82 },
-          { label: "Mild Pleural Effusion", confidence: 0.63 },
-        ],
-        impression:
-          "Pattern suggests a lower-lobe process; correlate clinically. Consider follow-up imaging if symptoms persist.",
-        meta: {
-          modality,
-          bodyRegion,
-          modelVersion: "demo-v0.1",
-          processingMs: 1180,
-        },
-      };
-
-      setResult(data);
+      const res = await fetch(`${API_BASE}/api/medimg/analyze`, {
+        method: "POST",
+        body: form,
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data?.error || "Analyze failed");
+      setResult(data.result);
+      setSessionId(data.session_id);
+      setMessages([
+        { role: "assistant", text: "Report generated. Ask any follow-up question below." },
+      ]);
     } catch (err) {
       console.error(err);
       setResult({ error: "Analysis failed. Please try again." });
@@ -84,21 +85,44 @@ const MedicalImageAnalysisPage = () => {
     }
   };
 
+  // Receive messages from ChatInputWidget
+  const onSendMessage = async ({ text }) => {
+    if (!text || !text.trim()) return;
+    if (!sessionId) {
+      setMessages((m) => [...m, { role: "assistant", text: "Please analyze an image first." }]);
+      return;
+    }
+    setMessages((m) => [...m, { role: "user", text }]);
+    setChatLoading(true);
+
+    try {
+      const res = await fetch(`${API_BASE}/api/medimg/chat`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ session_id: sessionId, text }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data?.error || "Chat failed");
+      setMessages((m) => [...m, { role: "assistant", text: data.answer }]);
+    } catch (e) {
+      console.error(e);
+      setMessages((m) => [...m, { role: "assistant", text: "Sorry—chat failed. Try again." }]);
+    } finally {
+      setChatLoading(false);
+    }
+  };
+
   return (
     <div className="mia">
       <header className="mia__header">
         <h1>Medical Image Analysis</h1>
-        <p>Upload an image (PNG/JPG) exported from DICOM or a standard medical image, choose options, and run analysis.</p>
+        <p>Upload an image (PNG/JPG), choose options, and generate a structured report. Then ask follow-up questions below.</p>
       </header>
 
       <section className="mia__panel mia__controls" aria-label="Analysis configuration">
         <div className="mia__control">
           <label htmlFor="modality">Modality</label>
-          <select
-            id="modality"
-            value={modality}
-            onChange={(e) => setModality(e.target.value)}
-          >
+          <select id="modality" value={modality} onChange={(e) => setModality(e.target.value)}>
             <option value="xray">X-ray</option>
             <option value="ct">CT</option>
             <option value="mri">MRI</option>
@@ -109,11 +133,7 @@ const MedicalImageAnalysisPage = () => {
 
         <div className="mia__control">
           <label htmlFor="region">Body Region</label>
-          <select
-            id="region"
-            value={bodyRegion}
-            onChange={(e) => setBodyRegion(e.target.value)}
-          >
+          <select id="region" value={bodyRegion} onChange={(e) => setBodyRegion(e.target.value)}>
             <option value="chest">Chest</option>
             <option value="abdomen">Abdomen</option>
             <option value="brain">Brain</option>
@@ -141,13 +161,7 @@ const MedicalImageAnalysisPage = () => {
         onDrop={onDrop}
         aria-label="Upload area"
       >
-        <input
-          id="mia-file"
-          type="file"
-          accept="image/*"
-          onChange={onInputChange}
-          hidden
-        />
+        <input id="mia-file" type="file" accept="image/*" onChange={onInputChange} hidden />
         <label htmlFor="mia-file" className="mia__dropInner">
           <span className="mia__dropTitle">Drag & drop</span> an image here, or{" "}
           <span className="mia__browse">browse</span>
@@ -159,11 +173,7 @@ const MedicalImageAnalysisPage = () => {
           <figure className="mia__previewFigure">
             <img src={previewUrl} alt="Selected medical" />
           </figure>
-          <button
-            className="mia__btn"
-            disabled={isAnalyzing}
-            onClick={analyze}
-          >
+          <button className="mia__btn" disabled={isAnalyzing} onClick={analyze}>
             {isAnalyzing ? "Analyzing…" : "Analyze"}
           </button>
         </section>
@@ -176,37 +186,36 @@ const MedicalImageAnalysisPage = () => {
           ) : (
             <>
               <div className="mia__panel">
-                <h2>Findings</h2>
-                <ul className="mia__findings">
-                  {result.findings.map((f, i) => (
-                    <li key={i} className="mia__finding">
-                      <div className="mia__findingHead">
-                        <span className="mia__findingLabel">{f.label}</span>
-                        <span className="mia__confidence">
-                          {Math.round(f.confidence * 100)}%
-                        </span>
-                      </div>
-                      <div className="mia__bar">
-                        <div
-                          className="mia__barFill"
-                          style={{ width: `${Math.max(6, Math.round(f.confidence * 100))}%` }}
-                        />
-                      </div>
-                    </li>
-                  ))}
-                </ul>
+                <h2>Structured Report (JSON)</h2>
+                <pre style={{ whiteSpace: "pre-wrap", margin: 0 }}>
+                  {JSON.stringify(result, null, 2)}
+                </pre>
               </div>
 
               <div className="mia__panel">
-                <h2>Impression</h2>
-                <p className="mia__impression">{result.impression}</p>
-              </div>
+                <h2>Follow-up Q&A</h2>
+                <div style={{ display: "flex", flexDirection: "column", gap: "8px", marginBottom: 12 }}>
+                  {messages.map((m, i) => (
+                    <div key={i} style={{
+                      alignSelf: m.role === "user" ? "flex-end" : "flex-start",
+                      background: m.role === "user" ? "rgba(79,70,229,0.14)" : "rgba(15,23,42,0.06)",
+                      borderRadius: 12,
+                      padding: "10px 12px",
+                      maxWidth: "min(680px, 100%)",
+                      whiteSpace: "pre-wrap"
+                    }}>
+                      <b>{m.role === "user" ? "You" : "Assistant"}:</b> {m.text}
+                    </div>
+                  ))}
+                  {chatLoading && (
+                    <div style={{ fontStyle: "italic", color: "var(--mia-muted)" }}>
+                      Thinking…
+                    </div>
+                  )}
+                </div>
 
-              <div className="mia__meta">
-                <span>Modality: <b>{result.meta.modality.toUpperCase()}</b></span>
-                <span>Region: <b>{result.meta.bodyRegion}</b></span>
-                <span>Model: <b>{result.meta.modelVersion}</b></span>
-                <span>Time: <b>{result.meta.processingMs} ms</b></span>
+                {/* Chat input */}
+                <ChatInputWidget onSendMessage={onSendMessage} />
               </div>
             </>
           )}
@@ -217,3 +226,4 @@ const MedicalImageAnalysisPage = () => {
 };
 
 export default MedicalImageAnalysisPage;
+

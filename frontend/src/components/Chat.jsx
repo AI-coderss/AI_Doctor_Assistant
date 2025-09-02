@@ -12,6 +12,7 @@ import { encodeWAV } from "./pcmToWav.js";
 import useAudioStore from "../store/audioStore.js";
 import { startVolumeMonitoring } from "./audioLevelAnalyzer";
 import VoiceRecorderPanel from "./VoiceRecorderPanel";
+import CalculateDosageButton from "./CalculateDosageButton.jsx";
 
 let localStream;
 
@@ -559,6 +560,7 @@ const Chat = () => {
         /* ✅ send transcript to voice assistant context (no UI rendering of transcript) */
         onTranscriptReady={handleAssistantContextTranscript}
       />
+      <CalculateDosageButton />
     </div>
     
   );

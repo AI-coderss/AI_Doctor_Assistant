@@ -1,5 +1,6 @@
 import os
 import tempfile
+import ast
 from uuid import uuid4
 from datetime import datetime
 import json
@@ -74,6 +75,80 @@ def get_conversational_rag_chain():
   return create_retrieval_chain(retriever_chain, create_stuff_documents_chain(llm, prompt))
 
 conversation_rag_chain = get_conversational_rag_chain()
+# ===== Helpers for dosage JSON handling =====
+def _validate_dosage_payload(payload: dict):
+    required = ["drug", "age", "weight", "condition"]
+    for k in required:
+        if k not in payload:
+            return f"Missing field: {k}"
+    try:
+        age = float(payload["age"])
+        weight = float(payload["weight"])
+        if age <= 0 or weight <= 0:
+            return "Age and weight must be positive numbers."
+    except Exception:
+        return "Age and weight must be numbers."
+    if not str(payload["drug"]).strip():
+        return "Invalid drug."
+    if not str(payload["condition"]).strip():
+        return "Invalid condition."
+    return None
+
+
+def _extract_json_dict(text: str):
+    """
+    Parse model output that may be:
+      - pure JSON
+      - fenced ```json ... ```
+      - first JSON-looking block in the text
+      - python-literal-compatible (last resort)
+    """
+    if not text:
+        return None
+
+    cleaned = re.sub(r"```json|```", "", text, flags=re.IGNORECASE).strip()
+
+    # Try strict JSON first
+    try:
+        return json.loads(cleaned)
+    except Exception:
+        pass
+
+    # Fallback: first {...} block
+    m = re.search(r"\{[\s\S]*\}", cleaned)
+    if m:
+        candidate = m.group(0)
+        try:
+            return json.loads(candidate)
+        except Exception:
+            try:
+                obj = ast.literal_eval(candidate)
+                if isinstance(obj, dict):
+                    return obj
+            except Exception:
+                pass
+    return None
+
+
+def _build_dosage_prompt(drug, age, weight, condition):
+    """
+    Builds the user message sent to your RAG chain.
+    Your global system prompt (engineeredprompt) remains unchanged.
+    """
+    return (
+        "CLINICAL DOSAGE CALCULATION REQUEST (ENGLISH ONLY).\n"
+        "Use ONLY knowledge retrieved by the RAG chain (authoritative pharmaceutical books/guidelines). "
+        "Consider adult vs pediatric dosing, renal/hepatic adjustments, and indication.\n\n"
+        "Return STRICT JSON with EXACT keys: dosage, regimen, notes. No extra text.\n"
+        "Schema:\n"
+        "{\n"
+        '  "dosage": "e.g., 500 mg every 8 hours",\n'
+        '  "regimen": "e.g., Oral for 7 days",\n'
+        '  "notes": "safety/monitoring/adjustments"\n'
+        "}\n\n"
+        f"Patient:\n- Drug: {drug}\n- Age: {age} years\n- Weight: {weight} kg\n- Condition: {condition}\n"
+    )
+
 
 # ====== NEW: /transcribe ======
 @app.route("/transcribe", methods=["POST"])
@@ -408,6 +483,103 @@ def generate_followups():
     except Exception as e:
         print(f"Error generating followups: {e}")
         return jsonify({"followups": []})
+# ===== NEW: /calculate-dosage-stream =====
+@app.route("/calculate-dosage-stream", methods=["POST"])
+def calculate_dosage_stream():
+    data = request.get_json() or {}
+    session_id = data.get("session_id", str(uuid4()))
+    err = _validate_dosage_payload(data)
+    if err:
+        return jsonify({"error": err}), 400
+
+    if session_id not in chat_sessions:
+        chat_sessions[session_id] = []
+
+    drug = str(data["drug"]).strip()
+    age = float(data["age"])
+    weight = float(data["weight"])
+    condition = str(data["condition"]).strip()
+
+    prompt = _build_dosage_prompt(drug, age, weight, condition)
+
+    def generate():
+        acc = ""
+        try:
+            for chunk in conversation_rag_chain.stream(
+                {"chat_history": chat_sessions[session_id], "input": prompt}
+            ):
+                token = chunk.get("answer", "")
+                acc += token
+                yield token
+        except Exception as e:
+            yield f'\n{{"error":"Vector error: {str(e)}"}}'
+
+        chat_sessions[session_id].append({
+            "role": "user",
+            "content": f"[Dosage Request] {drug} / {age}y / {weight}kg / {condition}"
+        })
+        chat_sessions[session_id].append({"role": "assistant", "content": acc})
+
+    return Response(stream_with_context(generate()), content_type="text/plain")
+# ===== NEW: /calculate-dosage =====
+@app.route("/calculate-dosage", methods=["POST"])
+def calculate_dosage():
+    data = request.get_json() or {}
+    session_id = data.get("session_id", str(uuid4()))
+    err = _validate_dosage_payload(data)
+    if err:
+        return jsonify({"error": err}), 400
+
+    if session_id not in chat_sessions:
+        chat_sessions[session_id] = []
+
+    drug = str(data["drug"]).strip()
+    age = float(data["age"])
+    weight = float(data["weight"])
+    condition = str(data["condition"]).strip()
+
+    prompt = _build_dosage_prompt(drug, age, weight, condition)
+
+    try:
+        # Use your existing LangChain RAG chain
+        response = conversation_rag_chain.invoke(
+            {"chat_history": chat_sessions[session_id], "input": prompt}
+        )
+        raw_answer = (response.get("answer") or "").strip()
+        parsed = _extract_json_dict(raw_answer)
+
+        if not parsed or not isinstance(parsed, dict):
+            return jsonify({
+                "error": "The model did not return valid JSON.",
+                "raw": raw_answer[:2000]
+            }), 502
+
+        dosage  = str(parsed.get("dosage", "")).strip()
+        regimen = str(parsed.get("regimen", "")).strip()
+        notes   = str(parsed.get("notes", "")).strip()
+        if not (dosage and regimen):
+            return jsonify({
+                "error": "Incomplete dosage JSON from model.",
+                "raw": raw_answer[:2000]
+            }), 502
+
+        # Persist to history (optional, consistent with your pattern)
+        chat_sessions[session_id].append({
+            "role": "user",
+            "content": f"[Dosage Request] {drug} / {age}y / {weight}kg / {condition}"
+        })
+        chat_sessions[session_id].append({"role": "assistant", "content": raw_answer})
+
+        return jsonify({
+            "dosage": dosage,
+            "regimen": regimen,
+            "notes": notes,
+            "session_id": session_id
+        }), 200
+
+    except Exception as e:
+        return jsonify({"error": f"Server error: {str(e)}"}), 500
+
 
 if __name__ == "__main__":
     app.run(host="127.0.0.1", port=5050, debug=True)

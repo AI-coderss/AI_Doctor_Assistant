@@ -4,6 +4,8 @@
 /* eslint-disable no-unused-vars */
 /* eslint-disable react-hooks/exhaustive-deps */
 /* eslint-disable no-unused-vars */
+/* eslint-disable react-hooks/exhaustive-deps */
+/* eslint-disable no-unused-vars */
 import React, { useEffect, useRef, useState } from "react";
 import SendIcon from "@mui/icons-material/Send";
 import MicIcon from "@mui/icons-material/Mic";
@@ -19,13 +21,14 @@ const SDP_URL = `${API_BASE}/api/rtc-transcribe-connect`;
  *  - "chat": compact textarea + round button (bottom center)
  *  - "voice": Siri-like overlay with mic orb + canvas visualizer
  *
- * Updated behavior (manual hold-to-stop):
+ * Behavior:
  *  - Live transcript is written only to the Zustand store (no text in overlay).
  *  - The RTC session STAYS OPEN while you are speaking; it will NOT auto-stop
  *    on interim `*.completed` events from the server.
- *  - The session stops ONLY when the user presses the mic again (manual stop).
- *  - On manual stop, we auto-send the FINAL accumulated text to parent via
- *    onSendMessage({ text, skipEcho: true }) and return to chat mode.
+ *  - An on-device VAD (RMS-based) detects sustained silence and FINALIZES the
+ *    current utterance automatically, sending it via onSendMessage({ skipEcho:true }).
+ *  - After sending, we reset the store for the next utterance and KEEP LISTENING.
+ *  - You can still press the mic again to stop the session entirely.
  */
 const ChatInputWidget = ({ onSendMessage }) => {
   // UI
@@ -54,7 +57,7 @@ const ChatInputWidget = ({ onSendMessage }) => {
   };
   useEffect(() => adjustTextAreaHeight(), []);
 
-  // ====== Voice visualization (AudioContext + Analyser + Canvas) ======
+  // ====== Voice visualization (AudioContext + Analyser + Canvas) + VAD ======
   const audioCtxRef = useRef(null);
   const analyserRef = useRef(null);
   const vizRAF = useRef(null);
@@ -62,10 +65,19 @@ const ChatInputWidget = ({ onSendMessage }) => {
   const canvasRef = useRef(null);
   const freqsRef = useRef(null);
 
-  // Reduced visualizer look
+  // VAD controls
+  const lastVoiceTsRef = useRef(0);
+  const speakingRef = useRef(false);
+  const sentThisUtteranceRef = useRef(false); // prevents duplicate sends per utterance
+
+  // Tunables (adjust as needed)
+  const VAD_THRESHOLD_RMS = 0.03;   // speech if RMS >= this
+  const VAD_MIN_SILENCE_MS = 1100;  // finalize if silence sustained this long
+  const UTTERANCE_MIN_CHARS = 4;    // don't send super-short noise
+
   const vizOptsRef = useRef({
     smoothing: 0.6,
-    fft: 9,                 // 512 bins
+    fft: 9,
     minDecibels: -75,
     amp: 0.75,
     width: 32,
@@ -78,6 +90,17 @@ const ChatInputWidget = ({ onSendMessage }) => {
     color2: [24, 137, 218],
     color3: [41, 200, 192],
   });
+
+  const finalizeAndSendUtterance = async () => {
+    const finalText = String(useLiveTranscriptStore.getState().text || "").trim();
+    if (finalText.length >= UTTERANCE_MIN_CHARS) {
+      onSendMessage?.({ text: finalText, skipEcho: true }); // avoid duplicate "me" bubbles
+    }
+    // Prepare for next utterance without closing RTC
+    transcriptionRef.current = "";
+    sentThisUtteranceRef.current = true;   // block repeated sends until speech resumes
+    liveStore.newUtterance();              // reset text & bump utterance sequence
+  };
 
   const startVisualizer = (mediaStream) => {
     try {
@@ -121,7 +144,7 @@ const ChatInputWidget = ({ onSendMessage }) => {
         ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
         ctx.clearRect(0, 0, W, H);
 
-        // Orb level (time domain RMS)
+        // Orb level + RMS for VAD
         analyser.getByteTimeDomainData(timeBuf);
         let sum = 0;
         for (let i = 0; i < timeBuf.length; i++) {
@@ -132,7 +155,33 @@ const ChatInputWidget = ({ onSendMessage }) => {
         const level = Math.min(1, rms * 2);
         if (orbRef.current) orbRef.current.style.setProperty("--level", String(level));
 
-        // Frequency curves
+        // === VAD logic ===
+        const now = performance.now();
+        if (rms >= VAD_THRESHOLD_RMS) {
+          // voice detected
+          speakingRef.current = true;
+          lastVoiceTsRef.current = now;
+          if (sentThisUtteranceRef.current) {
+            // new utterance is starting (after a send)
+            sentThisUtteranceRef.current = false;
+          }
+        } else {
+          // possibly in silence
+          const msSinceVoice = now - lastVoiceTsRef.current;
+          if (
+            speakingRef.current &&
+            !sentThisUtteranceRef.current &&
+            msSinceVoice >= VAD_MIN_SILENCE_MS &&
+            useLiveTranscriptStore.getState().text.trim().length >= UTTERANCE_MIN_CHARS &&
+            state === "recording"
+          ) {
+            // sustained silence after speaking -> finalize utterance
+            finalizeAndSendUtterance();
+            speakingRef.current = false; // reset; next speech will start a new utterance
+          }
+        }
+
+        // Frequency curves (visual only)
         const freqs = freqsRef.current;
         analyser.getByteFrequencyData(freqs);
 
@@ -212,7 +261,7 @@ const ChatInputWidget = ({ onSendMessage }) => {
       window.addEventListener("resize", onResize);
       onResize();
     } catch (e) {
-      console.warn("[voice-ui] Visualizer unavailable:", e);
+      console.warn("[voice-ui] Visualizer/VAD unavailable:", e);
     }
   };
 
@@ -248,23 +297,20 @@ const ChatInputWidget = ({ onSendMessage }) => {
       }, 3000);
     });
 
-  // Manual stop (user-initiated): send final text, teardown, return to chat
+  // Manual stop (user presses mic again): send any residual text and teardown
   const manualStopAndSend = async () => {
-    // Gather final text from store or local ref
-    const text = String(
-      useLiveTranscriptStore.getState().text || transcriptionRef.current || ""
-    ).trim();
-
+    const text = String(useLiveTranscriptStore.getState().text || "").trim();
     await teardownRTC();
-    useLiveTranscriptStore.getState().stop(); // sets isStreaming=false (Chat.jsx finalizes bubble)
+    useLiveTranscriptStore.getState().endSession(); // active=false
     setMode("chat");
     setState("idle");
 
     if (text) {
-      // skipEcho prevents duplicating the already-shown live "me" bubble
       onSendMessage?.({ text, skipEcho: true });
-      transcriptionRef.current = "";
     }
+    transcriptionRef.current = "";
+    speakingRef.current = false;
+    sentThisUtteranceRef.current = false;
   };
 
   // Realtime message handler — writes to the store for Chat.jsx
@@ -282,8 +328,7 @@ const ChatInputWidget = ({ onSendMessage }) => {
         }
       }
 
-      // Completed utterances → update full text but DO NOT STOP or AUTOSEND.
-      // We keep the RTC session alive until the user manually stops it.
+      // Completed utterances → merge into local rolling transcript (no stop)
       if (
         msg.type === "input_audio_transcription.completed" ||
         msg.type === "transcription.completed" ||
@@ -292,26 +337,25 @@ const ChatInputWidget = ({ onSendMessage }) => {
         const t = msg.transcript?.text || msg.transcript || msg.text || "";
         if (t) {
           transcriptionRef.current = (transcriptionRef.current + " " + t).trim();
+          // Keep the UI showing the most complete text so far
           liveStore.setFull(transcriptionRef.current);
         }
       }
-
-      // Optional: if your backend sends an explicit "session.ended", ignore it here
-      // so the session stays up until user taps to stop.
-
     } catch {
       /* ignore non-JSON frames */
     }
   };
 
-  // Begin voice capture + realtime (stays active until user stops)
+  // Begin voice capture + realtime (stays active until manual stop; VAD auto-sends per utterance)
   const startLiveTranscription = async () => {
     if (isBusy) return;
 
     setMode("voice");
     setState("connecting");
     transcriptionRef.current = "";
-    liveStore.start(); // isStreaming=true, text=""
+    speakingRef.current = false;
+    sentThisUtteranceRef.current = false;
+    liveStore.startSession(); // active=true, text="", utteranceSeq reset/incremented
 
     try {
       const pc = new RTCPeerConnection({
@@ -335,7 +379,7 @@ const ChatInputWidget = ({ onSendMessage }) => {
       });
       streamRef.current = stream;
 
-      // Visualizer
+      // Visualizer + VAD loop
       startVisualizer(stream);
 
       // Sender
@@ -360,10 +404,10 @@ const ChatInputWidget = ({ onSendMessage }) => {
       }
 
       await pc.setRemoteDescription({ type: "answer", sdp: body });
-      setState("recording"); // stay recording until user taps to stop
+      setState("recording"); // stay recording; VAD handles utterance boundaries
     } catch (err) {
       await teardownRTC();
-      liveStore.stop();
+      liveStore.endSession();
       setMode("chat");
       setState("idle");
     }
@@ -395,7 +439,7 @@ const ChatInputWidget = ({ onSendMessage }) => {
     if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault();
       if (mode === "voice" && isBusy) {
-        // In voice mode, Enter acts as stop → manual finalize + send
+        // In voice mode, Enter acts as manual stop → send residual text
         await stopOnly();
       } else if (inputText.trim()) {
         onSendMessage?.({ text: inputText.trim() });
@@ -413,7 +457,7 @@ const ChatInputWidget = ({ onSendMessage }) => {
         adjustTextAreaHeight(true);
         return;
       }
-      await startLiveTranscription(); // start and STAY recording
+      await startLiveTranscription(); // start and STAY recording; VAD will auto-send utterances
     } else {
       // voice mode: tap → manual stop (finalize + send)
       await stopOnly();
@@ -499,6 +543,7 @@ const ChatInputWidget = ({ onSendMessage }) => {
 };
 
 export default ChatInputWidget;
+
 
 
 

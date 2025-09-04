@@ -1,3 +1,6 @@
+/* eslint-disable no-unused-vars */
+/* eslint-disable no-useless-concat */
+/* eslint-disable no-loop-func */
 import React, { useState, useEffect, useRef } from "react";
 import ChatInputWidget from "./ChatInputWidget.jsx";
 import ReactMarkdown from "react-markdown";
@@ -13,6 +16,8 @@ import useAudioStore from "../store/audioStore.js";
 import { startVolumeMonitoring } from "./audioLevelAnalyzer";
 import VoiceRecorderPanel from "./VoiceRecorderPanel";
 
+// NEW: live transcript store
+import useLiveTranscriptStore from "../store/useLiveTranscriptStore";
 
 let localStream;
 
@@ -30,12 +35,10 @@ const Chat = () => {
   const [peerConnection, setPeerConnection] = useState(null);
   const [dataChannel, setDataChannel] = useState(null);
   const [connectionStatus, setConnectionStatus] = useState("idle");
-  // eslint-disable-next-line no-unused-vars
   const [audioWave, setAudioWave] = useState(false);
   const audioContextRef = useRef(null);
   const audioSourceRef = useRef(null);
   const analyserRef = useRef(null);
-  // eslint-disable-next-line no-unused-vars
   const { audioUrl, setAudioUrl, stopAudio } = useAudioStore();
   const scrollAnchorRef = useRef(null);
   const audioPlayerRef = useRef(null);
@@ -45,12 +48,19 @@ const Chat = () => {
     return id;
   });
 
+  // === NEW: subscribe to live transcript store ===
+  const liveText = useLiveTranscriptStore((s) => s.text);
+  const isStreaming = useLiveTranscriptStore((s) => s.isStreaming);
+
+  // Index of the live "me" bubble in chats (or null)
+  const liveIdxRef = useRef(null);
+
+  // auto-scroll
   useEffect(() => {
     scrollAnchorRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [chats]);
+  }, [chats, liveText, isStreaming]);
 
   useEffect(() => {
-    // fetch("http://localhost:5050/suggestions")
     fetch("https://ai-doctor-assistant-backend-server.onrender.com/suggestions")
       .then((res) => res.json())
       .then((data) => setSuggestedQuestions(data.suggested_questions || []))
@@ -69,14 +79,43 @@ const Chat = () => {
       setIsMicActive(false);
     };
   }, [dataChannel, micStream, peerConnection]);
+
   const { audioScale } = useAudioForVisualizerStore();
-  const startWebRTC = async () => {
-    if (peerConnection || connectionStatus === "connecting") {
-      console.warn("⚠️ Already connecting or connected.");
-      return;
+
+  // === NEW: reflect store → chat bubbles in real time ===
+  useEffect(() => {
+    // streaming started: open a live "me" bubble if not already present
+    if (isStreaming && liveIdxRef.current === null) {
+      setChats((prev) => [...prev, { msg: "", who: "me", live: true }]);
+      liveIdxRef.current = chats.length; // position at new element
     }
 
-    //console.log("🔌 Initializing WebRTC connection...");
+    // update the live bubble text
+    if (isStreaming && liveIdxRef.current !== null) {
+      setChats((prev) => {
+        const arr = [...prev];
+        arr[liveIdxRef.current] = { ...arr[liveIdxRef.current], msg: liveText || "" };
+        return arr;
+      });
+    }
+
+    // streaming stopped: finalize (keep the bubble; remove live flag)
+    if (!isStreaming && liveIdxRef.current !== null) {
+      setChats((prev) => {
+        const arr = [...prev];
+        const idx = liveIdxRef.current;
+        if (arr[idx]) arr[idx] = { msg: liveText || arr[idx].msg || "", who: "me" };
+        return arr;
+      });
+      liveIdxRef.current = null;
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isStreaming, liveText]);
+
+  // ===== Your existing WebRTC (voice assistant) =====
+  const startWebRTC = async () => {
+    if (peerConnection || connectionStatus === "connecting") return;
+
     setConnectionStatus("connecting");
     setIsMicActive(false);
 
@@ -85,8 +124,7 @@ const Chat = () => {
       const { setAudioScale } = useAudioForVisualizerStore.getState();
       startVolumeMonitoring(stream, setAudioScale);
 
-      localStream = stream; // Prevent garbage collection
-
+      localStream = stream;
       stream.getAudioTracks().forEach((track) => (track.enabled = true));
 
       const pc = new RTCPeerConnection({
@@ -99,48 +137,29 @@ const Chat = () => {
 
         audioPlayerRef.current.srcObject = stream;
         setAudioUrl(stream);
-        audioPlayerRef.current
-          .play()
-          .catch((err) => console.error("live stream play failed:", err));
+        audioPlayerRef.current.play().catch((err) => console.error("live stream play failed:", err));
       };
 
       pc.oniceconnectionstatechange = () => {
         if (pc.iceConnectionState === "failed") {
-          console.error("🚫 ICE connection failed.");
+          console.error("ICE connection failed.");
           pc.close();
           setConnectionStatus("error");
         }
       };
 
-      pc.onicecandidateerror = (e) => {
-        console.error("🚨 ICE candidate error:", e);
-      };
-
-      pc.onnegotiationneeded = (event) => {
-        //console.log("Negotiation needed:", event);
-      };
-
+      pc.onicecandidateerror = (e) => console.error("ICE candidate error:", e);
+      pc.onnegotiationneeded = () => {};
       pc.onconnectionstatechange = () => {
-        // //console.log("🔁 Connection state:", pc.connectionState);
-        if (
-          pc.connectionState === "closed" ||
-          pc.connectionState === "failed"
-        ) {
-          // console.error("🚫 Connection closed unexpectedly. ICE state:", pc.iceConnectionState, "Signaling state:", pc.signalingState);
+        if (pc.connectionState === "closed" || pc.connectionState === "failed") {
           setConnectionStatus("error");
           setIsMicActive(false);
         }
       };
 
-      if (!localStream) {
-        console.error("🚫 localStream is undefined when adding track.");
-      }
-      // 2. ADD TRACKS PROPERLY USING addTrack INSTEAD OF addTransceiver and add after creating channel
-      stream.getAudioTracks().forEach((track) => {
-        // pc.addTransceiver(track, { direction: "sendrecv" });
-        // Use addTrack instead of addTransceiver
-        return pc.addTrack(track, localStream);
-      });
+      if (!localStream) console.error("localStream undefined when adding track.");
+
+      stream.getAudioTracks().forEach((track) => pc.addTrack(track, localStream));
 
       const channel = pc.createDataChannel("response");
 
@@ -158,26 +177,19 @@ const Chat = () => {
           })
         );
         channel.send(JSON.stringify({ type: "response.create" }));
-        micStream?.getAudioTracks().forEach((track) => {
-          track.enabled = true;
-          //console.log("🎤 Microphone track enabled:", track.label);
-        });
+        micStream?.getAudioTracks().forEach((track) => (track.enabled = true));
       };
 
       channel.onclose = () => {
-        //console.log("🔌 Data channel closed.");
         if (pc.connectionState !== "closed") {
-          console.warn(
-            "⚠️ Data channel closed unexpectedly. Peer connection state:",
-            pc.connectionState
-          );
+          console.warn("Data channel closed unexpectedly.", pc.connectionState);
         }
         setConnectionStatus("idle");
         setIsMicActive(false);
       };
 
       channel.onerror = (error) => {
-        console.error("❌ Data channel error:", error);
+        console.error("Data channel error:", error);
         setConnectionStatus("error");
         setIsMicActive(false);
       };
@@ -185,19 +197,16 @@ const Chat = () => {
       let pcmBuffer = new ArrayBuffer(0);
 
       channel.onmessage = async (event) => {
-        //console.log("📨 Data channel message received:", event.data);
         const msg = JSON.parse(event.data);
         switch (msg.type) {
-          case "response.audio.delta":
-            const chunk = Uint8Array.from(atob(msg.delta), (c) =>
-              c.charCodeAt(0)
-            );
+          case "response.audio.delta": {
+            const chunk = Uint8Array.from(atob(msg.delta), (c) => c.charCodeAt(0));
             const tmp = new Uint8Array(pcmBuffer.byteLength + chunk.byteLength);
             tmp.set(new Uint8Array(pcmBuffer), 0);
             tmp.set(chunk, pcmBuffer.byteLength);
             pcmBuffer = tmp.buffer;
             break;
-
+          }
           case "response.audio.done": {
             const wav = encodeWAV(pcmBuffer, 24000, 1);
             const blob = new Blob([wav], { type: "audio/wav" });
@@ -208,18 +217,14 @@ const Chat = () => {
             el.volume = 1;
             el.muted = false;
             if (!audioContextRef.current) {
-              audioContextRef.current = new (window.AudioContext ||
-                window.webkitAudioContext)();
+              audioContextRef.current = new (window.AudioContext || window.webkitAudioContext)();
             }
 
             if (!audioSourceRef.current) {
-              audioSourceRef.current =
-                audioContextRef.current.createMediaElementSource(el);
-
+              audioSourceRef.current = audioContextRef.current.createMediaElementSource(el);
               analyserRef.current = audioContextRef.current.createAnalyser();
               audioSourceRef.current.connect(analyserRef.current);
               analyserRef.current.connect(audioContextRef.current.destination);
-
               analyserRef.current.smoothingTimeConstant = 0.8;
               analyserRef.current.fftSize = 256;
             }
@@ -230,65 +235,44 @@ const Chat = () => {
 
             const monitorBotVolume = () => {
               analyser.getByteFrequencyData(dataArray);
-              const avg =
-                dataArray.reduce((sum, val) => sum + val, 0) / dataArray.length;
+              const avg = dataArray.reduce((sum, val) => sum + val, 0) / dataArray.length;
               const normalized = Math.max(0.5, Math.min(2, avg / 50));
               setAudioScale(normalized);
 
-              if (!el.paused && !el.ended) {
-                requestAnimationFrame(monitorBotVolume);
-              }
+              if (!el.paused && !el.ended) requestAnimationFrame(monitorBotVolume);
             };
 
             monitorBotVolume();
             setAudioWave(true);
-            el.play()
-              .then(() => console.log("✅ play promise resolved"))
-              .catch((err) =>
-                console.error("❌ play error:", err.name, err.message)
-              );
-
-            pcmBuffer = new ArrayBuffer(0); // reset for next turn
+            el.play().catch((err) => console.error("play error:", err.name, err.message));
+            pcmBuffer = new ArrayBuffer(0);
             break;
           }
-
           case "response.audio_transcript.delta":
-            //console.log("📝 Transcript streaming update received.");
             break;
           case "output_audio_buffer.stopped":
-            //console.log("🛑 Audio buffer stopped. Clearing audio...");
             setAudioWave(false);
             stopAudio();
             break;
           default:
-            console.warn("❓ Unhandled message type:", msg.type);
+            console.warn("Unhandled message type:", msg.type);
         }
       };
 
-      // 3. CREATE OFFER AFTER SETTING UP ALL TRACKS AND HANDLERS
+      // Offer
       let offer;
       try {
-        // //console.log("📡 Creating offer...");
-        offer = await pc.createOffer({
-          offerToReceiveAudio: true,
-          offerToReceiveVideo: false,
-        });
-
-        // Modify SDP to prioritize Opus
+        offer = await pc.createOffer({ offerToReceiveAudio: true, offerToReceiveVideo: false });
         const modifiedOffer = {
           ...offer,
           sdp: offer.sdp.replace(
             /a=rtpmap:\d+ opus\/48000\/2/g,
-            "a=rtpmap:111 opus/48000/2\r\n" +
-              "a=fmtp:111 minptime=10;useinbandfec=1"
+            "a=rtpmap:111 opus/48000/2\r\n" + "a=fmtp:111 minptime=10;useinbandfec=1"
           ),
         };
-        // //console.log("📝 Offer created:", offer.type);
-
         await pc.setLocalDescription(modifiedOffer);
-        // //console.log("📤 Local SDP offer set:", pc.signalingState);
       } catch (e) {
-        console.error("❌ Failed to create/set offer:", e);
+        console.error("Failed to create/set offer:", e);
         pc.close();
         setPeerConnection(null);
         setDataChannel(null);
@@ -299,30 +283,21 @@ const Chat = () => {
         setConnectionStatus("error");
         throw e;
       }
-      // //console.log("📨 Sending offer to signaling server...");
+
       const res = await fetch(
-        // ✅ pass the session_id so backend merges transcript context
         `https://ai-doctor-assistant-voice-mode-webrtc.onrender.com/api/rtc-connect?session_id=${sessionId}`,
         {
           method: "POST",
-          headers: {
-            "Content-Type": "application/sdp",
-            "X-Session-Id": sessionId, // also supply via header (backend supports both)
-          },
+          headers: { "Content-Type": "application/sdp", "X-Session-Id": sessionId },
           body: offer.sdp,
         }
       );
 
-      if (!res.ok) {
-        throw new Error(`❌ Server responded with status ${res.status}`);
-      }
-
+      if (!res.ok) throw new Error(`Server responded with status ${res.status}`);
       const answer = await res.text();
-    
       await pc.setRemoteDescription({ type: "answer", sdp: answer });
-     
     } catch (error) {
-      console.error("🚫 WebRTC setup failed:", error);
+      console.error("WebRTC setup failed:", error);
       setConnectionStatus("error");
       setIsMicActive(false);
     }
@@ -336,9 +311,7 @@ const Chat = () => {
     if (connectionStatus === "connected" && localStream) {
       const newMicState = !isMicActive;
       setIsMicActive(newMicState);
-      localStream
-        .getAudioTracks()
-        .forEach((track) => (track.enabled = newMicState));
+      localStream.getAudioTracks().forEach((track) => (track.enabled = newMicState));
     }
   };
 
@@ -353,7 +326,7 @@ const Chat = () => {
   const handleNewMessage = async ({ text }) => {
     if (!text) return;
     setChats((prev) => [...prev, { msg: text, who: "me" }]);
-    setSuggestedQuestions((prev) => prev.filter((q) => q !== text)); // 🧼 remove from list
+    setSuggestedQuestions((prev) => prev.filter((q) => q !== text));
 
     const res = await fetch("https://ai-doctor-assistant-backend-server.onrender.com/stream", {
       method: "POST",
@@ -362,10 +335,7 @@ const Chat = () => {
     });
 
     if (!res.ok || !res.body) {
-      setChats((prev) => [
-        ...prev,
-        { msg: "Something went wrong.", who: "bot" },
-      ]);
+      setChats((prev) => [...prev, { msg: "Something went wrong.", who: "bot" }]);
       return;
     }
 
@@ -385,7 +355,6 @@ const Chat = () => {
       }
 
       message += chunk;
-      // eslint-disable-next-line no-loop-func
       setChats((prev) => {
         const updated = [...prev];
         updated[updated.length - 1].msg = message;
@@ -420,21 +389,16 @@ const Chat = () => {
     );
   };
 
-  // === Minimal glue for VoiceRecorderPanel streaming second opinion ===
+  // === VoiceRecorderPanel (unchanged) ===
   const opinionBufferRef = useRef("");
   const opinionStreamingRef = useRef(false);
   const handleOpinionStream = (chunkOrFull, done = false) => {
-    // ❗ Fix duplication: the panel sends streaming chunks,
-    // and at the end also sends the FULL aggregated text with done=true.
-    // We must IGNORE the payload when done===true to avoid doubling content.
     if (done) {
       opinionStreamingRef.current = false;
-      return; // <-- do not append the final aggregated payload again
+      return;
     }
-
     const chunk = String(chunkOrFull || "");
     if (!opinionStreamingRef.current) {
-      // first streaming chunk: open a new bot message
       opinionStreamingRef.current = true;
       opinionBufferRef.current = "";
       setChats((prev) => [...prev, { msg: "", who: "bot" }]);
@@ -447,7 +411,6 @@ const Chat = () => {
     });
   };
 
-  // === NEW: get transcript from panel and store it for the Voice Assistant session
   const handleAssistantContextTranscript = async (transcript) => {
     try {
       if (!transcript || !transcript.trim()) return;
@@ -456,7 +419,6 @@ const Chat = () => {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ session_id: sessionId, transcript }),
       });
-      // no UI render of transcript — just priming the voice assistant context
     } catch (e) {
       console.error("Failed to send transcript context for voice assistant:", e);
     }
@@ -481,11 +443,6 @@ const Chat = () => {
             <div className="connection-status connecting">🔄 Connecting...</div>
           )}
           <div>
-            {/* {audioWave && ( */}
-            {/* <figure className="avatar">
-              <img src="/av.gif" alt="avatar" />
-            </figure> */}
-            {/* )} */}
             <button
               className={`mic-icon-btn ${isMicActive ? "active" : ""}`}
               onClick={toggleMic}
@@ -493,10 +450,7 @@ const Chat = () => {
             >
               <FaMicrophoneAlt />
             </button>
-            <button
-              className="closed-btn"
-              onClick={() => setIsVoiceMode(false)}
-            >
+            <button className="closed-btn" onClick={() => setIsVoiceMode(false)}>
               ✖
             </button>
           </div>
@@ -510,7 +464,7 @@ const Chat = () => {
       <audio ref={audioPlayerRef} playsInline style={{ display: "none" }} />
       <div className="chat-content">
         {chats.map((chat, index) => (
-          <div key={index} className={`chat-message ${chat.who}`}>
+          <div key={index} className={`chat-message ${chat.who} ${chat.live ? "live" : ""}`}>
             {chat.who === "bot" && (
               <figure className="avatar">
                 <img src="/av.gif" alt="avatar" />
@@ -549,7 +503,6 @@ const Chat = () => {
         🎙️
       </button>
 
-      {/* === Voice Recorder Panel — no transcript shown, streams opinion into chat === */}
       <VoiceRecorderPanel
         transcribeUrl="https://ai-doctor-assistant-backend-server.onrender.com/transcribe"
         opinionUrl="https://ai-doctor-assistant-backend-server.onrender.com/case-second-opinion-stream"
@@ -557,24 +510,20 @@ const Chat = () => {
         anchorLeft={72}
         anchorBottom={96}
         onOpinion={handleOpinionStream}
-        /* ✅ send transcript to voice assistant context (no UI rendering of transcript) */
         onTranscriptReady={handleAssistantContextTranscript}
       />
     </div>
-    
   );
 };
 
 export default Chat;
 
+/* ==== Helpers (unchanged) ==== */
 const CollapsibleDiagram = ({ chart }) => {
   const [isOpen, setIsOpen] = useState(false);
   return (
     <div className="collapsible-diagram">
-      <div
-        className="collapsible-header"
-        onClick={() => setIsOpen((prev) => !prev)}
-      >
+      <div className="collapsible-header" onClick={() => setIsOpen((prev) => !prev)}>
         <span className="toggle-icon">{isOpen ? "–" : "+"}</span> View Diagram
       </div>
       <AnimatePresence initial={false}>
@@ -634,3 +583,4 @@ const SuggestedQuestionsAccordion = ({ questions, onQuestionClick }) => {
     </div>
   );
 };
+

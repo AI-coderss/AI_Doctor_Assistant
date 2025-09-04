@@ -3,6 +3,7 @@ import React, { useEffect, useRef, useState } from "react";
 import SendIcon from "@mui/icons-material/Send";
 import MicIcon from "@mui/icons-material/Mic";
 import "../styles/ChatInputWidget.css";
+import useLiveTranscriptStore from "../store/useLiveTranscriptStore";
 
 /** Backend */
 const API_BASE = "https://ai-platform-dsah-backend-chatbot.onrender.com";
@@ -13,17 +14,21 @@ const SDP_URL = `${API_BASE}/api/rtc-transcribe-connect`;
  *  - "chat": compact textarea + round button (bottom center)
  *  - "voice": Siri-like overlay with mic orb + canvas visualizer + live transcript
  *
- * Behavior:
- *  - Live transcript renders while speaking (no timer)
- *  - Tap mic (or Enter) again => stop, auto-send transcript, revert to "chat"
+ * Behavior now:
+ *  - Live transcript is pushed to a Zustand store in real time (no auto-send).
+ *  - Tapping mic again just stops & closes the overlay (transcript stays in Chat via store).
  */
 const ChatInputWidget = ({ onSendMessage }) => {
   // UI
   const [mode, setMode] = useState("chat");          // "chat" | "voice"
   const [state, setState] = useState("idle");        // "idle" | "connecting" | "recording"
+  const isBusy = state === "recording" || state === "connecting";
 
-  // Text
-  const [inputText, setInputText] = useState("");    // used for both chat input and live transcript
+  // Text (still used for typed messages + local preview in overlay)
+  const [inputText, setInputText] = useState("");
+
+  // Store (live transcript to Chat.jsx)
+  const liveStore = useLiveTranscriptStore();
 
   // WebRTC
   const transcriptionRef = useRef("");
@@ -36,40 +41,35 @@ const ChatInputWidget = ({ onSendMessage }) => {
   const adjustTextAreaHeight = (reset = false) => {
     if (!textAreaRef.current) return;
     textAreaRef.current.style.height = "auto";
-    if (!reset) {
-      textAreaRef.current.style.height = `${textAreaRef.current.scrollHeight}px`;
-    }
+    if (!reset) textAreaRef.current.style.height = `${textAreaRef.current.scrollHeight}px`;
   };
   useEffect(() => adjustTextAreaHeight(), []);
 
   // ====== Voice visualization (AudioContext + Analyser + Canvas) ======
   const audioCtxRef = useRef(null);
   const analyserRef = useRef(null);
-  const levelRAF = useRef(null);
   const vizRAF = useRef(null);
   const orbRef = useRef(null);
   const canvasRef = useRef(null);
   const freqsRef = useRef(null);
 
-  // Visualization options (adapted from your snippet; dat.GUI removed)
+  // Reduced visualizer look
   const vizOptsRef = useRef({
     smoothing: 0.6,
-    fft: 9,                // 2^9 = 512 bins (a bit smoother than 256)
-    minDecibels: -70,
-    amp: 1.2,
-    width: 44,
-    shift: 34,
-    fillOpacity: 0.55,
+    fft: 9,                 // 512 bins
+    minDecibels: -75,
+    amp: 0.75,              // ↓ amplitude (was higher)
+    width: 32,              // ↓ peak spacing
+    shift: 18,              // ↓ channel offset
+    fillOpacity: 0.50,
     lineWidth: 1,
-    glow: 12,
+    glow: 8,
     blend: "screen",
-    // Brand-aligned colors (you can tweak)
-    color1: [45, 92, 240],   // brand blue
-    color2: [24, 137, 218],  // lighter blue
-    color3: [41, 200, 192],  // teal accent
+    color1: [45, 92, 240],
+    color2: [24, 137, 218],
+    color3: [41, 200, 192],
   });
 
-  // Create AudioContext + Analyser, hook to stream, and start loops
   const startVisualizer = (mediaStream) => {
     try {
       const AudioCtx = window.AudioContext || window.webkitAudioContext;
@@ -77,21 +77,14 @@ const ChatInputWidget = ({ onSendMessage }) => {
       const analyser = audioCtx.createAnalyser();
       const source = audioCtx.createMediaStreamSource(mediaStream);
 
-      // Defaults; will be re-applied in the render loop to allow tweaks
+      source.connect(analyser);
+      audioCtxRef.current = audioCtx;
+      analyserRef.current = analyser;
       analyser.fftSize = Math.pow(2, vizOptsRef.current.fft);
       analyser.smoothingTimeConstant = vizOptsRef.current.smoothing;
       analyser.minDecibels = vizOptsRef.current.minDecibels;
       analyser.maxDecibels = 0;
-
-      source.connect(analyser);
-
-      audioCtxRef.current = audioCtx;
-      analyserRef.current = analyser;
       freqsRef.current = new Uint8Array(analyser.frequencyBinCount);
-
-      // One render loop that:
-      // 1) computes a level for the orb scale (from time-domain)
-      // 2) draws the canvas spectrum curves (from frequency-domain)
       const timeBuf = new Uint8Array(analyser.frequencyBinCount);
 
       const render = () => {
@@ -102,35 +95,11 @@ const ChatInputWidget = ({ onSendMessage }) => {
           return;
         }
 
-        // Update analyser params from opts (in case you change them)
-        const opts = vizOptsRef.current;
-        analyser.smoothingTimeConstant = opts.smoothing;
-        analyser.fftSize = Math.pow(2, opts.fft);
-        analyser.minDecibels = opts.minDecibels;
-        analyser.maxDecibels = 0;
-
-        // --- Level for orb (time domain RMS)
-        analyser.getByteTimeDomainData(timeBuf);
-        let sum = 0;
-        for (let i = 0; i < timeBuf.length; i++) {
-          const v = (timeBuf[i] - 128) / 128;
-          sum += v * v;
-        }
-        const rms = Math.sqrt(sum / timeBuf.length); // ~0..0.5
-        const level = Math.min(1, rms * 2.2);
-        if (orbRef.current) {
-          orbRef.current.style.setProperty("--level", String(level));
-        }
-
-        // --- Frequency data for the spectrum curves
-        const freqs = freqsRef.current;
-        analyser.getByteFrequencyData(freqs);
-
-        // Resize canvas to container (responsive, high-DPI)
+        // Responsive reduced canvas size
         const dpr = window.devicePixelRatio || 1;
         const parent = canvas.parentElement;
-        const W = Math.max(320, Math.min(parent.clientWidth - 24, 1000));
-        const H = Math.max(100, Math.min(220, Math.floor(W * 0.22))); // aspect
+        const W = Math.max(320, Math.min(parent.clientWidth - 24, 800)); // ↓ max width
+        const H = Math.max(80, Math.min(120, Math.floor(W * 0.16)));     // ↓ height ~80–120px
 
         if (canvas.width !== W * dpr || canvas.height !== H * dpr) {
           canvas.width = W * dpr;
@@ -143,7 +112,22 @@ const ChatInputWidget = ({ onSendMessage }) => {
         ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
         ctx.clearRect(0, 0, W, H);
 
-        // Draw three curves like your example
+        // Orb level (time domain RMS)
+        analyser.getByteTimeDomainData(timeBuf);
+        let sum = 0;
+        for (let i = 0; i < timeBuf.length; i++) {
+          const v = (timeBuf[i] - 128) / 128;
+          sum += v * v;
+        }
+        const rms = Math.sqrt(sum / timeBuf.length);
+        const level = Math.min(1, rms * 2);
+        if (orbRef.current) orbRef.current.style.setProperty("--level", String(level));
+
+        // Frequency curves
+        const freqs = freqsRef.current;
+        analyser.getByteFrequencyData(freqs);
+
+        const opts = vizOptsRef.current;
         const shuffle = [1, 3, 0, 4, 2];
         const mid = H / 2;
 
@@ -152,8 +136,8 @@ const ChatInputWidget = ({ onSendMessage }) => {
           return freqs[Math.min(band, freqs.length - 1)];
         };
         const scaleAt = (i) => {
-          const x = Math.abs(2 - i);      // 2,1,0,1,2
-          const s = 3 - x;                // 1,2,3,2,1
+          const x = Math.abs(2 - i);
+          const s = 3 - x;
           return (s / 3) * opts.amp;
         };
 
@@ -200,33 +184,23 @@ const ChatInputWidget = ({ onSendMessage }) => {
           ctx.restore();
         };
 
-        path(0);
-        path(1);
-        path(2);
-
+        path(0); path(1); path(2);
         vizRAF.current = requestAnimationFrame(render);
       };
 
-      // kick off loop
       vizRAF.current = requestAnimationFrame(render);
-
-      // handle resize
       const onResize = () => {
         const canvas = canvasRef.current;
         if (!canvas) return;
         const dpr = window.devicePixelRatio || 1;
         const parent = canvas.parentElement;
-        if (!parent) return;
-        const W = Math.max(320, Math.min(parent.clientWidth - 24, 1000));
-        const H = Math.max(100, Math.min(220, Math.floor(W * 0.22)));
-        canvas.width = W * dpr;
-        canvas.height = H * dpr;
-        canvas.style.width = `${W}px`;
-        canvas.style.height = `${H}px`;
+        const W = Math.max(320, Math.min(parent.clientWidth - 24, 800));
+        const H = Math.max(80, Math.min(120, Math.floor(W * 0.16)));
+        canvas.width = W * dpr; canvas.height = H * dpr;
+        canvas.style.width = `${W}px`; canvas.style.height = `${H}px`;
       };
       window.addEventListener("resize", onResize);
       onResize();
-
     } catch (e) {
       console.warn("[voice-ui] Visualizer unavailable:", e);
     }
@@ -235,20 +209,15 @@ const ChatInputWidget = ({ onSendMessage }) => {
   const stopVisualizer = async () => {
     try { if (vizRAF.current) cancelAnimationFrame(vizRAF.current); } catch {}
     vizRAF.current = null;
-    try { if (levelRAF.current) cancelAnimationFrame(levelRAF.current); } catch {}
-    levelRAF.current = null;
     if (orbRef.current) orbRef.current.style.setProperty("--level", "0");
-
     try { await audioCtxRef.current?.close(); } catch {}
     audioCtxRef.current = null;
     analyserRef.current = null;
 
-    // clear canvas
     const canvas = canvasRef.current;
     if (canvas) {
       const ctx = canvas.getContext("2d");
-      const w = canvas.width, h = canvas.height;
-      ctx.clearRect(0, 0, w, h);
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
     }
   };
 
@@ -269,7 +238,7 @@ const ChatInputWidget = ({ onSendMessage }) => {
       }, 3000);
     });
 
-  // Realtime message handler — updates live transcript immediately
+  // Realtime message handler — writes to the store for Chat.jsx
   const handleTranscriptEvent = (evt) => {
     try {
       const raw = typeof evt.data === "string" ? evt.data : "";
@@ -279,8 +248,9 @@ const ChatInputWidget = ({ onSendMessage }) => {
       if (msg.type === "input_audio_transcription.delta" || msg.type === "transcription.delta") {
         const t = msg.delta?.text || msg.text || "";
         if (t) {
-          const preview = (transcriptionRef.current + " " + t).trim();
-          setInputText(preview);          // LIVE render
+          // Store streaming + local preview
+          liveStore.appendDelta(t);
+          setInputText((transcriptionRef.current + " " + t).trim());
         }
       }
 
@@ -292,7 +262,8 @@ const ChatInputWidget = ({ onSendMessage }) => {
         const t = msg.transcript?.text || msg.transcript || msg.text || "";
         if (t) {
           transcriptionRef.current = (transcriptionRef.current + " " + t).trim();
-          setInputText(transcriptionRef.current);    // LIVE render
+          liveStore.setFull(transcriptionRef.current);
+          setInputText(transcriptionRef.current);
         }
       }
     } catch {
@@ -300,15 +271,16 @@ const ChatInputWidget = ({ onSendMessage }) => {
     }
   };
 
-  // Begin voice capture + realtime
+  // Begin voice capture + realtime (NO auto-send)
   const startLiveTranscription = async () => {
-    if (state !== "idle") return;
+    if (isBusy) return;
 
-    // Switch UI first (immediate feedback)
+    // Switch UI; mark store streaming
     setMode("voice");
     setState("connecting");
-    setInputText("");
     transcriptionRef.current = "";
+    setInputText("");
+    liveStore.start();
 
     try {
       const pc = new RTCPeerConnection({
@@ -316,12 +288,11 @@ const ChatInputWidget = ({ onSendMessage }) => {
       });
       pcRef.current = pc;
 
-      // Client data channel for events
+      // Events
       const dc = pc.createDataChannel("oai-events", { ordered: true });
       dcRef.current = dc;
       dc.onmessage = handleTranscriptEvent;
 
-      // Accept server-initiated too
       pc.ondatachannel = (event) => {
         if (event.channel?.label === "oai-events") {
           event.channel.onmessage = handleTranscriptEvent;
@@ -334,15 +305,15 @@ const ChatInputWidget = ({ onSendMessage }) => {
       });
       streamRef.current = stream;
 
-      // Start visualizer (uses same stream)
+      // Visualizer
       startVisualizer(stream);
 
-      // Single sender (sendonly)
+      // Sender
       const [track] = stream.getAudioTracks();
       const tx = pc.addTransceiver("audio", { direction: "sendonly" });
       await tx.sender.replaceTrack(track);
 
-      // SDP round trip
+      // SDP
       const offer = await pc.createOffer();
       await pc.setLocalDescription(offer);
       await waitForIceGatheringComplete(pc);
@@ -362,24 +333,18 @@ const ChatInputWidget = ({ onSendMessage }) => {
       setState("recording");
     } catch (err) {
       await teardownRTC();
+      liveStore.stop();         // stop streaming if failed
       setMode("chat");
       setState("idle");
     }
   };
 
-  // Stop, auto-send, revert UI
-  const stopAndSend = async () => {
-    const text = (transcriptionRef.current || inputText || "").trim();
+  // Stop (NO auto-send). Chat.jsx keeps showing the last text from the store.
+  const stopOnly = async () => {
     await teardownRTC();
+    liveStore.stop();           // keep text; just stop streaming
     setMode("chat");
     setState("idle");
-
-    if (text) {
-      onSendMessage?.({ text });
-      setInputText("");
-      transcriptionRef.current = "";
-      adjustTextAreaHeight(true);
-    }
   };
 
   const teardownRTC = async () => {
@@ -393,7 +358,7 @@ const ChatInputWidget = ({ onSendMessage }) => {
     await stopVisualizer();
   };
 
-  // Chat input handlers
+  // Chat input (typed) handlers
   const handleInputChange = (e) => {
     setInputText(e.target.value);
     adjustTextAreaHeight();
@@ -402,8 +367,9 @@ const ChatInputWidget = ({ onSendMessage }) => {
   const handleKeyDown = async (e) => {
     if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault();
-      if (mode === "voice" && (state === "recording" || state === "connecting")) {
-        await stopAndSend();
+      if (mode === "voice" && isBusy) {
+        // stop only; no auto-send
+        await stopOnly();
       } else if (inputText.trim()) {
         onSendMessage?.({ text: inputText.trim() });
         setInputText("");
@@ -424,12 +390,12 @@ const ChatInputWidget = ({ onSendMessage }) => {
       }
       await startLiveTranscription();
     } else {
-      // voice mode: tap to stop & auto-send
-      await stopAndSend();
+      // voice mode: tap → stop only (no send)
+      await stopOnly();
     }
   };
 
-  // Cleanup on unmount
+  // Cleanup
   useEffect(() => {
     return () => { teardownRTC(); };
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -439,10 +405,10 @@ const ChatInputWidget = ({ onSendMessage }) => {
   if (mode === "voice") {
     return (
       <div className={`voice-overlay ${state}`} role="region" aria-label="Voice input">
-        {/* Canvas visualization (behind mic) */}
+        {/* Canvas visualization (reduced size) */}
         <canvas ref={canvasRef} className="voice-canvas" aria-hidden />
 
-        {/* Live transcript (updates continuously) */}
+        {/* Live transcript preview (also in Chat via store) */}
         <div className="voice-live-text" aria-live="polite">
           {inputText || "Listening…"}
         </div>
@@ -452,8 +418,8 @@ const ChatInputWidget = ({ onSendMessage }) => {
           ref={orbRef}
           className={`voice-mic ${state}`}
           onClick={handleIconClick}
-          aria-label="Stop and send"
-          title="Stop and send"
+          aria-label="Stop"
+          title="Stop"
         >
           <MicIcon className="voice-mic-icon" />
           <span className="ring r1" />
@@ -509,3 +475,4 @@ const ChatInputWidget = ({ onSendMessage }) => {
 };
 
 export default ChatInputWidget;
+

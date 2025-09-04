@@ -1,6 +1,13 @@
 /* eslint-disable no-unused-vars */
 /* eslint-disable no-useless-concat */
 /* eslint-disable no-loop-func */
+/* eslint-disable react-hooks/exhaustive-deps */
+/* eslint-disable no-unused-vars */
+/* eslint-disable no-useless-concat */
+/* eslint-disable no-loop-func */
+/* eslint-disable no-unused-vars */
+/* eslint-disable no-useless-concat */
+/* eslint-disable no-loop-func */
 import React, { useState, useEffect, useRef } from "react";
 import ChatInputWidget from "./ChatInputWidget.jsx";
 import ReactMarkdown from "react-markdown";
@@ -16,7 +23,7 @@ import useAudioStore from "../store/audioStore.js";
 import { startVolumeMonitoring } from "./audioLevelAnalyzer";
 import VoiceRecorderPanel from "./VoiceRecorderPanel";
 
-// NEW: live transcript store
+// Live transcript store
 import useLiveTranscriptStore from "../store/useLiveTranscriptStore";
 
 let localStream;
@@ -40,26 +47,32 @@ const Chat = () => {
   const audioSourceRef = useRef(null);
   const analyserRef = useRef(null);
   const { audioUrl, setAudioUrl, stopAudio } = useAudioStore();
+  const { audioScale } = useAudioForVisualizerStore();
+
   const scrollAnchorRef = useRef(null);
   const audioPlayerRef = useRef(null);
+
   const [sessionId] = useState(() => {
     const id = localStorage.getItem("sessionId") || crypto.randomUUID();
     localStorage.setItem("sessionId", id);
     return id;
   });
 
-  // === NEW: subscribe to live transcript store ===
+  // Live transcript store
   const liveText = useLiveTranscriptStore((s) => s.text);
   const isStreaming = useLiveTranscriptStore((s) => s.isStreaming);
 
   // Index of the live "me" bubble in chats (or null)
   const liveIdxRef = useRef(null);
+  // Debounce timer to avoid premature finalize on transient pauses
+  const finalizeTimerRef = useRef(null);
 
   // auto-scroll
   useEffect(() => {
     scrollAnchorRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [chats, liveText, isStreaming]);
 
+  // suggestions
   useEffect(() => {
     fetch("https://ai-doctor-assistant-backend-server.onrender.com/suggestions")
       .then((res) => res.json())
@@ -67,23 +80,24 @@ const Chat = () => {
       .catch((err) => console.error("Failed to fetch suggestions:", err));
   }, []);
 
+  // cleanup on unmount
   useEffect(() => {
     return () => {
       micStream?.getTracks().forEach((track) => track.stop());
       peerConnection?.close();
       dataChannel?.close();
-      setMicStream(null);
-      setPeerConnection(null);
-      setDataChannel(null);
-      setConnectionStatus("idle");
       setIsMicActive(false);
     };
   }, [dataChannel, micStream, peerConnection]);
 
-  const { audioScale } = useAudioForVisualizerStore();
-
-  // === NEW: reflect store → chat bubbles in real time ===
+  // === reflect store → chat bubbles in real time ===
   useEffect(() => {
+    // If streaming resumes, cancel any pending finalization
+    if (isStreaming && finalizeTimerRef.current) {
+      clearTimeout(finalizeTimerRef.current);
+      finalizeTimerRef.current = null;
+    }
+
     // streaming started: open a live "me" bubble if not already present
     if (isStreaming && liveIdxRef.current === null) {
       setChats((prev) => [...prev, { msg: "", who: "me", live: true }]);
@@ -99,20 +113,31 @@ const Chat = () => {
       });
     }
 
-    // streaming stopped: finalize (keep the bubble; remove live flag)
-    if (!isStreaming && liveIdxRef.current !== null) {
-      setChats((prev) => {
-        const arr = [...prev];
-        const idx = liveIdxRef.current;
-        if (arr[idx]) arr[idx] = { msg: liveText || arr[idx].msg || "", who: "me" };
-        return arr;
-      });
-      liveIdxRef.current = null;
+    // streaming stopped: debounce finalization to avoid fugacious cut-offs
+    if (!isStreaming && liveIdxRef.current !== null && !finalizeTimerRef.current) {
+      finalizeTimerRef.current = setTimeout(() => {
+        setChats((prev) => {
+          const arr = [...prev];
+          const idx = liveIdxRef.current;
+          if (arr[idx]) arr[idx] = { msg: liveText || arr[idx].msg || "", who: "me" };
+          return arr;
+        });
+        liveIdxRef.current = null;
+        finalizeTimerRef.current = null;
+        // Do not send here; ChatInputWidget already sent on manual stop with skipEcho:true
+      }, 900);
     }
+
+    return () => {
+      if (finalizeTimerRef.current) {
+        clearTimeout(finalizeTimerRef.current);
+        finalizeTimerRef.current = null;
+      }
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isStreaming, liveText]);
 
-  // ===== Your existing WebRTC (voice assistant) =====
+  // ===== Your existing WebRTC (voice assistant) — left intact =====
   const startWebRTC = async () => {
     if (peerConnection || connectionStatus === "connecting") return;
 
@@ -158,7 +183,6 @@ const Chat = () => {
       };
 
       if (!localStream) console.error("localStream undefined when adding track.");
-
       stream.getAudioTracks().forEach((track) => pc.addTrack(track, localStream));
 
       const channel = pc.createDataChannel("response");
@@ -323,9 +347,13 @@ const Chat = () => {
     }
   };
 
-  const handleNewMessage = async ({ text }) => {
-    if (!text) return;
-    setChats((prev) => [...prev, { msg: text, who: "me" }]);
+  // ===== Send message to backend; stream into ONE bot bubble =====
+  const handleNewMessage = async ({ text, skipEcho = false }) => {
+    if (!text || !text.trim()) return;
+
+    if (!skipEcho) {
+      setChats((prev) => [...prev, { msg: text, who: "me" }]);
+    }
     setSuggestedQuestions((prev) => prev.filter((q) => q !== text));
 
     const res = await fetch("https://ai-doctor-assistant-backend-server.onrender.com/stream", {
@@ -363,6 +391,7 @@ const Chat = () => {
     }
   };
 
+  // === Markdown + Mermaid renderer ===
   const renderMessage = (message) => {
     const regex = /```mermaid([\s\S]*?)```/g;
     const parts = [];
@@ -389,7 +418,7 @@ const Chat = () => {
     );
   };
 
-  // === VoiceRecorderPanel (unchanged) ===
+  // === Opinion panel hooks (unchanged) ===
   const opinionBufferRef = useRef("");
   const opinionStreamingRef = useRef(false);
   const handleOpinionStream = (chunkOrFull, done = false) => {
@@ -424,6 +453,7 @@ const Chat = () => {
     }
   };
 
+  // === Render ===
   if (isVoiceMode) {
     return (
       <div className="voice-assistant-wrapper">
@@ -479,7 +509,7 @@ const Chat = () => {
       <div className="chat-footer">
         <SuggestedQuestionsAccordion
           questions={suggestedQuestions}
-          onQuestionClick={handleNewMessage}
+          onQuestionClick={({ text }) => handleNewMessage({ text, skipEcho: false })}
         />
         <ChatInputWidget onSendMessage={handleNewMessage} />
       </div>
@@ -491,7 +521,7 @@ const Chat = () => {
             <button
               key={idx}
               className="suggestion-item"
-              onClick={() => handleNewMessage({ text: q })}
+              onClick={() => handleNewMessage({ text: q, skipEcho: false })}
             >
               {q}
             </button>
@@ -583,4 +613,3 @@ const SuggestedQuestionsAccordion = ({ questions, onQuestionClick }) => {
     </div>
   );
 };
-

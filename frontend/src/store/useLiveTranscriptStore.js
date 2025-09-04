@@ -28,3 +28,4 @@ const useLiveTranscriptStore = create((set, get) => ({
 }));
 
 export default useLiveTranscriptStore;
+

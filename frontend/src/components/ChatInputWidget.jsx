@@ -1,3 +1,8 @@
+/* eslint-disable react-hooks/exhaustive-deps */
+/* eslint-disable no-unused-vars */
+/* eslint-disable react-hooks/exhaustive-deps */
+/* eslint-disable no-unused-vars */
+/* eslint-disable react-hooks/exhaustive-deps */
 /* eslint-disable no-unused-vars */
 import React, { useEffect, useRef, useState } from "react";
 import SendIcon from "@mui/icons-material/Send";
@@ -12,11 +17,15 @@ const SDP_URL = `${API_BASE}/api/rtc-transcribe-connect`;
 /**
  * Modes:
  *  - "chat": compact textarea + round button (bottom center)
- *  - "voice": Siri-like overlay with mic orb + canvas visualizer + live transcript
+ *  - "voice": Siri-like overlay with mic orb + canvas visualizer
  *
- * Behavior now:
- *  - Live transcript is pushed to a Zustand store in real time (no auto-send).
- *  - Tapping mic again just stops & closes the overlay (transcript stays in Chat via store).
+ * Updated behavior (manual hold-to-stop):
+ *  - Live transcript is written only to the Zustand store (no text in overlay).
+ *  - The RTC session STAYS OPEN while you are speaking; it will NOT auto-stop
+ *    on interim `*.completed` events from the server.
+ *  - The session stops ONLY when the user presses the mic again (manual stop).
+ *  - On manual stop, we auto-send the FINAL accumulated text to parent via
+ *    onSendMessage({ text, skipEcho: true }) and return to chat mode.
  */
 const ChatInputWidget = ({ onSendMessage }) => {
   // UI
@@ -24,7 +33,7 @@ const ChatInputWidget = ({ onSendMessage }) => {
   const [state, setState] = useState("idle");        // "idle" | "connecting" | "recording"
   const isBusy = state === "recording" || state === "connecting";
 
-  // Text (still used for typed messages + local preview in overlay)
+  // Textarea for typed messages only
   const [inputText, setInputText] = useState("");
 
   // Store (live transcript to Chat.jsx)
@@ -58,9 +67,9 @@ const ChatInputWidget = ({ onSendMessage }) => {
     smoothing: 0.6,
     fft: 9,                 // 512 bins
     minDecibels: -75,
-    amp: 0.75,              // ↓ amplitude (was higher)
-    width: 32,              // ↓ peak spacing
-    shift: 18,              // ↓ channel offset
+    amp: 0.75,
+    width: 32,
+    shift: 18,
     fillOpacity: 0.50,
     lineWidth: 1,
     glow: 8,
@@ -98,8 +107,8 @@ const ChatInputWidget = ({ onSendMessage }) => {
         // Responsive reduced canvas size
         const dpr = window.devicePixelRatio || 1;
         const parent = canvas.parentElement;
-        const W = Math.max(320, Math.min(parent.clientWidth - 24, 800)); // ↓ max width
-        const H = Math.max(80, Math.min(120, Math.floor(W * 0.16)));     // ↓ height ~80–120px
+        const W = Math.max(320, Math.min(parent.clientWidth - 24, 800));
+        const H = Math.max(80, Math.min(120, Math.floor(W * 0.16)));
 
         if (canvas.width !== W * dpr || canvas.height !== H * dpr) {
           canvas.width = W * dpr;
@@ -148,6 +157,7 @@ const ChatInputWidget = ({ onSendMessage }) => {
           const y = Array.from({ length: 5 }, (_, i) => Math.max(0, mid - scaleAt(i) * freqAt(channel, i)));
           const h = 2 * mid;
 
+          const ctx = canvas.getContext("2d");
           ctx.save();
           ctx.globalCompositeOperation = opts.blend;
           ctx.fillStyle = `rgba(${color[0]}, ${color[1]}, ${color[2]}, ${opts.fillOpacity})`;
@@ -238,6 +248,25 @@ const ChatInputWidget = ({ onSendMessage }) => {
       }, 3000);
     });
 
+  // Manual stop (user-initiated): send final text, teardown, return to chat
+  const manualStopAndSend = async () => {
+    // Gather final text from store or local ref
+    const text = String(
+      useLiveTranscriptStore.getState().text || transcriptionRef.current || ""
+    ).trim();
+
+    await teardownRTC();
+    useLiveTranscriptStore.getState().stop(); // sets isStreaming=false (Chat.jsx finalizes bubble)
+    setMode("chat");
+    setState("idle");
+
+    if (text) {
+      // skipEcho prevents duplicating the already-shown live "me" bubble
+      onSendMessage?.({ text, skipEcho: true });
+      transcriptionRef.current = "";
+    }
+  };
+
   // Realtime message handler — writes to the store for Chat.jsx
   const handleTranscriptEvent = (evt) => {
     try {
@@ -245,15 +274,16 @@ const ChatInputWidget = ({ onSendMessage }) => {
       if (!raw) return;
       const msg = JSON.parse(raw);
 
+      // Deltas → append to store (Live bubble updates in Chat.jsx)
       if (msg.type === "input_audio_transcription.delta" || msg.type === "transcription.delta") {
         const t = msg.delta?.text || msg.text || "";
         if (t) {
-          // Store streaming + local preview
           liveStore.appendDelta(t);
-          setInputText((transcriptionRef.current + " " + t).trim());
         }
       }
 
+      // Completed utterances → update full text but DO NOT STOP or AUTOSEND.
+      // We keep the RTC session alive until the user manually stops it.
       if (
         msg.type === "input_audio_transcription.completed" ||
         msg.type === "transcription.completed" ||
@@ -263,24 +293,25 @@ const ChatInputWidget = ({ onSendMessage }) => {
         if (t) {
           transcriptionRef.current = (transcriptionRef.current + " " + t).trim();
           liveStore.setFull(transcriptionRef.current);
-          setInputText(transcriptionRef.current);
         }
       }
+
+      // Optional: if your backend sends an explicit "session.ended", ignore it here
+      // so the session stays up until user taps to stop.
+
     } catch {
       /* ignore non-JSON frames */
     }
   };
 
-  // Begin voice capture + realtime (NO auto-send)
+  // Begin voice capture + realtime (stays active until user stops)
   const startLiveTranscription = async () => {
     if (isBusy) return;
 
-    // Switch UI; mark store streaming
     setMode("voice");
     setState("connecting");
     transcriptionRef.current = "";
-    setInputText("");
-    liveStore.start();
+    liveStore.start(); // isStreaming=true, text=""
 
     try {
       const pc = new RTCPeerConnection({
@@ -288,11 +319,10 @@ const ChatInputWidget = ({ onSendMessage }) => {
       });
       pcRef.current = pc;
 
-      // Events
+      // Set up app data channel (events from server)
       const dc = pc.createDataChannel("oai-events", { ordered: true });
       dcRef.current = dc;
       dc.onmessage = handleTranscriptEvent;
-
       pc.ondatachannel = (event) => {
         if (event.channel?.label === "oai-events") {
           event.channel.onmessage = handleTranscriptEvent;
@@ -330,21 +360,18 @@ const ChatInputWidget = ({ onSendMessage }) => {
       }
 
       await pc.setRemoteDescription({ type: "answer", sdp: body });
-      setState("recording");
+      setState("recording"); // stay recording until user taps to stop
     } catch (err) {
       await teardownRTC();
-      liveStore.stop();         // stop streaming if failed
+      liveStore.stop();
       setMode("chat");
       setState("idle");
     }
   };
 
-  // Stop (NO auto-send). Chat.jsx keeps showing the last text from the store.
+  // Stop → manual (button/Enter) only
   const stopOnly = async () => {
-    await teardownRTC();
-    liveStore.stop();           // keep text; just stop streaming
-    setMode("chat");
-    setState("idle");
+    await manualStopAndSend();
   };
 
   const teardownRTC = async () => {
@@ -358,7 +385,7 @@ const ChatInputWidget = ({ onSendMessage }) => {
     await stopVisualizer();
   };
 
-  // Chat input (typed) handlers
+  // Chat input (typed) handlers — unchanged for typed flow
   const handleInputChange = (e) => {
     setInputText(e.target.value);
     adjustTextAreaHeight();
@@ -368,12 +395,11 @@ const ChatInputWidget = ({ onSendMessage }) => {
     if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault();
       if (mode === "voice" && isBusy) {
-        // stop only; no auto-send
+        // In voice mode, Enter acts as stop → manual finalize + send
         await stopOnly();
       } else if (inputText.trim()) {
         onSendMessage?.({ text: inputText.trim() });
         setInputText("");
-        transcriptionRef.current = "";
         adjustTextAreaHeight(true);
       }
     }
@@ -384,13 +410,12 @@ const ChatInputWidget = ({ onSendMessage }) => {
       if (inputText.trim()) {
         onSendMessage?.({ text: inputText.trim() });
         setInputText("");
-        transcriptionRef.current = "";
         adjustTextAreaHeight(true);
         return;
       }
-      await startLiveTranscription();
+      await startLiveTranscription(); // start and STAY recording
     } else {
-      // voice mode: tap → stop only (no send)
+      // voice mode: tap → manual stop (finalize + send)
       await stopOnly();
     }
   };
@@ -398,7 +423,6 @@ const ChatInputWidget = ({ onSendMessage }) => {
   // Cleanup
   useEffect(() => {
     return () => { teardownRTC(); };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // ====== RENDER ======
@@ -408,9 +432,9 @@ const ChatInputWidget = ({ onSendMessage }) => {
         {/* Canvas visualization (reduced size) */}
         <canvas ref={canvasRef} className="voice-canvas" aria-hidden />
 
-        {/* Live transcript preview (also in Chat via store) */}
+        {/* Overlay text shows status ONLY (no transcript here) */}
         <div className="voice-live-text" aria-live="polite">
-          {inputText || "Listening…"}
+          {state === "connecting" ? "Connecting…" : "Listening…"}
         </div>
 
         {/* Mic orb (voice level animates via --level) */}
@@ -475,4 +499,7 @@ const ChatInputWidget = ({ onSendMessage }) => {
 };
 
 export default ChatInputWidget;
+
+
+
 

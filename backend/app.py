@@ -4,6 +4,8 @@ import ast
 from uuid import uuid4
 from datetime import datetime
 import json
+import logging
+import requests
 import re
 import base64
 import random
@@ -21,6 +23,9 @@ from langchain.chains.combine_documents import create_stuff_documents_chain
 
 # Load env vars
 load_dotenv()
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
+if not OPENAI_API_KEY:
+    raise RuntimeError("Missing OPENAI_API_KEY")
 
 app = Flask(__name__)
 CORS(app, resources={
@@ -38,6 +43,19 @@ CORS(app, resources={
 chat_sessions = {}
 collection_name = os.getenv("QDRANT_COLLECTION_NAME")
 
+logging.basicConfig(level=logging.INFO)
+log = logging.getLogger("rtc-transcribe")
+
+OAI_BASE = "https://api.openai.com/v1"
+COMMON_JSON_HEADERS = {
+    "Authorization": f"Bearer {OPENAI_API_KEY}",
+    "Content-Type": "application/json",
+    "OpenAI-Beta": "realtime=v1",
+}
+
+@app.get("/api/health")
+def health():
+    return {"ok": True}
 # Initialize OpenAI client
 client = OpenAI()
 
@@ -847,6 +865,113 @@ def calculate_dosage_stream_with_context():
 
     return Response(stream_with_context(generate()), content_type="text/plain")
 # ========== END STRICT CONTEXT EXTRACTION ==========
+OAI_BASE = "https://api.openai.com/v1"
+COMMON_JSON_HEADERS = {
+    "Authorization": f"Bearer {OPENAI_API_KEY}",
+    "Content-Type": "application/json",
+    "OpenAI-Beta": "realtime=v1",
+}
+
+@app.get("/api/health")
+def health():
+    return {"ok": True}
+
+@app.post("/api/rtc-transcribe-connect")
+def rtc_transcribe_connect():
+    """
+    Browser sends an SDP offer (text).
+    We:
+      1) Create a Realtime Transcription Session -> ephemeral client_secret
+      2) POST the browser SDP to OpenAI Realtime WebRTC endpoint with ?intent=transcription
+         (Do NOT pass model here; model is defined by the session)
+      3) Return the answer SDP (application/sdp) back to the browser **as raw bytes** (no decoding/strip)
+    """
+    offer_sdp = request.get_data()  # raw bytes; don't decode here
+    if not offer_sdp:
+        return Response(b"No SDP provided", status=400, mimetype="text/plain")
+
+    # 1) Create ephemeral transcription session
+    # NOTE: Do NOT force input_audio_format here; WebRTC uses RTP/Opus.
+    session_payload = {
+        "input_audio_transcription": {
+            "model": "gpt-4o-transcribe"
+        },
+        "turn_detection": {
+            "type": "server_vad",
+            "threshold": 0.5,
+            "prefix_padding_ms": 300,
+            "silence_duration_ms": 500
+        },
+        "input_audio_noise_reduction": {"type": "near_field"}
+    }
+
+    try:
+        sess = requests.post(
+            f"{OAI_BASE}/realtime/transcription_sessions",
+            headers=COMMON_JSON_HEADERS,
+            data=json.dumps(session_payload),
+            timeout=20
+        )
+    except Exception as e:
+        log.exception("Failed to create transcription session")
+        return Response(f"Session error: {e}".encode(), status=502, mimetype="text/plain")
+
+    if not sess.ok:
+        log.error("Session create failed (%s): %s", sess.status_code, sess.text)
+        return Response(sess.content or b"Failed to create session",
+                        status=sess.status_code,
+                        mimetype="text/plain")
+
+    client_secret = (sess.json().get("client_secret") or {}).get("value")
+    if not client_secret:
+        log.error("Missing client_secret in session response")
+        return Response(b"Missing client_secret", status=502, mimetype="text/plain")
+
+    # 2) Exchange SDP with Realtime endpoint using ephemeral secret
+    sdp_headers = {
+        "Authorization": f"Bearer {client_secret}",
+        "Content-Type": "application/sdp",
+        "OpenAI-Beta": "realtime=v1",
+        "Cache-Control": "no-cache",
+    }
+    upstream_url = f"{OAI_BASE}/realtime"
+    params = {"intent": "transcription"}
+    log.info("Posting SDP offer to %s with params=%s (offer %d bytes)",
+             upstream_url, params, len(offer_sdp or b""))
+
+    try:
+        ans = requests.post(
+            upstream_url,
+            params=params,
+            headers=sdp_headers,
+            data=offer_sdp,   # send EXACT bytes we received
+            timeout=30
+        )
+    except Exception as e:
+        log.exception("SDP exchange error")
+        return Response(f"SDP exchange error: {e}".encode(), status=502, mimetype="text/plain")
+
+    if not ans.ok:
+        log.error("SDP exchange failed (%s): %s", ans.status_code, ans.text)
+        # surface upstream body (could be helpful error text)
+        return Response(ans.content or b"SDP exchange failed",
+                        status=ans.status_code,
+                        mimetype=ans.headers.get("Content-Type", "text/plain"))
+
+    # 3) Return the raw SDP answer bytes exactly as received (no text decode/strip)
+    answer_bytes = ans.content or b""
+    log.info("Upstream answered SDP (%d bytes)", len(answer_bytes))
+
+    if not answer_bytes.startswith(b"v="):
+        # Not an SDP body; return it verbatim for debugging
+        preview = answer_bytes[:2000]
+        log.error("Upstream returned non-SDP body (first bytes): %r", preview)
+        return Response(answer_bytes, status=502, mimetype="text/plain")
+
+    resp = Response(answer_bytes, status=200, mimetype="application/sdp")
+    resp.headers["Content-Disposition"] = "inline; filename=answer.sdp"
+    resp.headers["Cache-Control"] = "no-store"
+    return resp
 
 
 

@@ -1,4 +1,27 @@
-/* Chat Input Container – Compact Glassmorphic */
+/* =========================================================
+   THEME FALLBACKS (keeps your existing variables intact)
+   ========================================================= */
+:root {
+  /* Use your existing tokens if they’re defined elsewhere;
+     these are only fallbacks to keep colors consistent. */
+  --primary: var(--primary, #2D5CF0);
+  --primary-600: #244EE0;
+  --primary-700: #1D43CA;
+  --primary-800: #1838B3;
+
+  /* Optional fallbacks (only used if you didn’t define them): */
+  --glass-bg: var(--glass-bg, rgba(255,255,255,0.55));
+  --glass-border: var(--glass-border, 1px solid rgba(45,92,240,0.18));
+  --surface: var(--surface, rgba(255,255,255,0.9));
+  --ink: var(--ink, #0f172a);
+  --ink-subtle: var(--ink-subtle, #64748b);
+  --bg-app: var(--bg-app, #ffffff);
+  --shadow-1: var(--shadow-1, 0 10px 24px rgba(45,92,240,.15));
+}
+
+/* =========================================================
+   CHAT INPUT (original layout, compact glassmorphic)
+   ========================================================= */
 .chat-container {
   position: absolute;
   bottom: 20px;
@@ -20,7 +43,7 @@
   z-index: 999;
 }
 
-/* Chat Text Area – Reduced Size */
+/* Chat Text Area – Reduced Size (unchanged) */
 .chat-input {
   flex-grow: 1;
   font-size: 14px;
@@ -42,7 +65,7 @@
   color: var(--ink-subtle);
 }
 
-/* Buttons – Slightly Smaller */
+/* Buttons – Slightly Smaller (brand blue update) */
 .icon-btn {
   width: 45px;
   height: 45px;
@@ -53,29 +76,57 @@
   display: flex;
   justify-content: center;
   align-items: center;
-  background: var(--primary);
+  background: linear-gradient(135deg, var(--primary-600), var(--primary-800));
   color: var(--bg-app);
   font-size: 14px;
   cursor: pointer;
-  transition: transform 0.2s, background 0.3s, box-shadow 0.3s;
-  box-shadow: var(--shadow-1);
+  transition: transform 0.2s, background 0.3s, box-shadow 0.3s, filter .2s;
+  box-shadow: 0 8px 18px color-mix(in srgb, var(--primary) 25%, transparent);
   padding: 0;
 }
 
 .icon-btn:hover {
-  background: linear-gradient(135deg, #ff66b2, #eb0451);
-  box-shadow: 0 5px 14px rgba(235, 4, 81, 0.3);
+  background: linear-gradient(135deg, var(--primary), var(--primary-700));
+  box-shadow: 0 10px 22px color-mix(in srgb, var(--primary) 35%, transparent);
+  transform: translateY(-1px);
 }
 
 .icon-btn:active {
-  transform: scale(1.08);
+  transform: scale(0.98);
 }
 
 .icon-btn:focus {
   outline: none;
+  box-shadow:
+    0 0 0 3px color-mix(in srgb, var(--primary) 25%, transparent),
+    0 10px 22px color-mix(in srgb, var(--primary) 35%, transparent);
 }
 
-/* Responsive Adjustments */
+/* Ready-to-send state keeps blue family */
+.icon-btn.will-send {
+  background: linear-gradient(135deg, var(--primary-600), var(--primary-800));
+  box-shadow: 0 10px 22px color-mix(in srgb, var(--primary) 40%, transparent);
+}
+
+/* =========================================================
+   SPINNER (used for connecting + your loader)
+   ========================================================= */
+.spinner {
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  border: 3px solid rgba(99,102,241,.25);
+  border-top-color: #6366f1;
+  animation: spin 0.8s linear infinite;
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+/* =========================================================
+   RESPONSIVE (unchanged from your original)
+   ========================================================= */
 @media (max-width: 768px) {
   .chat-container {
     width: 90%;
@@ -125,5 +176,165 @@
     min-height: 40px;
     font-size: 8px;
     margin: 0 2px;
+  }
+}
+
+/* =========================================================
+   LOADER OVERLAY (kept from your original)
+   ========================================================= */
+.loader-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 10;
+  display: grid;
+  place-items: center;
+  background: rgba(255, 255, 255, 0.45);
+  backdrop-filter: blur(10px) saturate(120%);
+  border-radius: 16px;
+}
+
+.loader-card {
+  min-width: 240px;
+  padding: 16px 18px;
+  border-radius: 14px;
+  background:
+    linear-gradient(180deg, rgba(255,255,255,.9), rgba(255,255,255,.65)) padding-box,
+    linear-gradient(90deg, #7c3aed, #6366f1, #06b6d4) border-box;
+  border: 2px solid transparent;
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  box-shadow: 0 20px 40px rgba(0,0,0,.15);
+}
+
+.loader-text {
+  font: 600 13px/1.3 ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto;
+  color: #1f2937;
+  letter-spacing: .2px;
+}
+
+/* =========================================================
+   ERROR (kept from your original)
+   ========================================================= */
+.chat-error {
+  position: absolute;
+  left: 12px;
+  bottom: -22px;
+  font: 600 12px/1.2 ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto;
+  color: #ef4444;
+}
+
+/* =========================================================
+   SIRI-LIKE VOICE OVERLAY (NEW)
+   Appears in the same place as the chat input, bottom center.
+   The orb reacts to live audio level via JS setting --level (0..1).
+   ========================================================= */
+.voice-overlay {
+  position: absolute;           /* same anchoring as chat-container */
+  bottom: 20px;
+  left: 0;
+  right: 0;
+  margin: 0 auto;
+  width: 92%;
+  max-width: 600px;
+  min-height: 86px;             /* gives breathing room */
+  display: grid;
+  place-items: center;
+  background: var(--glass-bg);
+  border: var(--glass-border);
+  border-radius: 35px;
+  backdrop-filter: blur(10px);
+  box-shadow: var(--shadow-1);
+  z-index: 1000;                /* above chat-container */
+  padding: 12px 0;
+}
+
+/* The voice orb button */
+.voice-mic {
+  --level: 0; /* JS sets 0..1 */
+  position: relative;
+  width: 86px;
+  height: 86px;
+  border-radius: 999px;
+  border: none;
+  cursor: pointer;
+  display: grid;
+  place-items: center;
+  color: #fff;
+  background:
+    radial-gradient(100% 100% at 50% 0%, color-mix(in srgb, var(--primary) 20%, #ffffff) 0%, transparent 60%),
+    linear-gradient(135deg, var(--primary-600), var(--primary-800));
+  box-shadow:
+    0 10px 24px color-mix(in srgb, var(--primary) 35%, transparent),
+    0 0 0 calc(var(--level) * 10px) color-mix(in srgb, var(--primary) 25%, transparent);
+  transition: box-shadow 80ms ease, transform 80ms ease, filter 160ms ease;
+  outline: none;
+}
+
+.voice-mic:hover {
+  transform: translateY(-1px);
+}
+.voice-mic:active {
+  transform: scale(0.98);
+}
+
+/* Mic glyph scales slightly with level */
+.voice-mic-icon {
+  width: 28px;
+  height: 28px;
+  transform: scale(calc(1 + (var(--level) * 0.15)));
+  transition: transform 40ms linear;
+  filter: drop-shadow(0 2px 6px rgba(0,0,0,.25));
+}
+
+/* Concentric rings (subtle Siri-like ripples) */
+.voice-mic .ring {
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  pointer-events: none;
+  border: 2px solid color-mix(in srgb, var(--primary) 45%, transparent);
+  opacity: .55;
+}
+
+.voice-mic .r1 { animation: ring 1.8s ease-in-out infinite; }
+.voice-mic .r2 { animation: ring 1.8s ease-in-out infinite .4s; }
+.voice-mic .r3 { animation: ring 1.8s ease-in-out infinite .8s; }
+
+@keyframes ring {
+  0%   { transform: scale(1);    opacity: .5; }
+  60%  { transform: scale(1.25); opacity: .08; }
+  100% { transform: scale(1.25); opacity: 0;  }
+}
+
+/* Overlay responsive — mirrors chat-container tweaks */
+@media (max-width: 768px) {
+  .voice-overlay {
+    width: 90%;
+    max-width: 98vw;
+    bottom: 14px;
+    min-height: 76px;
+  }
+  .voice-mic {
+    width: 76px; height: 76px;
+  }
+  .voice-mic-icon {
+    width: 26px; height: 26px;
+  }
+}
+
+@media (max-width: 480px) {
+  .voice-overlay {
+    width: 93%;
+    max-width: 100vw;
+    bottom: 10px;
+    min-height: 70px;
+    padding: 10px 0;
+  }
+  .voice-mic {
+    width: 72px; height: 72px;
+  }
+  .voice-mic-icon {
+    width: 24px; height: 24px;
   }
 }

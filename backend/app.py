@@ -34,10 +34,17 @@ CORS(app, resources={
             "https://ai-doctor-assistant-app-dev.onrender.com",
             "http://localhost:3000"
         ],
+    r"/api/rtc-transcribe-connect": {
+        "origins": [
+            "https://ai-doctor-assistant-app-dev.onrender.com",
+            "http://localhost:3000"
+                ],
         "methods": ["GET", "POST", "OPTIONS"],
         "allow_headers": ["Content-Type", "Authorization"],
         "supports_credentials": True
     }
+    }
+
 })
 
 chat_sessions = {}

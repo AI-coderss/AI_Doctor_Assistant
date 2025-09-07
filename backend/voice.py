@@ -17,7 +17,7 @@ app = Flask(__name__)
 
 CORS(app, resources={
     r"/api/*": {
-        "origins": ["https://dsahdoctoraiassistantbot.onrender.com", "http://localhost:3000"],
+        "origins": ["https://ai-doctor-assistant-app-dev.onrender.com", "http://localhost:3000"],
         "methods": ["GET", "POST", "OPTIONS"],
         "allow_headers": ["Content-Type", "Authorization", "X-Session-Id"]
     }

@@ -31,7 +31,7 @@ app = Flask(__name__)
 CORS(app, resources={
     r"/*": {
         "origins": [
-            "https://dsahdoctoraiassistantbot.onrender.com",
+            "https://ai-doctor-assistant-app-dev.onrender.com",
             "http://localhost:3000"
         ],
         "methods": ["GET", "POST", "OPTIONS"],

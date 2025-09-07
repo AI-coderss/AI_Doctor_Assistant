@@ -53,9 +53,6 @@ COMMON_JSON_HEADERS = {
     "OpenAI-Beta": "realtime=v1",
 }
 
-@app.get("/api/health")
-def health():
-    return {"ok": True}
 # Initialize OpenAI client
 client = OpenAI()
 

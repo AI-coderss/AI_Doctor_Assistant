@@ -28,11 +28,6 @@ import useLiveTranscriptStore from "../store/useLiveTranscriptStore";
 
 let localStream;
 
-/** === Personalized Medicine endpoints === */
-const API_BASE = "https://ai-doctor-assistant-backend-server.onrender.com";
-const NUDGE_NEXT_URL = `${API_BASE}/nudge-next`;
-const NUDGE_ANSWER_URL = `${API_BASE}/nudge-answer`;
-
 const Chat = () => {
   const [chats, setChats] = useState([
     {
@@ -62,97 +57,6 @@ const Chat = () => {
     localStorage.setItem("sessionId", id);
     return id;
   });
-
-  // ===== Personalized Medicine (PM) toggle + state =====
-  const [isPersonalized, setIsPersonalized] = useState(
-    () => localStorage.getItem("pmode") === "1"
-  );
-  useEffect(() => {
-    localStorage.setItem("pmode", isPersonalized ? "1" : "0");
-  }, [isPersonalized]);
-
-  const [intakeAnswers, setIntakeAnswers] = useState({
-    age: null,
-    sex: null,
-    pregnancy: null,
-    weight: null,
-  });
-  const [nudgeOpen, setNudgeOpen] = useState(false);
-  const [nudgePayload, setNudgePayload] = useState(null); // server JSON (next_question/state/analysis)
-  const nudgeHistoryRef = useRef([]); // [{questionId, answer}]
-  const complaintRef = useRef(""); // first message that triggers PM
-
-  const mapAnswerIntoIntake = (qid, answer) => {
-    const key = String(qid || "").toLowerCase();
-    setIntakeAnswers((prev) => {
-      if (key === "age" || key === "age_years")
-        return { ...prev, age: Number(answer) || answer };
-      if (key === "sex" || key === "biological_sex")
-        return { ...prev, sex: String(answer).toLowerCase() };
-      if (key === "pregnancy" || key === "pregnancy_status")
-        return { ...prev, pregnancy: String(answer).toLowerCase() };
-      if (key === "weight" || key === "weight_kg")
-        return { ...prev, weight: Number(answer) || answer };
-      return prev;
-    });
-  };
-
-  const fetchNudgeNext = async ({ complaint }) => {
-    try {
-      const res = await fetch(NUDGE_NEXT_URL, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          session_id: sessionId,
-          complaint,
-          answers: intakeAnswers,
-          history: nudgeHistoryRef.current,
-        }),
-      });
-      const data = await res.json();
-      setNudgePayload(data);
-      setNudgeOpen(true);
-      return data;
-    } catch (e) {
-      console.error("nudge-next error:", e);
-      return null;
-    }
-  };
-
-  const sendNudgeAnswer = async ({ question_id, answer }) => {
-    try {
-      mapAnswerIntoIntake(question_id, answer);
-      nudgeHistoryRef.current.push({ questionId: question_id, answer });
-
-      const res = await fetch(NUDGE_ANSWER_URL, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          session_id: sessionId,
-          complaint: complaintRef.current || "Consultation",
-          question_id,
-          answer,
-        }),
-      });
-      const data = await res.json();
-      setNudgePayload(data);
-      if (
-        data?.state === "complete" ||
-        data?.state === "triage_urgent"
-      ) {
-        setNudgeOpen(false);
-      }
-      return data;
-    } catch (e) {
-      console.error("nudge-answer error:", e);
-      return null;
-    }
-  };
-
-  const nudgeIncomplete = () => {
-    const st = nudgePayload?.state;
-    return !(st === "complete" || st === "triage_urgent");
-  };
 
   // Live transcript store
   const liveText = useLiveTranscriptStore((s) => s.text);
@@ -204,20 +108,13 @@ const Chat = () => {
     if (isStreaming && liveIdxRef.current !== null) {
       setChats((prev) => {
         const arr = [...prev];
-        arr[liveIdxRef.current] = {
-          ...arr[liveIdxRef.current],
-          msg: liveText || "",
-        };
+        arr[liveIdxRef.current] = { ...arr[liveIdxRef.current], msg: liveText || "" };
         return arr;
       });
     }
 
     // streaming stopped: debounce finalization to avoid fugacious cut-offs
-    if (
-      !isStreaming &&
-      liveIdxRef.current !== null &&
-      !finalizeTimerRef.current
-    ) {
+    if (!isStreaming && liveIdxRef.current !== null && !finalizeTimerRef.current) {
       finalizeTimerRef.current = setTimeout(() => {
         setChats((prev) => {
           const arr = [...prev];
@@ -265,9 +162,7 @@ const Chat = () => {
 
         audioPlayerRef.current.srcObject = stream;
         setAudioUrl(stream);
-        audioPlayerRef.current
-          .play()
-          .catch((err) => console.error("live stream play failed:", err));
+        audioPlayerRef.current.play().catch((err) => console.error("live stream play failed:", err));
       };
 
       pc.oniceconnectionstatechange = () => {
@@ -346,13 +241,11 @@ const Chat = () => {
             el.volume = 1;
             el.muted = false;
             if (!audioContextRef.current) {
-              audioContextRef.current =
-                new (window.AudioContext || window.webkitAudioContext)();
+              audioContextRef.current = new (window.AudioContext || window.webkitAudioContext)();
             }
 
             if (!audioSourceRef.current) {
-              audioSourceRef.current =
-                audioContextRef.current.createMediaElementSource(el);
+              audioSourceRef.current = audioContextRef.current.createMediaElementSource(el);
               analyserRef.current = audioContextRef.current.createAnalyser();
               audioSourceRef.current.connect(analyserRef.current);
               analyserRef.current.connect(audioContextRef.current.destination);
@@ -366,8 +259,7 @@ const Chat = () => {
 
             const monitorBotVolume = () => {
               analyser.getByteFrequencyData(dataArray);
-              const avg =
-                dataArray.reduce((sum, val) => sum + val, 0) / dataArray.length;
+              const avg = dataArray.reduce((sum, val) => sum + val, 0) / dataArray.length;
               const normalized = Math.max(0.5, Math.min(2, avg / 50));
               setAudioScale(normalized);
 
@@ -394,16 +286,12 @@ const Chat = () => {
       // Offer
       let offer;
       try {
-        offer = await pc.createOffer({
-          offerToReceiveAudio: true,
-          offerToReceiveVideo: false,
-        });
+        offer = await pc.createOffer({ offerToReceiveAudio: true, offerToReceiveVideo: false });
         const modifiedOffer = {
           ...offer,
           sdp: offer.sdp.replace(
             /a=rtpmap:\d+ opus\/48000\/2/g,
-            "a=rtpmap:111 opus/48000/2\r\n" +
-              "a=fmtp:111 minptime=10;useinbandfec=1"
+            "a=rtpmap:111 opus/48000/2\r\n" + "a=fmtp:111 minptime=10;useinbandfec=1"
           ),
         };
         await pc.setLocalDescription(modifiedOffer);
@@ -439,14 +327,7 @@ const Chat = () => {
     }
   };
 
-  const toggleMic = async () => {
-    // ✅ Block voice until PM questions done
-    if (isPersonalized && (!nudgePayload || nudgeIncomplete())) {
-      if (!complaintRef.current) complaintRef.current = "Voice consultation";
-      await fetchNudgeNext({ complaint: complaintRef.current });
-      return;
-    }
-
+  const toggleMic = () => {
     if (connectionStatus === "idle" || connectionStatus === "error") {
       startWebRTC();
       return;
@@ -458,51 +339,39 @@ const Chat = () => {
     }
   };
   // Close voice session immediately (DC, PC, tracks, audio, UI)
-  const closeVoiceSession = () => {
-    try {
-      stopAudio?.();
-    } catch {}
-    try {
-      const { setAudioScale } = useAudioForVisualizerStore.getState();
-      setAudioScale(1);
-    } catch {}
+const closeVoiceSession = () => {
+  try { stopAudio?.(); } catch {}
+  try {
+    const { setAudioScale } = useAudioForVisualizerStore.getState();
+    setAudioScale(1);
+  } catch {}
 
-    if (audioPlayerRef.current) {
-      try {
-        audioPlayerRef.current.pause();
-      } catch {}
-      audioPlayerRef.current.srcObject = null;
-      audioPlayerRef.current.src = "";
-    }
+  if (audioPlayerRef.current) {
+    try { audioPlayerRef.current.pause(); } catch {}
+    audioPlayerRef.current.srcObject = null;
+    audioPlayerRef.current.src = "";
+  }
 
-    if (dataChannel && dataChannel.readyState !== "closed") {
-      try {
-        dataChannel.close();
-      } catch {}
-    }
+  if (dataChannel && dataChannel.readyState !== "closed") {
+    try { dataChannel.close(); } catch {}
+  }
 
-    if (peerConnection) {
-      try {
-        peerConnection.getSenders?.().forEach((s) => s.track?.stop());
-      } catch {}
-      try {
-        peerConnection.close();
-      } catch {}
-    }
+  if (peerConnection) {
+    try { peerConnection.getSenders?.().forEach(s => s.track?.stop()); } catch {}
+    try { peerConnection.close(); } catch {}
+  }
 
-    if (localStream) {
-      try {
-        localStream.getTracks().forEach((t) => t.stop());
-      } catch {}
-      localStream = null;
-    }
+  if (localStream) {
+    try { localStream.getTracks().forEach(t => t.stop()); } catch {}
+    localStream = null;
+  }
 
-    setDataChannel(null);
-    setPeerConnection(null);
-    setIsMicActive(false);
-    setConnectionStatus("idle");
-    setIsVoiceMode(false);
-  };
+  setDataChannel(null);
+  setPeerConnection(null);
+  setIsMicActive(false);
+  setConnectionStatus("idle");
+  setIsVoiceMode(false);
+};
 
   const handleEnterVoiceMode = () => {
     setIsVoiceMode(true);
@@ -516,21 +385,12 @@ const Chat = () => {
   const handleNewMessage = async ({ text, skipEcho = false }) => {
     if (!text || !text.trim()) return;
 
-    // ✅ Personalized mode: trigger/continue nudge BEFORE normal chat
-    if (isPersonalized) {
-      if (!complaintRef.current) complaintRef.current = text.trim();
-      if (!nudgePayload || nudgeIncomplete()) {
-        await fetchNudgeNext({ complaint: complaintRef.current });
-        return;
-      }
-    }
-
     if (!skipEcho) {
       setChats((prev) => [...prev, { msg: text, who: "me" }]);
     }
     setSuggestedQuestions((prev) => prev.filter((q) => q !== text));
 
-    const res = await fetch(`${API_BASE}/stream`, {
+    const res = await fetch("https://ai-doctor-assistant-backend-server.onrender.com/stream", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ message: text, session_id: sessionId }),
@@ -617,14 +477,11 @@ const Chat = () => {
   const handleAssistantContextTranscript = async (transcript) => {
     try {
       if (!transcript || !transcript.trim()) return;
-      await fetch(
-        "https://ai-doctor-assistant-voice-mode-webrtc.onrender.com/api/session-context",
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ session_id: sessionId, transcript }),
-        }
-      );
+      await fetch("https://ai-doctor-assistant-voice-mode-webrtc.onrender.com/api/session-context", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ session_id: sessionId, transcript }),
+      });
     } catch (e) {
       console.error("Failed to send transcript context for voice assistant:", e);
     }
@@ -671,10 +528,7 @@ const Chat = () => {
       <audio ref={audioPlayerRef} playsInline style={{ display: "none" }} />
       <div className="chat-content">
         {chats.map((chat, index) => (
-          <div
-            key={index}
-            className={`chat-message ${chat.who} ${chat.live ? "live" : ""}`}
-          >
+          <div key={index} className={`chat-message ${chat.who} ${chat.live ? "live" : ""}`}>
             {chat.who === "bot" && (
               <figure className="avatar">
                 <img src="/av.gif" alt="avatar" />
@@ -687,30 +541,6 @@ const Chat = () => {
       </div>
 
       <div className="chat-footer">
-        {/* Personalized Medicine Toggle */}
-        <div className="pmode-toggle">
-          <label className="switch">
-            <input
-              type="checkbox"
-              checked={isPersonalized}
-              onChange={(e) => {
-                const on = e.target.checked;
-                setIsPersonalized(on);
-                if (!on) {
-                  // reset PM state when turning OFF
-                  setNudgeOpen(false);
-                  setNudgePayload(null);
-                  nudgeHistoryRef.current = [];
-                  complaintRef.current = "";
-                  setIntakeAnswers({ age: null, sex: null, pregnancy: null, weight: null });
-                }
-              }}
-            />
-            <span className="slider" />
-          </label>
-          <span className="pmode-label">Personalized Medicine</span>
-        </div>
-
         <SuggestedQuestionsAccordion
           questions={suggestedQuestions}
           onQuestionClick={({ text }) => handleNewMessage({ text, skipEcho: false })}
@@ -736,22 +566,6 @@ const Chat = () => {
       <button className="voice-toggle-button" onClick={handleEnterVoiceMode}>
         🎙️
       </button>
-
-      {/* Nudge modal */}
-      <NudgeModal
-        open={nudgeOpen}
-        payload={nudgePayload}
-        onClose={() => setNudgeOpen(false)}
-        onAnswer={async (qid, answer) => {
-          const data = await sendNudgeAnswer({ question_id: qid, answer });
-          if (data && (data.state === "complete" || data.state === "triage_urgent")) {
-            const text = complaintRef.current;
-            complaintRef.current = "";
-            // Echo complaint and proceed through normal chat flow
-            handleNewMessage({ text, skipEcho: false });
-          }
-        }}
-      />
 
       <VoiceRecorderPanel
         transcribeUrl="https://ai-doctor-assistant-backend-server.onrender.com/transcribe"
@@ -833,113 +647,3 @@ const SuggestedQuestionsAccordion = ({ questions, onQuestionClick }) => {
     </div>
   );
 };
-
-/** === Nudge Modal (fixed: hook is before any early return) === */
-const NudgeModal = ({ open, payload, onAnswer, onClose }) => {
-  const [val, setVal] = React.useState(""); // <-- hook first, always called
-
-  if (!open || !payload) return null;       // early return AFTER hooks
-
-  const q = payload.next_question || null;
-
-  const renderControls = () => {
-    if (!q) return null;
-
-    if (q.type === "enum" || q.type === "multiselect") {
-      const opts = Array.isArray(q.options) ? q.options : [];
-      return (
-        <div className="nudge-pills">
-          {opts.map((opt) => (
-            <button key={opt} className="pill" onClick={() => onAnswer(q.id, opt)}>
-              {opt}
-            </button>
-          ))}
-        </div>
-      );
-    }
-    if (q.type === "boolean") {
-      return (
-        <div className="nudge-pills">
-          <button className="pill" onClick={() => onAnswer(q.id, true)}>Yes</button>
-          <button className="pill" onClick={() => onAnswer(q.id, false)}>No</button>
-        </div>
-      );
-    }
-    if (q.type === "scale" || q.type === "number") {
-      return (
-        <div className="nudge-number-row">
-          <input
-            type="number"
-            inputMode="decimal"
-            placeholder={q.unit ? `${q.text} (${q.unit})` : q.text}
-            value={val}
-            onChange={(e) => setVal(e.target.value)}
-            onKeyDown={(e) => e.key === "Enter" && val !== "" && onAnswer(q.id, Number(val))}
-          />
-          <button disabled={val === ""} onClick={() => onAnswer(q.id, Number(val))}>
-            Submit
-          </button>
-        </div>
-      );
-    }
-    return (
-      <div className="nudge-text-row">
-        <input
-          type="text"
-          placeholder={q.text}
-          value={val}
-          onChange={(e) => setVal(e.target.value)}
-          onKeyDown={(e) => e.key === "Enter" && val.trim() && onAnswer(q.id, val.trim())}
-        />
-        <button disabled={!val.trim()} onClick={() => onAnswer(q.id, val.trim())}>
-          Submit
-        </button>
-      </div>
-    );
-  };
-
-  const state = payload.state;
-  const done = state === "complete" || state === "triage_urgent";
-
-  return (
-    <div className="nudge-overlay" role="dialog" aria-modal="true">
-      <div className="nudge-card">
-        <h3 className="nudge-title">{done ? "Summary ready" : "Quick critical questions"}</h3>
-
-        {!done && q && (
-          <>
-            <p className="nudge-question">{q.text}</p>
-            {q.hint && <div className="nudge-hint">{q.hint}</div>}
-            {renderControls()}
-            {Array.isArray(payload.alternatives) && payload.alternatives.length > 0 && (
-              <div className="nudge-alt">
-                <span>Or ask:</span>
-                {payload.alternatives.slice(0, 2).map((alt) => (
-                  <button
-                    key={alt.id}
-                    className="alt-pill"
-                    onClick={() => onAnswer(alt.id, "[skipped → alt]")}
-                  >
-                    {alt.text}
-                  </button>
-                ))}
-              </div>
-            )}
-          </>
-        )}
-
-        {done && (
-          <>
-            <div className="nudge-done-note">
-              {state === "triage_urgent"
-                ? "⚠️ Urgent triage suggested."
-                : "✅ Enough info collected."}
-            </div>
-            <button className="proceed-btn" onClick={onClose}>Proceed to chat</button>
-          </>
-        )}
-      </div>
-    </div>
-  );
-};
-

@@ -57,6 +57,16 @@ const ChatInputWidget = ({ onSendMessage }) => {
   };
   useEffect(() => adjustTextAreaHeight(), []);
 
+  // ===== Personalized Medicine Submit Guard (typed only) =====
+  const isPmodeOn = () => {
+    try { return localStorage.getItem("pmode") === "1"; } catch { return false; }
+  };
+  const guardedSend = (text) => {
+    // Single place to honor PM toggle for typed messages.
+    // Chat.jsx already enforces the full PM flow in handleNewMessage.
+    onSendMessage?.({ text });
+  };
+
   // ====== Voice visualization (AudioContext + Analyser + Canvas) + VAD ======
   const audioCtxRef = useRef(null);
   const analyserRef = useRef(null);
@@ -429,7 +439,7 @@ const ChatInputWidget = ({ onSendMessage }) => {
     await stopVisualizer();
   };
 
-  // Chat input (typed) handlers — unchanged for typed flow
+  // Chat input (typed) handlers — now routed via guardedSend
   const handleInputChange = (e) => {
     setInputText(e.target.value);
     adjustTextAreaHeight();
@@ -442,7 +452,8 @@ const ChatInputWidget = ({ onSendMessage }) => {
         // In voice mode, Enter acts as manual stop → send residual text
         await stopOnly();
       } else if (inputText.trim()) {
-        onSendMessage?.({ text: inputText.trim() });
+        // Submit path uses guard (respects Personalized toggle)
+        guardedSend(inputText.trim());
         setInputText("");
         adjustTextAreaHeight(true);
       }
@@ -452,7 +463,8 @@ const ChatInputWidget = ({ onSendMessage }) => {
   const handleIconClick = async () => {
     if (mode === "chat") {
       if (inputText.trim()) {
-        onSendMessage?.({ text: inputText.trim() });
+        // Submit path uses guard (respects Personalized toggle)
+        guardedSend(inputText.trim());
         setInputText("");
         adjustTextAreaHeight(true);
         return;
@@ -543,6 +555,7 @@ const ChatInputWidget = ({ onSendMessage }) => {
 };
 
 export default ChatInputWidget;
+
 
 
 

@@ -1,0 +1,302 @@
+/* =========================================================
+   Specialty.css — Multi-level dropdown (NO glassmorphism)
+   Uses your provided design tokens (solid surfaces, borders)
+   ========================================================= */
+
+/* ---------- TOKENS (as provided) ---------- */
+:root {
+    /* sizing/radii (shared) */
+    --radius-sm: 6px;
+    --radius-md: 12px;
+    --radius-lg: 16px;
+
+    /* shadows (shared) */
+    --shadow-1: 0 8px 18px rgba(0, 0, 0, .10);
+    --shadow-2: 0 12px 28px rgba(0, 0, 0, .18);
+}
+
+/* LIGHT */
+:root[data-theme="light"] {
+    color-scheme: light;
+    --primary: #6366f1;
+    /* brand */
+    --bg-app: #ffffff;
+    --ink: #0d0f14;
+    --ink-muted: #3a3f45;
+    --ink-subtle: #5a6168;
+
+    --surface: #ffffff;
+    --surface-2: #f5f7fb;
+
+    --border: rgba(0, 0, 0, .14);
+
+    --link: var(--primary);
+    --link-hover: #4f46e5;
+
+    --highlight: #fff59d;
+}
+
+/* DARK */
+:root[data-theme="dark"] {
+    color-scheme: dark;
+    --primary: #06b6d4;
+    /* brand */
+    --bg-app: #0f172a;
+    --ink: #f5f8ff;
+    --ink-muted: #c9d4ff;
+    --ink-subtle: #aab7cf;
+
+    --surface: #121826;
+    --surface-2: #0f172a;
+
+    --border: rgba(255, 255, 255, .22);
+
+    --link: var(--primary);
+    --link-hover: #22d3ee;
+
+    --highlight: #ffd54f;
+}
+
+/* =========================================================
+   Base helpers
+   ========================================================= */
+.nav-divider {
+    width: 1px;
+    height: 24px;
+    background: var(--border);
+    margin: 0 10px;
+}
+
+button,
+a {
+    -webkit-tap-highlight-color: transparent;
+}
+
+/* Reset list bullets inside our menus */
+.dd-l1,
+.dd-l2 {
+    margin: 0;
+    padding: 0;
+    list-style: none;
+}
+
+/* =========================================================
+   HOME multi-level dropdown (pure CSS hover/focus-within)
+   Structure:
+   .home-dd
+     > .home-trigger (the "Home" link)
+     > ul.dd-l1 (first level)
+        > li.has-subs > a.dd-link
+            > ul.dd-l2 (second level)
+                > li > button.dd-action (specialty pick)
+   ========================================================= */
+.home-dd {
+    position: relative;
+    display: inline-block;
+}
+
+/* Home trigger inherits your nav styling; add a small caret */
+.home-dd .home-trigger {
+    position: relative;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.home-dd .home-trigger:after {
+    content: "▾";
+    font-size: 11px;
+    opacity: .8;
+    transform: translateY(-1px);
+}
+
+/* --- First level dropdown container --- */
+.home-dd .dd-l1 {
+    position: absolute;
+    left: 0;
+    top: calc(100% + 10px);
+    min-width: 240px;
+    border-radius: var(--radius-lg);
+    background: var(--surface);
+    border: 1px solid var(--border);
+    color: var(--ink);
+    box-shadow: var(--shadow-2);
+    padding: 8px;
+    opacity: 0;
+    visibility: hidden;
+    transform: translateY(6px) scale(.98);
+    transition: opacity .18s ease, transform .18s ease, visibility .18s;
+    z-index: 9990;
+}
+
+/* show menu on hover or keyboard focus */
+.home-dd:hover .dd-l1,
+.home-dd:focus-within .dd-l1 {
+    opacity: 1;
+    visibility: visible;
+    transform: translateY(0) scale(1);
+}
+
+/* First-level items (categories) */
+.home-dd .dd-l1>li {
+    position: relative;
+}
+
+.home-dd .dd-link {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 10px 12px;
+    border-radius: var(--radius-md);
+    color: var(--ink);
+    text-decoration: none;
+    white-space: nowrap;
+}
+
+.home-dd .dd-link:hover {
+    background: var(--surface-2);
+}
+
+.home-dd .dd-link .caret {
+    opacity: .7;
+    font-size: 12px;
+}
+
+/* --- Second level (nested) --- */
+.home-dd .dd-l2 {
+    position: absolute;
+    top: 0;
+    left: calc(100% + 8px);
+    min-width: 260px;
+    border-radius: var(--radius-lg);
+    background: var(--surface);
+    border: 1px solid var(--border);
+    color: var(--ink);
+    box-shadow: var(--shadow-2);
+    padding: 8px;
+    opacity: 0;
+    visibility: hidden;
+    transform: translateY(6px) scale(.98);
+    transition: opacity .18s ease, transform .18s ease, visibility .18s;
+    z-index: 9991;
+}
+
+/* show second level when hovering that category row */
+.home-dd .has-subs:hover>.dd-l2,
+.home-dd .has-subs:focus-within>.dd-l2 {
+    opacity: 1;
+    visibility: visible;
+    transform: translateY(0) scale(1);
+}
+
+
+
+.home-dd .dd-action {
+    width: 100%;
+    text-align: left;
+    padding: 10px 12px;
+    border-radius: var(--radius-md);
+    border: 1px solid transparent;
+    background: transparent;
+    color: var(--ink);
+    cursor: pointer;
+    white-space: nowrap;
+    font: inherit;
+}
+
+.home-dd .dd-action:hover {
+    background: var(--surface-2);
+    border-color: var(--border);
+}
+
+/* Active/selected hint (optional) */
+.home-dd .dd-action.active {
+    border-color: var(--link);
+    background: color-mix(in srgb, var(--link) 12%, transparent);
+}
+
+/* --- Small responsive tweak for very narrow screens --- */
+@media (max-width: 520px) {
+    .home-dd .dd-l2 {
+        left: 0;
+        top: calc(100% + 8px);
+    }
+}
+
+/* =========================================================
+   Template panel used in Chat (solid, no glass)
+   ========================================================= */
+.template-panel {
+    border: 1px solid var(--border);
+    background: var(--surface);
+    border-radius: var(--radius-lg);
+    padding: 12px;
+    margin: 12px 0;
+    color: var(--ink);
+    box-shadow: var(--shadow-1);
+}
+
+:root[data-theme="dark"] .template-panel {
+    background: var(--surface);
+}
+
+.template-header {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+.template-header .badge {
+    background: var(--primary);
+    color: white;
+    border-radius: 999px;
+    padding: 2px 10px;
+    font-size: 12px;
+}
+
+.template-section h5 {
+    margin: 10px 0 6px;
+}
+
+.template-section ul {
+    margin: 0;
+    padding-left: 18px;
+}
+
+.template-section li {
+    margin: 2px 0;
+    color: inherit;
+}
+
+.fu-list {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-top: 6px;
+}
+
+.fu-chip {
+    font-size: 12px;
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    padding: 6px 10px;
+    background: var(--surface-2);
+    cursor: pointer;
+    color: inherit;
+}
+
+.fu-chip:hover {
+    background: var(--surface);
+}
+/* --- Programmatic close to override hover/focus state --- */
+.home-dd.force-close { pointer-events: none; }
+.home-dd.force-close .dd-l1,
+.home-dd.force-close .has-subs > .dd-l2 {
+  opacity: 0 !important;
+  visibility: hidden !important;
+  transform: translateY(6px) scale(.98) !important;
+}
+
+
+/* End of Specialty.css */

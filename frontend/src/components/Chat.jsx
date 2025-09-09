@@ -26,7 +26,14 @@ import VoiceRecorderPanel from "./VoiceRecorderPanel";
 // Live transcript store
 import useLiveTranscriptStore from "../store/useLiveTranscriptStore";
 
+/* ==== NEW: Specialty Template State + Panel ==== */
+import useSpecialtyStore from "../store/useSpecialtyStore";
+import { activateTemplate as apiActivateTemplate } from "../api/specialtyTemplate";
+import SpecialtyTemplatePanel from "./SpecialtyTemplatePanel";
+
 let localStream;
+
+const BACKEND_BASE = "https://ai-doctor-assistant-backend-server.onrender.com";
 
 const Chat = () => {
   const [chats, setChats] = useState([
@@ -62,6 +69,10 @@ const Chat = () => {
   const liveText = useLiveTranscriptStore((s) => s.text);
   const isStreaming = useLiveTranscriptStore((s) => s.isStreaming);
 
+  // ==== NEW: Specialty template store ====
+  const specialtyStore = useSpecialtyStore();
+  const { specialty, template, isActive } = specialtyStore; // expect: string, object/string, boolean
+
   // Index of the live "me" bubble in chats (or null)
   const liveIdxRef = useRef(null);
   // Debounce timer to avoid premature finalize on transient pauses
@@ -74,7 +85,7 @@ const Chat = () => {
 
   // suggestions
   useEffect(() => {
-    fetch("https://ai-doctor-assistant-backend-server.onrender.com/suggestions")
+    fetch(`${BACKEND_BASE}/suggestions`)
       .then((res) => res.json())
       .then((data) => setSuggestedQuestions(data.suggested_questions || []))
       .catch((err) => console.error("Failed to fetch suggestions:", err));
@@ -108,18 +119,26 @@ const Chat = () => {
     if (isStreaming && liveIdxRef.current !== null) {
       setChats((prev) => {
         const arr = [...prev];
-        arr[liveIdxRef.current] = { ...arr[liveIdxRef.current], msg: liveText || "" };
+        arr[liveIdxRef.current] = {
+          ...arr[liveIdxRef.current],
+          msg: liveText || "",
+        };
         return arr;
       });
     }
 
     // streaming stopped: debounce finalization to avoid fugacious cut-offs
-    if (!isStreaming && liveIdxRef.current !== null && !finalizeTimerRef.current) {
+    if (
+      !isStreaming &&
+      liveIdxRef.current !== null &&
+      !finalizeTimerRef.current
+    ) {
       finalizeTimerRef.current = setTimeout(() => {
         setChats((prev) => {
           const arr = [...prev];
           const idx = liveIdxRef.current;
-          if (arr[idx]) arr[idx] = { msg: liveText || arr[idx].msg || "", who: "me" };
+          if (arr[idx])
+            arr[idx] = { msg: liveText || arr[idx].msg || "", who: "me" };
           return arr;
         });
         liveIdxRef.current = null;
@@ -136,6 +155,24 @@ const Chat = () => {
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isStreaming, liveText]);
+
+  /* =========================
+     NEW: keep backend in sync so
+     voice "Record Case" also uses
+     the active template.
+     ========================= */
+  useEffect(() => {
+    const sync = async () => {
+      try {
+        if (isActive && specialty && template) {
+          await apiActivateTemplate(sessionId, specialty, template);
+        }
+      } catch (e) {
+        console.error("Template sync failed:", e);
+      }
+    };
+    sync();
+  }, [isActive, specialty, template, sessionId]);
 
   // ===== Your existing WebRTC (voice assistant) — left intact =====
   const startWebRTC = async () => {
@@ -162,7 +199,9 @@ const Chat = () => {
 
         audioPlayerRef.current.srcObject = stream;
         setAudioUrl(stream);
-        audioPlayerRef.current.play().catch((err) => console.error("live stream play failed:", err));
+        audioPlayerRef.current
+          .play()
+          .catch((err) => console.error("live stream play failed:", err));
       };
 
       pc.oniceconnectionstatechange = () => {
@@ -176,14 +215,20 @@ const Chat = () => {
       pc.onicecandidateerror = (e) => console.error("ICE candidate error:", e);
       pc.onnegotiationneeded = () => {};
       pc.onconnectionstatechange = () => {
-        if (pc.connectionState === "closed" || pc.connectionState === "failed") {
+        if (
+          pc.connectionState === "closed" ||
+          pc.connectionState === "failed"
+        ) {
           setConnectionStatus("error");
           setIsMicActive(false);
         }
       };
 
-      if (!localStream) console.error("localStream undefined when adding track.");
-      stream.getAudioTracks().forEach((track) => pc.addTrack(track, localStream));
+      if (!localStream)
+        console.error("localStream undefined when adding track.");
+      stream
+        .getAudioTracks()
+        .forEach((track) => pc.addTrack(track, localStream));
 
       const channel = pc.createDataChannel("response");
 
@@ -224,7 +269,9 @@ const Chat = () => {
         const msg = JSON.parse(event.data);
         switch (msg.type) {
           case "response.audio.delta": {
-            const chunk = Uint8Array.from(atob(msg.delta), (c) => c.charCodeAt(0));
+            const chunk = Uint8Array.from(atob(msg.delta), (c) =>
+              c.charCodeAt(0)
+            );
             const tmp = new Uint8Array(pcmBuffer.byteLength + chunk.byteLength);
             tmp.set(new Uint8Array(pcmBuffer), 0);
             tmp.set(chunk, pcmBuffer.byteLength);
@@ -241,11 +288,13 @@ const Chat = () => {
             el.volume = 1;
             el.muted = false;
             if (!audioContextRef.current) {
-              audioContextRef.current = new (window.AudioContext || window.webkitAudioContext)();
+              audioContextRef.current = new (window.AudioContext ||
+                window.webkitAudioContext)();
             }
 
             if (!audioSourceRef.current) {
-              audioSourceRef.current = audioContextRef.current.createMediaElementSource(el);
+              audioSourceRef.current =
+                audioContextRef.current.createMediaElementSource(el);
               analyserRef.current = audioContextRef.current.createAnalyser();
               audioSourceRef.current.connect(analyserRef.current);
               analyserRef.current.connect(audioContextRef.current.destination);
@@ -259,16 +308,20 @@ const Chat = () => {
 
             const monitorBotVolume = () => {
               analyser.getByteFrequencyData(dataArray);
-              const avg = dataArray.reduce((sum, val) => sum + val, 0) / dataArray.length;
+              const avg =
+                dataArray.reduce((sum, val) => sum + val, 0) / dataArray.length;
               const normalized = Math.max(0.5, Math.min(2, avg / 50));
               setAudioScale(normalized);
 
-              if (!el.paused && !el.ended) requestAnimationFrame(monitorBotVolume);
+              if (!el.paused && !el.ended)
+                requestAnimationFrame(monitorBotVolume);
             };
 
             monitorBotVolume();
             setAudioWave(true);
-            el.play().catch((err) => console.error("play error:", err.name, err.message));
+            el.play().catch((err) =>
+              console.error("play error:", err.name, err.message)
+            );
             pcmBuffer = new ArrayBuffer(0);
             break;
           }
@@ -286,12 +339,16 @@ const Chat = () => {
       // Offer
       let offer;
       try {
-        offer = await pc.createOffer({ offerToReceiveAudio: true, offerToReceiveVideo: false });
+        offer = await pc.createOffer({
+          offerToReceiveAudio: true,
+          offerToReceiveVideo: false,
+        });
         const modifiedOffer = {
           ...offer,
           sdp: offer.sdp.replace(
             /a=rtpmap:\d+ opus\/48000\/2/g,
-            "a=rtpmap:111 opus/48000/2\r\n" + "a=fmtp:111 minptime=10;useinbandfec=1"
+            "a=rtpmap:111 opus/48000/2\r\n" +
+              "a=fmtp:111 minptime=10;useinbandfec=1"
           ),
         };
         await pc.setLocalDescription(modifiedOffer);
@@ -312,12 +369,16 @@ const Chat = () => {
         `https://ai-doctor-assistant-voice-mode-webrtc.onrender.com/api/rtc-connect?session_id=${sessionId}`,
         {
           method: "POST",
-          headers: { "Content-Type": "application/sdp", "X-Session-Id": sessionId },
+          headers: {
+            "Content-Type": "application/sdp",
+            "X-Session-Id": sessionId,
+          },
           body: offer.sdp,
         }
       );
 
-      if (!res.ok) throw new Error(`Server responded with status ${res.status}`);
+      if (!res.ok)
+        throw new Error(`Server responded with status ${res.status}`);
       const answer = await res.text();
       await pc.setRemoteDescription({ type: "answer", sdp: answer });
     } catch (error) {
@@ -335,43 +396,57 @@ const Chat = () => {
     if (connectionStatus === "connected" && localStream) {
       const newMicState = !isMicActive;
       setIsMicActive(newMicState);
-      localStream.getAudioTracks().forEach((track) => (track.enabled = newMicState));
+      localStream
+        .getAudioTracks()
+        .forEach((track) => (track.enabled = newMicState));
     }
   };
   // Close voice session immediately (DC, PC, tracks, audio, UI)
-const closeVoiceSession = () => {
-  try { stopAudio?.(); } catch {}
-  try {
-    const { setAudioScale } = useAudioForVisualizerStore.getState();
-    setAudioScale(1);
-  } catch {}
+  const closeVoiceSession = () => {
+    try {
+      stopAudio?.();
+    } catch {}
+    try {
+      const { setAudioScale } = useAudioForVisualizerStore.getState();
+      setAudioScale(1);
+    } catch {}
 
-  if (audioPlayerRef.current) {
-    try { audioPlayerRef.current.pause(); } catch {}
-    audioPlayerRef.current.srcObject = null;
-    audioPlayerRef.current.src = "";
-  }
+    if (audioPlayerRef.current) {
+      try {
+        audioPlayerRef.current.pause();
+      } catch {}
+      audioPlayerRef.current.srcObject = null;
+      audioPlayerRef.current.src = "";
+    }
 
-  if (dataChannel && dataChannel.readyState !== "closed") {
-    try { dataChannel.close(); } catch {}
-  }
+    if (dataChannel && dataChannel.readyState !== "closed") {
+      try {
+        dataChannel.close();
+      } catch {}
+    }
 
-  if (peerConnection) {
-    try { peerConnection.getSenders?.().forEach(s => s.track?.stop()); } catch {}
-    try { peerConnection.close(); } catch {}
-  }
+    if (peerConnection) {
+      try {
+        peerConnection.getSenders?.().forEach((s) => s.track?.stop());
+      } catch {}
+      try {
+        peerConnection.close();
+      } catch {}
+    }
 
-  if (localStream) {
-    try { localStream.getTracks().forEach(t => t.stop()); } catch {}
-    localStream = null;
-  }
+    if (localStream) {
+      try {
+        localStream.getTracks().forEach((t) => t.stop());
+      } catch {}
+      localStream = null;
+    }
 
-  setDataChannel(null);
-  setPeerConnection(null);
-  setIsMicActive(false);
-  setConnectionStatus("idle");
-  setIsVoiceMode(false);
-};
+    setDataChannel(null);
+    setPeerConnection(null);
+    setIsMicActive(false);
+    setConnectionStatus("idle");
+    setIsVoiceMode(false);
+  };
 
   const handleEnterVoiceMode = () => {
     setIsVoiceMode(true);
@@ -381,7 +456,10 @@ const closeVoiceSession = () => {
     }
   };
 
-  // ===== Send message to backend; stream into ONE bot bubble =====
+  /* =========================
+     Send message to backend;
+     try template-aware endpoint
+     ========================= */
   const handleNewMessage = async ({ text, skipEcho = false }) => {
     if (!text || !text.trim()) return;
 
@@ -390,38 +468,84 @@ const closeVoiceSession = () => {
     }
     setSuggestedQuestions((prev) => prev.filter((q) => q !== text));
 
-    const res = await fetch("https://ai-doctor-assistant-backend-server.onrender.com/stream", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ message: text, session_id: sessionId }),
-    });
+    // Try /stream-with-template first; fallback to /stream
+    const payloadWithTemplate = {
+      message: text,
+      session_id: sessionId,
+      specialty: isActive ? specialty : undefined,
+      template: isActive ? template : undefined,
+      template_active: !!isActive,
+    };
 
-    if (!res.ok || !res.body) {
-      setChats((prev) => [...prev, { msg: "Something went wrong.", who: "bot" }]);
-      return;
-    }
-
-    const reader = res.body.getReader();
-    const decoder = new TextDecoder();
-    let message = "";
-    let isFirstChunk = true;
-
-    while (true) {
-      const { value, done } = await reader.read();
-      if (done) break;
-      const chunk = decoder.decode(value, { stream: true });
-
-      if (isFirstChunk) {
-        setChats((prev) => [...prev, { msg: "", who: "bot" }]);
-        isFirstChunk = false;
+    // helper to stream response
+    const streamToChat = async (res) => {
+      if (!res.ok || !res.body) {
+        setChats((prev) => [
+          ...prev,
+          { msg: "Something went wrong.", who: "bot" },
+        ]);
+        return;
       }
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+      let message = "";
+      let isFirstChunk = true;
 
-      message += chunk;
-      setChats((prev) => {
-        const updated = [...prev];
-        updated[updated.length - 1].msg = message;
-        return updated;
+      while (true) {
+        const { value, done } = await reader.read();
+        if (done) break;
+        const chunk = decoder.decode(value, { stream: true });
+
+        if (isFirstChunk) {
+          setChats((prev) => [...prev, { msg: "", who: "bot" }]);
+          isFirstChunk = false;
+        }
+
+        message += chunk;
+        setChats((prev) => {
+          const updated = [...prev];
+          updated[updated.length - 1].msg = message;
+          return updated;
+        });
+      }
+    };
+
+    // Attempt template-aware streaming
+    try {
+      const resTpl = await fetch(`${BACKEND_BASE}/stream-with-template`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payloadWithTemplate),
       });
+
+      if (resTpl.ok && resTpl.body) {
+        await streamToChat(resTpl);
+        return;
+      }
+      // Fallback to classic /stream if not supported
+      const res = await fetch(`${BACKEND_BASE}/stream`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        // As a soft fallback, prepend a short inline instruction if template is active
+        body: JSON.stringify({
+          message:
+            isActive && template
+              ? `[Use the following ${specialty} specialty template (sections, phrasing, follow-ups) when answering and asking clarifying questions.]\n${
+                  typeof template === "string"
+                    ? template
+                    : JSON.stringify(template)
+                }\n\nUser: ${text}`
+              : text,
+          session_id: sessionId,
+        }),
+      });
+      await streamToChat(res);
+    } catch (e) {
+      console.error("Chat request failed:", e);
+      setChats((prev) => [
+        ...prev,
+        { msg: "Something went wrong.", who: "bot" },
+      ]);
     }
   };
 
@@ -477,13 +601,29 @@ const closeVoiceSession = () => {
   const handleAssistantContextTranscript = async (transcript) => {
     try {
       if (!transcript || !transcript.trim()) return;
-      await fetch("https://ai-doctor-assistant-voice-mode-webrtc.onrender.com/api/session-context", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ session_id: sessionId, transcript }),
-      });
+
+      // Keep voice session aware of current template (belt & suspenders)
+      if (isActive && specialty && template) {
+        try {
+          await apiActivateTemplate(sessionId, specialty, template);
+        } catch (e) {
+          console.error("Voice template sync failed:", e);
+        }
+      }
+
+      await fetch(
+        "https://ai-doctor-assistant-voice-mode-webrtc.onrender.com/api/session-context",
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ session_id: sessionId, transcript }),
+        }
+      );
     } catch (e) {
-      console.error("Failed to send transcript context for voice assistant:", e);
+      console.error(
+        "Failed to send transcript context for voice assistant:",
+        e
+      );
     }
   };
 
@@ -528,7 +668,10 @@ const closeVoiceSession = () => {
       <audio ref={audioPlayerRef} playsInline style={{ display: "none" }} />
       <div className="chat-content">
         {chats.map((chat, index) => (
-          <div key={index} className={`chat-message ${chat.who} ${chat.live ? "live" : ""}`}>
+          <div
+            key={index}
+            className={`chat-message ${chat.who} ${chat.live ? "live" : ""}`}
+          >
             {chat.who === "bot" && (
               <figure className="avatar">
                 <img src="/av.gif" alt="avatar" />
@@ -540,10 +683,19 @@ const closeVoiceSession = () => {
         <div ref={scrollAnchorRef} />
       </div>
 
+      {/* ==== NEW: Show active template summary so the doctor knows what's applied ==== */}
+      {isActive && template && (
+        <div style={{ margin: "0 16px" }}>
+          <SpecialtyTemplatePanel specialty={specialty} template={template} />
+        </div>
+      )}
+
       <div className="chat-footer">
         <SuggestedQuestionsAccordion
           questions={suggestedQuestions}
-          onQuestionClick={({ text }) => handleNewMessage({ text, skipEcho: false })}
+          onQuestionClick={({ text }) =>
+            handleNewMessage({ text, skipEcho: false })
+          }
         />
         <ChatInputWidget onSendMessage={handleNewMessage} />
       </div>
@@ -568,8 +720,8 @@ const closeVoiceSession = () => {
       </button>
 
       <VoiceRecorderPanel
-        transcribeUrl="https://ai-doctor-assistant-backend-server.onrender.com/transcribe"
-        opinionUrl="https://ai-doctor-assistant-backend-server.onrender.com/case-second-opinion-stream"
+        transcribeUrl={`${BACKEND_BASE}/transcribe`}
+        opinionUrl={`${BACKEND_BASE}/case-second-opinion-stream`}
         fileFieldName="audio_data"
         anchorLeft={72}
         anchorBottom={96}
@@ -587,7 +739,10 @@ const CollapsibleDiagram = ({ chart }) => {
   const [isOpen, setIsOpen] = useState(false);
   return (
     <div className="collapsible-diagram">
-      <div className="collapsible-header" onClick={() => setIsOpen((prev) => !prev)}>
+      <div
+        className="collapsible-header"
+        onClick={() => setIsOpen((prev) => !prev)}
+      >
         <span className="toggle-icon">{isOpen ? "–" : "+"}</span> View Diagram
       </div>
       <AnimatePresence initial={false}>

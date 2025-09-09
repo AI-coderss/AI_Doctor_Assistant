@@ -1,6 +1,8 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useLocation } from "react-router-dom";
 import "../styles/Navbar.css";
+import "../styles/Specialty.css";
+import SpecialtyHomeMenu from "./SpecialtyHomeMenu";
 
 const THEME_KEY = "theme";
 
@@ -9,9 +11,7 @@ function readStoredTheme() {
   try {
     const v = localStorage.getItem(THEME_KEY);
     if (v === "dark" || v === "light") return v;
-  } catch (_e) {
-    // ignore storage errors (private mode, etc.)
-  }
+  } catch (_e) {}
   const prefersDark =
     typeof window !== "undefined" &&
     window.matchMedia?.("(prefers-color-scheme: dark)")?.matches;
@@ -22,9 +22,7 @@ function readStoredTheme() {
 function applyTheme(t) {
   const root = document.documentElement;
   root.setAttribute("data-theme", t);
-  // Help OS/native UI choose proper colors for inputs/scrollbars
   root.style.colorScheme = t;
-  // Optional: mirror on body for CSS that targets body[data-theme]
   document.body?.setAttribute("data-theme", t);
 }
 
@@ -42,6 +40,10 @@ const Navbar = () => {
   const navLinksRef = useRef(null);
   const mobileBtnRef = useRef(null);
 
+  // NEW: programmatic close state for the Home dropdown
+  const [homeForceClose, setHomeForceClose] = useState(false);
+  const homeRef = useRef(null);
+
   const navItems = useMemo(
     () => [
       { to: "/", label: "Home 🏠" },
@@ -52,16 +54,12 @@ const Navbar = () => {
 
   // Persist on change & re-apply to be extra sure
   useEffect(() => {
-    try {
-      localStorage.setItem(THEME_KEY, theme);
-    } catch (_e) {}
+    try { localStorage.setItem(THEME_KEY, theme); } catch (_e) {}
     applyTheme(theme);
   }, [theme]);
 
   // Close mobile menu on route change
-  useEffect(() => {
-    setMenuOpen(false);
-  }, [location.pathname]);
+  useEffect(() => { setMenuOpen(false); }, [location.pathname]);
 
   // Click-outside to close mobile drawer
   useEffect(() => {
@@ -69,12 +67,7 @@ const Navbar = () => {
     const handleClick = (e) => {
       const linksEl = navLinksRef.current;
       const btnEl = mobileBtnRef.current;
-      if (
-        linksEl &&
-        !linksEl.contains(e.target) &&
-        btnEl &&
-        !btnEl.contains(e.target)
-      ) {
+      if (linksEl && !linksEl.contains(e.target) && btnEl && !btnEl.contains(e.target)) {
         setMenuOpen(false);
       }
     };
@@ -82,7 +75,7 @@ const Navbar = () => {
     return () => document.removeEventListener("click", handleClick);
   }, [menuOpen]);
 
-  // Sync theme across tabs/windows (stringent persistence)
+  // Sync theme across tabs/windows
   useEffect(() => {
     const onStorage = (e) => {
       if (e.key === THEME_KEY && (e.newValue === "dark" || e.newValue === "light")) {
@@ -95,6 +88,15 @@ const Navbar = () => {
 
   const toggleTheme = () => setTheme((t) => (t === "light" ? "dark" : "light"));
   const isActive = (to) => location.pathname === to;
+
+  // When a specialty is picked, force-close the hover menu briefly
+  const handleMenuPicked = () => {
+    // blur any focused element to end :focus-within visibility
+    try { document.activeElement?.blur?.(); } catch {}
+    setHomeForceClose(true);
+    // After transition time, allow hovering again
+    setTimeout(() => setHomeForceClose(false), 220);
+  };
 
   return (
     <nav className="premium-nav" role="navigation" aria-label="Main Navigation">
@@ -112,16 +114,35 @@ const Navbar = () => {
           role="menubar"
           aria-label="Primary"
         >
-          {navItems.map((item, idx) => (
+          {/* Home: multi-level dropdown */}
+          <div
+            ref={homeRef}
+            className={`home-dd ${isActive("/") ? "active" : ""} ${homeForceClose ? "force-close" : ""}`}
+            onMouseLeave={() => setHomeForceClose(false)}
+          >
+            {/* Prevent navigation; dropdown opens on hover/focus */}
+            <Link
+              to="/"
+              role="menuitem"
+              className={`nav-link home-trigger ${isActive("/") ? "active" : ""}`}
+              onClick={(e) => e.preventDefault()}
+            >
+              <span>Home 🏠</span>
+            </Link>
+
+            {/* Multi-level dropdown */}
+            <SpecialtyHomeMenu onPicked={handleMenuPicked} />
+          </div>
+
+          {/* Other nav items */}
+          {navItems.slice(1).map((item, idx) => (
             <Link
               key={item.to}
               to={item.to}
               role="menuitem"
               className={`nav-link ${isActive(item.to) ? "active" : ""}`}
               onClick={() => setMenuOpen(false)}
-              style={{
-                animation: `navItemFade 0.5s ease forwards ${idx / 7 + 0.3}s`,
-              }}
+              style={{ animation: `navItemFade 0.5s ease forwards ${idx / 7 + 0.3}s` }}
             >
               <span>{item.label}</span>
             </Link>
@@ -171,6 +192,10 @@ const Navbar = () => {
 };
 
 export default Navbar;
+
+
+
+
 
 
 

@@ -27,6 +27,44 @@ load_dotenv()
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 if not OPENAI_API_KEY:
     raise RuntimeError("Missing OPENAI_API_KEY")
+# ===== Adaptive Specialty Templates (session-scoped) =====
+ACTIVE_TEMPLATES = {}  # session_id -> {"specialty": str, "template": dict, "activated_at": iso}
+
+def _build_specialty_template_prompt(specialty: str) -> str:
+    """
+    Ask the LLM to RETURN STRICT JSON ONLY for a specialty note template.
+    The JSON includes ordered sections, fields, and suggested follow-up questions.
+    """
+    return (
+        "You are a clinical template designer. RETURN STRICT JSON ONLY.\n"
+        "Schema:\n"
+        "{\n"
+        '  "specialty": "lowercase specialty name",\n'
+        '  "sections": [\n'
+        '     {"title":"Subjective","fields":["..."]},\n'
+        '     {"title":"Objective","fields":["..."]},\n'
+        '     {"title":"Assessment","fields":["..."]},\n'
+        '     {"title":"Plan","fields":["..."]}\n'
+        "  ],\n"
+        '  "follow_up_questions":[ "short, direct clinician prompts..." ],\n'
+        '  "style": {"tone":"concise, clinical","bullets":true,"icd_cpt_suggestions":true}\n'
+        "}\n"
+        "Rules:\n"
+        "- Use standard SOAP variants suitable for the specialty.\n"
+        "- Add 6–10 precise follow_up_questions a doctor would ask for this specialty.\n"
+        f"- Specialty: {specialty}\n"
+    )
+
+def _safe_json_dict(text: str):
+    # re-use your existing tolerant parser if you prefer
+    try:
+        return json.loads(re.sub(r"```json|```", "", (text or "").strip(), flags=re.I))
+    except Exception:
+        m = re.search(r"\{[\s\S]*\}", text or "")
+        if m:
+            try: return json.loads(m.group(0))
+            except Exception: pass
+    return None
 
 app = Flask(__name__)
 CORS(app, resources={
@@ -977,6 +1015,152 @@ def rtc_transcribe_connect():
     resp.headers["Content-Disposition"] = "inline; filename=answer.sdp"
     resp.headers["Cache-Control"] = "no-store"
     return resp
+from datetime import timezone
+
+@app.route("/specialty-template/generate", methods=["POST"])
+def specialty_template_generate():
+    """
+    Body: { specialty: str, session_id?: str }
+    Returns: { specialty, template }
+    """
+    data = request.get_json() or {}
+    specialty = (data.get("specialty") or "").strip().lower()
+    session_id = data.get("session_id", str(uuid4()))
+    if not specialty:
+        return jsonify({"error": "Missing specialty"}), 400
+
+    prompt = _build_specialty_template_prompt(specialty)
+    try:
+        resp = conversation_rag_chain.invoke({"chat_history": [], "input": prompt})
+        raw = (resp.get("answer") or "").strip()
+        doc = _safe_json_dict(raw)
+    except Exception as e:
+        doc = None
+
+    # fallback minimal template if model fails
+    if not isinstance(doc, dict) or not doc.get("sections"):
+        doc = {
+            "specialty": specialty,
+            "sections": [
+                {"title":"Subjective","fields":["Chief complaint","Onset","Duration","Modifying factors","ROS"]},
+                {"title":"Objective","fields":["Vitals","Exam key findings","Pertinent labs/imaging"]},
+                {"title":"Assessment","fields":["Working diagnosis","Differential diagnoses"]},
+                {"title":"Plan","fields":["Investigations","Medications","Non-pharmacologic","Follow-up"]},
+            ],
+            "follow_up_questions":[
+                "What is the primary symptom and duration?",
+                "Any red flags (fever, syncope, bleeding, weight loss)?"
+            ],
+            "style":{"tone":"concise, clinical","bullets":True,"icd_cpt_suggestions":True}
+        }
+
+    return jsonify({"session_id": session_id, "specialty": specialty, "template": doc}), 200
+
+
+@app.route("/specialty-template/activate", methods=["POST"])
+def specialty_template_activate():
+    """
+    Body: { session_id: str, specialty: str, template: {...} }
+    Stores the active template for the session.
+    """
+    data = request.get_json() or {}
+    session_id = data.get("session_id")
+    specialty = (data.get("specialty") or "").strip().lower()
+    template = data.get("template")
+    if not (session_id and specialty and isinstance(template, dict)):
+        return jsonify({"error": "Missing session_id/specialty/template"}), 400
+
+    ACTIVE_TEMPLATES[session_id] = {
+        "specialty": specialty,
+        "template": template,
+        "activated_at": datetime.now(timezone.utc).isoformat()
+    }
+    return jsonify({"ok": True, "active": ACTIVE_TEMPLATES[session_id]}), 200
+
+
+@app.route("/specialty-template/deactivate", methods=["POST"])
+def specialty_template_deactivate():
+    data = request.get_json() or {}
+    session_id = data.get("session_id")
+    if not session_id:
+        return jsonify({"error": "Missing session_id"}), 400
+    ACTIVE_TEMPLATES.pop(session_id, None)
+    return jsonify({"ok": True}), 200
+
+
+@app.route("/specialty-template/active", methods=["GET"])
+def specialty_template_active():
+    session_id = request.args.get("session_id", "")
+    active = ACTIVE_TEMPLATES.get(session_id)
+    return jsonify({"exists": bool(active), "active": active}), 200
+@app.route("/stream-with-template", methods=["POST"])
+def stream_with_template():
+    """
+    Body: { message: str, session_id?: str }
+    If a specialty template is active, prepend strict instructions so the AI:
+      - uses the template sections order,
+      - fills available items,
+      - asks 1–2 follow-up questions from template.follow_up_questions based on missing fields,
+      - stays concise & clinical.
+    """
+    data = request.get_json() or {}
+    session_id = data.get("session_id", str(uuid4()))
+    user_input = (data.get("message") or "").strip()
+    if not user_input:
+        return jsonify({"error": "No input message"}), 400
+
+    active = ACTIVE_TEMPLATES.get(session_id)
+    if not active:
+        # fallback to normal behavior if nothing is active
+        # (no changes to your original /stream UX)
+        def passthrough():
+            answer = ""
+            try:
+                for chunk in conversation_rag_chain.stream(
+                    {"chat_history": chat_sessions.get(session_id, []), "input": user_input}
+                ):
+                    token = chunk.get("answer", "")
+                    answer += token
+                    yield token
+            except Exception as e:
+                yield f"\n[Vector error: {str(e)}]"
+            chat_sessions.setdefault(session_id, [])
+            chat_sessions[session_id].append({"role": "user", "content": user_input})
+            chat_sessions[session_id].append({"role": "assistant", "content": answer})
+        return Response(stream_with_context(passthrough()), content_type="text/plain")
+
+    template = active["template"]
+    template_json = json.dumps(template, ensure_ascii=False)
+
+    instruction = (
+        "ADAPTIVE SPECIALTY TEMPLATE MODE (STRICT):\n"
+        "- Use the following JSON template (sections order, field names) to structure the note.\n"
+        "- Fill what is known; list **Missing** fields clearly and ask at most TWO targeted follow-ups from 'follow_up_questions'.\n"
+        "- Tone: concise, clinical; prefer bullets.\n"
+        "- If coding is appropriate, suggest ICD/CPT hints at the end.\n"
+        f"TEMPLATE_JSON:\n{template_json}\n\n"
+        f"USER_MESSAGE:\n{user_input}\n"
+    )
+
+    if session_id not in chat_sessions:
+        chat_sessions[session_id] = []
+
+    def generate():
+        answer = ""
+        try:
+            for chunk in conversation_rag_chain.stream(
+                {"chat_history": chat_sessions[session_id], "input": instruction}
+            ):
+                token = chunk.get("answer", "")
+                answer += token
+                yield token
+        except Exception as e:
+            yield f"\n[Vector error: {str(e)}]"
+
+        chat_sessions[session_id].append({"role": "user", "content": f"[TemplateMode] {user_input}"})
+        chat_sessions[session_id].append({"role": "assistant", "content": answer})
+
+    return Response(stream_with_context(generate()), content_type="text/plain")
 
 
 

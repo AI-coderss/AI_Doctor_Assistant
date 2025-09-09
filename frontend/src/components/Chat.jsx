@@ -1,3 +1,6 @@
+/* eslint-disable no-unused-vars */
+/* eslint-disable no-useless-concat */
+/* eslint-disable no-loop-func */
 /* eslint-disable react-hooks/exhaustive-deps */
 /* eslint-disable no-unused-vars */
 /* eslint-disable no-useless-concat */
@@ -23,14 +26,7 @@ import VoiceRecorderPanel from "./VoiceRecorderPanel";
 // Live transcript store
 import useLiveTranscriptStore from "../store/useLiveTranscriptStore";
 
-/* ==== NEW: Specialty Template State + Panel ==== */
-import useSpecialtyStore from "../store/useSpecialtyStore";
-import { activateTemplate as apiActivateTemplate } from "../api/specialtyTemplate";
-import SpecialtyTemplatePanel from "./SpecialtyTemplatePanel";
-
 let localStream;
-
-const BACKEND_BASE = "https://ai-doctor-assistant-backend-server.onrender.com";
 
 const Chat = () => {
   const [chats, setChats] = useState([
@@ -66,10 +62,6 @@ const Chat = () => {
   const liveText = useLiveTranscriptStore((s) => s.text);
   const isStreaming = useLiveTranscriptStore((s) => s.isStreaming);
 
-  // ==== NEW: Specialty template store ====
-  const specialtyStore = useSpecialtyStore();
-  const { specialty, template, isActive } = specialtyStore; // expect: string, object/string, boolean
-
   // Index of the live "me" bubble in chats (or null)
   const liveIdxRef = useRef(null);
   // Debounce timer to avoid premature finalize on transient pauses
@@ -82,7 +74,7 @@ const Chat = () => {
 
   // suggestions
   useEffect(() => {
-    fetch(`${BACKEND_BASE}/suggestions`)
+    fetch("https://ai-doctor-assistant-backend-server.onrender.com/suggestions")
       .then((res) => res.json())
       .then((data) => setSuggestedQuestions(data.suggested_questions || []))
       .catch((err) => console.error("Failed to fetch suggestions:", err));
@@ -144,24 +136,6 @@ const Chat = () => {
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isStreaming, liveText]);
-
-  /* =========================
-     NEW: keep backend in sync so
-     voice "Record Case" also uses
-     the active template.
-     ========================= */
-  useEffect(() => {
-    const sync = async () => {
-      try {
-        if (isActive && specialty && template) {
-          await apiActivateTemplate(sessionId, specialty, template);
-        }
-      } catch (e) {
-        console.error("Template sync failed:", e);
-      }
-    };
-    sync();
-  }, [isActive, specialty, template, sessionId]);
 
   // ===== Your existing WebRTC (voice assistant) — left intact =====
   const startWebRTC = async () => {
@@ -407,11 +381,7 @@ const closeVoiceSession = () => {
     }
   };
 
-  /* =========================
-     Send message to backend;
-     try template-aware endpoint first,
-     otherwise fallback WITHOUT JSON.
-     ========================= */
+  // ===== Send message to backend; stream into ONE bot bubble =====
   const handleNewMessage = async ({ text, skipEcho = false }) => {
     if (!text || !text.trim()) return;
 
@@ -420,92 +390,38 @@ const closeVoiceSession = () => {
     }
     setSuggestedQuestions((prev) => prev.filter((q) => q !== text));
 
-    // Try /stream-with-template first; fallback to /stream (no JSON injection)
-    const payloadWithTemplate = {
-      message: text,
-      session_id: sessionId,
-      specialty: isActive ? specialty : undefined,
-      template: undefined, // IMPORTANT: do not send raw JSON template to the model
-      template_active: !!isActive,
-    };
+    const res = await fetch("https://ai-doctor-assistant-backend-server.onrender.com/stream", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ message: text, session_id: sessionId }),
+    });
 
-    // helper to stream response
-    const streamToChat = async (res) => {
-      if (!res.ok || !res.body) {
-        setChats((prev) => [...prev, { msg: "Something went wrong.", who: "bot" }]);
-        return;
-      }
-      const reader = res.body.getReader();
-      const decoder = new TextDecoder();
-      let message = "";
-      let isFirstChunk = true;
-
-      while (true) {
-        const { value, done } = await reader.read();
-        if (done) break;
-        const chunk = decoder.decode(value, { stream: true });
-
-        if (isFirstChunk) {
-          setChats((prev) => [...prev, { msg: "", who: "bot" }]);
-          isFirstChunk = false;
-        }
-
-        message += chunk;
-
-        // Guard: if a model ever starts printing JSON, pivot to a single follow-up question
-        if (/^\s*[{[]/.test(message) && /"sections"|^\s*{/.test(message)) {
-          message =
-            "Let’s proceed step by step. Please answer this first question: Do they have any medication or food allergies?";
-        }
-
-        setChats((prev) => {
-          const updated = [...prev];
-          updated[updated.length - 1].msg = message;
-          return updated;
-        });
-      }
-    };
-
-    try {
-      // Attempt template-aware streaming endpoint (server should use stored template by session)
-      const resTpl = await fetch(`${BACKEND_BASE}/stream-with-template`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payloadWithTemplate),
-      });
-
-      if (resTpl.ok && resTpl.body) {
-        await streamToChat(resTpl);
-        return;
-      }
-
-      // Fallback: classic /stream with behavior-only instruction (NO JSON, NO code fences)
-      const behaviorOnlyInstruction = isActive
-        ? [
-            `[You have an active ${specialty} specialty template stored for session ${sessionId}.]`,
-            `Do NOT display, dump, or summarize that template.`,
-            `Conduct the consultation by asking EXACTLY ONE clinically relevant follow-up question at a time.`,
-            `Wait for the user's reply before asking the next question.`,
-            `Never output JSON or code fences. Never list all template sections at once.`,
-            `If sufficient info is provided, proceed to the next single question or give a concise, structured clinical assessment.`,
-            ``,
-            `User: ${text}`,
-          ].join("\n")
-        : text;
-
-      const res = await fetch(`${BACKEND_BASE}/stream`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          message: behaviorOnlyInstruction,
-          session_id: sessionId,
-        }),
-      });
-
-      await streamToChat(res);
-    } catch (e) {
-      console.error("Chat request failed:", e);
+    if (!res.ok || !res.body) {
       setChats((prev) => [...prev, { msg: "Something went wrong.", who: "bot" }]);
+      return;
+    }
+
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder();
+    let message = "";
+    let isFirstChunk = true;
+
+    while (true) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      const chunk = decoder.decode(value, { stream: true });
+
+      if (isFirstChunk) {
+        setChats((prev) => [...prev, { msg: "", who: "bot" }]);
+        isFirstChunk = false;
+      }
+
+      message += chunk;
+      setChats((prev) => {
+        const updated = [...prev];
+        updated[updated.length - 1].msg = message;
+        return updated;
+      });
     }
   };
 
@@ -561,16 +477,6 @@ const closeVoiceSession = () => {
   const handleAssistantContextTranscript = async (transcript) => {
     try {
       if (!transcript || !transcript.trim()) return;
-
-      // Keep voice session aware of current template (belt & suspenders)
-      if (isActive && specialty && template) {
-        try {
-          await apiActivateTemplate(sessionId, specialty, template);
-        } catch (e) {
-          console.error("Voice template sync failed:", e);
-        }
-      }
-
       await fetch("https://ai-doctor-assistant-voice-mode-webrtc.onrender.com/api/session-context", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -634,13 +540,6 @@ const closeVoiceSession = () => {
         <div ref={scrollAnchorRef} />
       </div>
 
-      {/* ==== NEW: Show active template summary so the doctor knows what's applied ==== */}
-      {isActive && template && (
-        <div style={{ margin: "0 16px" }}>
-          <SpecialtyTemplatePanel specialty={specialty} template={template} />
-        </div>
-      )}
-
       <div className="chat-footer">
         <SuggestedQuestionsAccordion
           questions={suggestedQuestions}
@@ -669,8 +568,8 @@ const closeVoiceSession = () => {
       </button>
 
       <VoiceRecorderPanel
-        transcribeUrl={`${BACKEND_BASE}/transcribe`}
-        opinionUrl={`${BACKEND_BASE}/case-second-opinion-stream`}
+        transcribeUrl="https://ai-doctor-assistant-backend-server.onrender.com/transcribe"
+        opinionUrl="https://ai-doctor-assistant-backend-server.onrender.com/case-second-opinion-stream"
         fileFieldName="audio_data"
         anchorLeft={72}
         anchorBottom={96}

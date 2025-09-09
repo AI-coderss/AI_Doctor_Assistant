@@ -1,6 +1,3 @@
-/* eslint-disable no-unused-vars */
-/* eslint-disable no-useless-concat */
-/* eslint-disable no-loop-func */
 /* eslint-disable react-hooks/exhaustive-deps */
 /* eslint-disable no-unused-vars */
 /* eslint-disable no-useless-concat */
@@ -119,26 +116,18 @@ const Chat = () => {
     if (isStreaming && liveIdxRef.current !== null) {
       setChats((prev) => {
         const arr = [...prev];
-        arr[liveIdxRef.current] = {
-          ...arr[liveIdxRef.current],
-          msg: liveText || "",
-        };
+        arr[liveIdxRef.current] = { ...arr[liveIdxRef.current], msg: liveText || "" };
         return arr;
       });
     }
 
     // streaming stopped: debounce finalization to avoid fugacious cut-offs
-    if (
-      !isStreaming &&
-      liveIdxRef.current !== null &&
-      !finalizeTimerRef.current
-    ) {
+    if (!isStreaming && liveIdxRef.current !== null && !finalizeTimerRef.current) {
       finalizeTimerRef.current = setTimeout(() => {
         setChats((prev) => {
           const arr = [...prev];
           const idx = liveIdxRef.current;
-          if (arr[idx])
-            arr[idx] = { msg: liveText || arr[idx].msg || "", who: "me" };
+          if (arr[idx]) arr[idx] = { msg: liveText || arr[idx].msg || "", who: "me" };
           return arr;
         });
         liveIdxRef.current = null;
@@ -199,9 +188,7 @@ const Chat = () => {
 
         audioPlayerRef.current.srcObject = stream;
         setAudioUrl(stream);
-        audioPlayerRef.current
-          .play()
-          .catch((err) => console.error("live stream play failed:", err));
+        audioPlayerRef.current.play().catch((err) => console.error("live stream play failed:", err));
       };
 
       pc.oniceconnectionstatechange = () => {
@@ -215,20 +202,14 @@ const Chat = () => {
       pc.onicecandidateerror = (e) => console.error("ICE candidate error:", e);
       pc.onnegotiationneeded = () => {};
       pc.onconnectionstatechange = () => {
-        if (
-          pc.connectionState === "closed" ||
-          pc.connectionState === "failed"
-        ) {
+        if (pc.connectionState === "closed" || pc.connectionState === "failed") {
           setConnectionStatus("error");
           setIsMicActive(false);
         }
       };
 
-      if (!localStream)
-        console.error("localStream undefined when adding track.");
-      stream
-        .getAudioTracks()
-        .forEach((track) => pc.addTrack(track, localStream));
+      if (!localStream) console.error("localStream undefined when adding track.");
+      stream.getAudioTracks().forEach((track) => pc.addTrack(track, localStream));
 
       const channel = pc.createDataChannel("response");
 
@@ -269,9 +250,7 @@ const Chat = () => {
         const msg = JSON.parse(event.data);
         switch (msg.type) {
           case "response.audio.delta": {
-            const chunk = Uint8Array.from(atob(msg.delta), (c) =>
-              c.charCodeAt(0)
-            );
+            const chunk = Uint8Array.from(atob(msg.delta), (c) => c.charCodeAt(0));
             const tmp = new Uint8Array(pcmBuffer.byteLength + chunk.byteLength);
             tmp.set(new Uint8Array(pcmBuffer), 0);
             tmp.set(chunk, pcmBuffer.byteLength);
@@ -288,13 +267,11 @@ const Chat = () => {
             el.volume = 1;
             el.muted = false;
             if (!audioContextRef.current) {
-              audioContextRef.current = new (window.AudioContext ||
-                window.webkitAudioContext)();
+              audioContextRef.current = new (window.AudioContext || window.webkitAudioContext)();
             }
 
             if (!audioSourceRef.current) {
-              audioSourceRef.current =
-                audioContextRef.current.createMediaElementSource(el);
+              audioSourceRef.current = audioContextRef.current.createMediaElementSource(el);
               analyserRef.current = audioContextRef.current.createAnalyser();
               audioSourceRef.current.connect(analyserRef.current);
               analyserRef.current.connect(audioContextRef.current.destination);
@@ -308,20 +285,16 @@ const Chat = () => {
 
             const monitorBotVolume = () => {
               analyser.getByteFrequencyData(dataArray);
-              const avg =
-                dataArray.reduce((sum, val) => sum + val, 0) / dataArray.length;
+              const avg = dataArray.reduce((sum, val) => sum + val, 0) / dataArray.length;
               const normalized = Math.max(0.5, Math.min(2, avg / 50));
               setAudioScale(normalized);
 
-              if (!el.paused && !el.ended)
-                requestAnimationFrame(monitorBotVolume);
+              if (!el.paused && !el.ended) requestAnimationFrame(monitorBotVolume);
             };
 
             monitorBotVolume();
             setAudioWave(true);
-            el.play().catch((err) =>
-              console.error("play error:", err.name, err.message)
-            );
+            el.play().catch((err) => console.error("play error:", err.name, err.message));
             pcmBuffer = new ArrayBuffer(0);
             break;
           }
@@ -339,16 +312,12 @@ const Chat = () => {
       // Offer
       let offer;
       try {
-        offer = await pc.createOffer({
-          offerToReceiveAudio: true,
-          offerToReceiveVideo: false,
-        });
+        offer = await pc.createOffer({ offerToReceiveAudio: true, offerToReceiveVideo: false });
         const modifiedOffer = {
           ...offer,
           sdp: offer.sdp.replace(
             /a=rtpmap:\d+ opus\/48000\/2/g,
-            "a=rtpmap:111 opus/48000/2\r\n" +
-              "a=fmtp:111 minptime=10;useinbandfec=1"
+            "a=rtpmap:111 opus/48000/2\r\n" + "a=fmtp:111 minptime=10;useinbandfec=1"
           ),
         };
         await pc.setLocalDescription(modifiedOffer);
@@ -369,16 +338,12 @@ const Chat = () => {
         `https://ai-doctor-assistant-voice-mode-webrtc.onrender.com/api/rtc-connect?session_id=${sessionId}`,
         {
           method: "POST",
-          headers: {
-            "Content-Type": "application/sdp",
-            "X-Session-Id": sessionId,
-          },
+          headers: { "Content-Type": "application/sdp", "X-Session-Id": sessionId },
           body: offer.sdp,
         }
       );
 
-      if (!res.ok)
-        throw new Error(`Server responded with status ${res.status}`);
+      if (!res.ok) throw new Error(`Server responded with status ${res.status}`);
       const answer = await res.text();
       await pc.setRemoteDescription({ type: "answer", sdp: answer });
     } catch (error) {
@@ -396,57 +361,43 @@ const Chat = () => {
     if (connectionStatus === "connected" && localStream) {
       const newMicState = !isMicActive;
       setIsMicActive(newMicState);
-      localStream
-        .getAudioTracks()
-        .forEach((track) => (track.enabled = newMicState));
+      localStream.getAudioTracks().forEach((track) => (track.enabled = newMicState));
     }
   };
   // Close voice session immediately (DC, PC, tracks, audio, UI)
-  const closeVoiceSession = () => {
-    try {
-      stopAudio?.();
-    } catch {}
-    try {
-      const { setAudioScale } = useAudioForVisualizerStore.getState();
-      setAudioScale(1);
-    } catch {}
+const closeVoiceSession = () => {
+  try { stopAudio?.(); } catch {}
+  try {
+    const { setAudioScale } = useAudioForVisualizerStore.getState();
+    setAudioScale(1);
+  } catch {}
 
-    if (audioPlayerRef.current) {
-      try {
-        audioPlayerRef.current.pause();
-      } catch {}
-      audioPlayerRef.current.srcObject = null;
-      audioPlayerRef.current.src = "";
-    }
+  if (audioPlayerRef.current) {
+    try { audioPlayerRef.current.pause(); } catch {}
+    audioPlayerRef.current.srcObject = null;
+    audioPlayerRef.current.src = "";
+  }
 
-    if (dataChannel && dataChannel.readyState !== "closed") {
-      try {
-        dataChannel.close();
-      } catch {}
-    }
+  if (dataChannel && dataChannel.readyState !== "closed") {
+    try { dataChannel.close(); } catch {}
+  }
 
-    if (peerConnection) {
-      try {
-        peerConnection.getSenders?.().forEach((s) => s.track?.stop());
-      } catch {}
-      try {
-        peerConnection.close();
-      } catch {}
-    }
+  if (peerConnection) {
+    try { peerConnection.getSenders?.().forEach(s => s.track?.stop()); } catch {}
+    try { peerConnection.close(); } catch {}
+  }
 
-    if (localStream) {
-      try {
-        localStream.getTracks().forEach((t) => t.stop());
-      } catch {}
-      localStream = null;
-    }
+  if (localStream) {
+    try { localStream.getTracks().forEach(t => t.stop()); } catch {}
+    localStream = null;
+  }
 
-    setDataChannel(null);
-    setPeerConnection(null);
-    setIsMicActive(false);
-    setConnectionStatus("idle");
-    setIsVoiceMode(false);
-  };
+  setDataChannel(null);
+  setPeerConnection(null);
+  setIsMicActive(false);
+  setConnectionStatus("idle");
+  setIsVoiceMode(false);
+};
 
   const handleEnterVoiceMode = () => {
     setIsVoiceMode(true);
@@ -458,7 +409,8 @@ const Chat = () => {
 
   /* =========================
      Send message to backend;
-     try template-aware endpoint
+     try template-aware endpoint first,
+     otherwise fallback WITHOUT JSON.
      ========================= */
   const handleNewMessage = async ({ text, skipEcho = false }) => {
     if (!text || !text.trim()) return;
@@ -468,22 +420,19 @@ const Chat = () => {
     }
     setSuggestedQuestions((prev) => prev.filter((q) => q !== text));
 
-    // Try /stream-with-template first; fallback to /stream
+    // Try /stream-with-template first; fallback to /stream (no JSON injection)
     const payloadWithTemplate = {
       message: text,
       session_id: sessionId,
       specialty: isActive ? specialty : undefined,
-      template: isActive ? template : undefined,
+      template: undefined, // IMPORTANT: do not send raw JSON template to the model
       template_active: !!isActive,
     };
 
     // helper to stream response
     const streamToChat = async (res) => {
       if (!res.ok || !res.body) {
-        setChats((prev) => [
-          ...prev,
-          { msg: "Something went wrong.", who: "bot" },
-        ]);
+        setChats((prev) => [...prev, { msg: "Something went wrong.", who: "bot" }]);
         return;
       }
       const reader = res.body.getReader();
@@ -502,6 +451,13 @@ const Chat = () => {
         }
 
         message += chunk;
+
+        // Guard: if a model ever starts printing JSON, pivot to a single follow-up question
+        if (/^\s*[{[]/.test(message) && /"sections"|^\s*{/.test(message)) {
+          message =
+            "Let’s proceed step by step. Please answer this first question: Do they have any medication or food allergies?";
+        }
+
         setChats((prev) => {
           const updated = [...prev];
           updated[updated.length - 1].msg = message;
@@ -510,8 +466,8 @@ const Chat = () => {
       }
     };
 
-    // Attempt template-aware streaming
     try {
+      // Attempt template-aware streaming endpoint (server should use stored template by session)
       const resTpl = await fetch(`${BACKEND_BASE}/stream-with-template`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -522,30 +478,34 @@ const Chat = () => {
         await streamToChat(resTpl);
         return;
       }
-      // Fallback to classic /stream if not supported
+
+      // Fallback: classic /stream with behavior-only instruction (NO JSON, NO code fences)
+      const behaviorOnlyInstruction = isActive
+        ? [
+            `[You have an active ${specialty} specialty template stored for session ${sessionId}.]`,
+            `Do NOT display, dump, or summarize that template.`,
+            `Conduct the consultation by asking EXACTLY ONE clinically relevant follow-up question at a time.`,
+            `Wait for the user's reply before asking the next question.`,
+            `Never output JSON or code fences. Never list all template sections at once.`,
+            `If sufficient info is provided, proceed to the next single question or give a concise, structured clinical assessment.`,
+            ``,
+            `User: ${text}`,
+          ].join("\n")
+        : text;
+
       const res = await fetch(`${BACKEND_BASE}/stream`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        // As a soft fallback, prepend a short inline instruction if template is active
         body: JSON.stringify({
-          message:
-            isActive && template
-              ? `[Use the following ${specialty} specialty template (sections, phrasing, follow-ups) when answering and asking clarifying questions.]\n${
-                  typeof template === "string"
-                    ? template
-                    : JSON.stringify(template)
-                }\n\nUser: ${text}`
-              : text,
+          message: behaviorOnlyInstruction,
           session_id: sessionId,
         }),
       });
+
       await streamToChat(res);
     } catch (e) {
       console.error("Chat request failed:", e);
-      setChats((prev) => [
-        ...prev,
-        { msg: "Something went wrong.", who: "bot" },
-      ]);
+      setChats((prev) => [...prev, { msg: "Something went wrong.", who: "bot" }]);
     }
   };
 
@@ -611,19 +571,13 @@ const Chat = () => {
         }
       }
 
-      await fetch(
-        "https://ai-doctor-assistant-voice-mode-webrtc.onrender.com/api/session-context",
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ session_id: sessionId, transcript }),
-        }
-      );
+      await fetch("https://ai-doctor-assistant-voice-mode-webrtc.onrender.com/api/session-context", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ session_id: sessionId, transcript }),
+      });
     } catch (e) {
-      console.error(
-        "Failed to send transcript context for voice assistant:",
-        e
-      );
+      console.error("Failed to send transcript context for voice assistant:", e);
     }
   };
 
@@ -668,10 +622,7 @@ const Chat = () => {
       <audio ref={audioPlayerRef} playsInline style={{ display: "none" }} />
       <div className="chat-content">
         {chats.map((chat, index) => (
-          <div
-            key={index}
-            className={`chat-message ${chat.who} ${chat.live ? "live" : ""}`}
-          >
+          <div key={index} className={`chat-message ${chat.who} ${chat.live ? "live" : ""}`}>
             {chat.who === "bot" && (
               <figure className="avatar">
                 <img src="/av.gif" alt="avatar" />
@@ -693,9 +644,7 @@ const Chat = () => {
       <div className="chat-footer">
         <SuggestedQuestionsAccordion
           questions={suggestedQuestions}
-          onQuestionClick={({ text }) =>
-            handleNewMessage({ text, skipEcho: false })
-          }
+          onQuestionClick={({ text }) => handleNewMessage({ text, skipEcho: false })}
         />
         <ChatInputWidget onSendMessage={handleNewMessage} />
       </div>
@@ -739,10 +688,7 @@ const CollapsibleDiagram = ({ chart }) => {
   const [isOpen, setIsOpen] = useState(false);
   return (
     <div className="collapsible-diagram">
-      <div
-        className="collapsible-header"
-        onClick={() => setIsOpen((prev) => !prev)}
-      >
+      <div className="collapsible-header" onClick={() => setIsOpen((prev) => !prev)}>
         <span className="toggle-icon">{isOpen ? "–" : "+"}</span> View Diagram
       </div>
       <AnimatePresence initial={false}>

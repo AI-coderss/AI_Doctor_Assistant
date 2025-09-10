@@ -289,169 +289,208 @@ a {
 .fu-chip:hover {
     background: var(--surface);
 }
+
 /* --- Programmatic close to override hover/focus state --- */
-.home-dd.force-close { pointer-events: none; }
+.home-dd.force-close {
+    pointer-events: none;
+}
+
 .home-dd.force-close .dd-l1,
-.home-dd.force-close .has-subs > .dd-l2 {
-  opacity: 0 !important;
-  visibility: hidden !important;
-  transform: translateY(6px) scale(.98) !important;
+.home-dd.force-close .has-subs>.dd-l2 {
+    opacity: 0 !important;
+    visibility: hidden !important;
+    transform: translateY(6px) scale(.98) !important;
 }
 
 /* === ADD-ON (keep existing CSS above unchanged) === */
 
 /* Put modal layer above everything */
-.sheet-overlay { z-index: 2147483646 !important; }
-.sheet { z-index: 2147483647 !important; }
+.sheet-overlay {
+    z-index: 2147483646 !important;
+}
+
+.sheet {
+    z-index: 2147483647 !important;
+}
 
 /* Lock background scroll while sheet is open */
-body.modal-open { overflow: hidden !important; }
+body.modal-open {
+    overflow: hidden !important;
+}
 
 /* Ensure sizing constraints remain strict */
 .sheet {
-  height: 100vh !important;
-  max-height: 100vh !important;
-  width: min(880px, 96vw) !important;
-  margin: auto !important; /* center */
-  inset: 0 !important;
-  position: fixed !important;
+    height: 100vh !important;
+    max-height: 100vh !important;
+    width: min(880px, 96vw) !important;
+    margin: auto !important;
+    /* center */
+    inset: 0 !important;
+    position: fixed !important;
 }
 
 /* Keep internal body from scrolling; content changes per step */
-.sheet-body { overflow: hidden !important; }
+.sheet-body {
+    overflow: hidden !important;
+}
 
 /* Safety on small screens */
-@media (max-width: 720px){
-  .sheet { width: 96vw !important; }
+@media (max-width: 720px) {
+    .sheet {
+        width: 96vw !important;
+    }
 }
+
 /* =========================================================
    FORM SHEET STYLES (append-only; keep your existing CSS)
    ========================================================= */
 
 /* Layering & backdrop already added in your previous block, keep them: */
-.sheet-overlay { z-index: 2147483646 !important; }
-.sheet { z-index: 2147483647 !important; }
-body.modal-open { overflow: hidden !important; }
+.sheet-overlay {
+    z-index: 2147483646 !important;
+}
+
+.sheet {
+    z-index: 2147483647 !important;
+}
+
+body.modal-open {
+    overflow: hidden !important;
+}
 
 /* Container (centered, full-height, limited width) */
 .sheet {
-  position: fixed !important;
-  inset: 0 !important;
-  margin: auto !important;
-  height: 100vh !important;
-  max-height: 100vh !important;
-  width: min(860px, 94vw) !important;
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-lg);
-  box-shadow: var(--shadow-2);
-  display: grid;
-  grid-template-rows: auto 4px 1fr auto;
+    position: fixed !important;
+    inset: 0 !important;
+    margin: auto !important;
+    height: 100vh !important;
+    max-height: 100vh !important;
+    width: min(860px, 94vw) !important;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-lg);
+    box-shadow: var(--shadow-2);
+    display: grid;
+    grid-template-rows: auto 4px 1fr auto;
 }
 
 /* Header */
 .sheet-head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 14px 18px;
-  border-bottom: 1px solid var(--border);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 14px 18px;
+    border-bottom: 1px solid var(--border);
 }
 
 .sheet-title {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  color: var(--ink);
-  font-weight: 600;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    color: var(--ink);
+    font-weight: 600;
 }
 
 .spec-pill {
-  background: var(--primary);
-  color: #fff;
-  border-radius: 999px;
-  padding: 4px 10px;
-  font-size: 12px;
+    background: var(--primary);
+    color: #fff;
+    border-radius: 999px;
+    padding: 4px 10px;
+    font-size: 12px;
 }
 
 .step-info {
-  color: var(--ink-subtle);
-  font-size: 12px;
+    color: var(--ink-subtle);
+    font-size: 12px;
 }
 
 .icon-btn {
-  background: transparent;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-  padding: 6px 10px;
-  color: var(--ink);
-  cursor: pointer;
+    background: transparent;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    padding: 6px 10px;
+    color: var(--ink);
+    cursor: pointer;
 }
-.icon-btn:hover { background: var(--surface-2); }
+
+.icon-btn:hover {
+    background: var(--surface-2);
+}
 
 /* Progress bar */
 .sheet-progress {
-  height: 4px;
-  background: var(--surface-2);
-  position: relative;
-  overflow: hidden;
+    height: 4px;
+    background: var(--surface-2);
+    position: relative;
+    overflow: hidden;
 }
+
 .sheet-progress .bar {
-  position: absolute;
-  left: 0; top: 0; bottom: 0;
-  background: var(--primary);
-  transition: width .2s ease;
+    position: absolute;
+    left: 0;
+    top: 0;
+    bottom: 0;
+    background: var(--primary);
+    transition: width .2s ease;
 }
 
 /* Body (no internal scroll; content fits per step) */
 .sheet-body {
-  padding: 18px;
-  overflow: hidden !important;
-  display: grid;
+    padding: 18px;
+    overflow: hidden !important;
+    display: grid;
 }
 
 /* Section grid */
 .section-grid {
-  display: grid;
-  grid-template-columns: 1fr 1fr;  /* two columns */
-  gap: 14px 16px;
-  align-content: start;
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    /* two columns */
+    gap: 14px 16px;
+    align-content: start;
 }
 
 .section-title {
-  grid-column: 1 / -1;
-  margin: 6px 0 8px;
-  color: var(--ink-muted);
-  font-size: 14px;
-  font-weight: 600;
+    grid-column: 1 / -1;
+    margin: 6px 0 8px;
+    color: var(--ink-muted);
+    font-size: 14px;
+    font-weight: 600;
 }
 
 /* Field blocks */
-.field-wrap { display: block; }
+.field-wrap {
+    display: block;
+}
 
 .fld {
-  display: grid;
-  gap: 6px;
-}
-.fld.span2 {
-  grid-column: 1 / -1; /* full width of the two columns */
+    display: grid;
+    gap: 6px;
 }
 
-.fld label, .fld .lbl {
-  color: var(--ink);
-  font-size: 13px;
-  font-weight: 600;
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
+.fld.span2 {
+    grid-column: 1 / -1;
+    /* full width of the two columns */
 }
+
+.fld label,
+.fld .lbl {
+    color: var(--ink);
+    font-size: 13px;
+    font-weight: 600;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+}
+
 .fld .req {
-  color: #ef4444;
-  font-weight: 700;
+    color: #ef4444;
+    font-weight: 700;
 }
+
 .fld .unit {
-  color: var(--ink-subtle);
-  font-style: normal;
+    color: var(--ink-subtle);
+    font-style: normal;
 }
 
 /* Inputs */
@@ -460,123 +499,158 @@ body.modal-open { overflow: hidden !important; }
 .fld input[type="date"],
 .fld select,
 .fld textarea {
-  width: 100%;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-md);
-  background: var(--surface);
-  color: var(--ink);
-  padding: 10px 12px;
-  outline: none;
-  transition: border-color .15s ease, box-shadow .15s ease;
+    width: 100%;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
+    background: var(--surface);
+    color: var(--ink);
+    padding: 10px 12px;
+    outline: none;
+    transition: border-color .15s ease, box-shadow .15s ease;
 }
-.fld textarea { resize: vertical; }
+
+.fld textarea {
+    resize: vertical;
+}
+
 .fld input:focus,
 .fld select:focus,
 .fld textarea:focus {
-  border-color: var(--primary);
-  box-shadow: 0 0 0 3px color-mix(in srgb, var(--primary) 22%, transparent);
+    border-color: var(--primary);
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--primary) 22%, transparent);
 }
 
 /* Choice chips */
-.chips, .radio-row {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
+.chips,
+.radio-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
 }
+
 .chip {
-  border: 1px solid var(--border);
-  border-radius: 999px;
-  padding: 8px 12px;
-  background: var(--surface-2);
-  color: var(--ink);
-  cursor: pointer;
-  user-select: none;
-  font-size: 13px;
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    padding: 8px 12px;
+    background: var(--surface-2);
+    color: var(--ink);
+    cursor: pointer;
+    user-select: none;
+    font-size: 13px;
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
 }
-.chip input { display: none; }
+
+.chip input {
+    display: none;
+}
+
 .chip.sel {
-  border-color: var(--primary);
-  background: color-mix(in srgb, var(--primary) 15%, transparent);
-  color: var(--ink);
+    border-color: var(--primary);
+    background: color-mix(in srgb, var(--primary) 15%, transparent);
+    color: var(--ink);
 }
 
 /* Toggle */
 .fld.toggle {
-  grid-column: 1 / -1;
-  display: flex;
-  align-items: center;
-  gap: 10px;
+    grid-column: 1 / -1;
+    display: flex;
+    align-items: center;
+    gap: 10px;
 }
+
 .switch {
-  position: relative;
-  width: 42px;
-  height: 22px;
-  display: inline-block;
+    position: relative;
+    width: 42px;
+    height: 22px;
+    display: inline-block;
 }
-.switch input { display: none; }
+
+.switch input {
+    display: none;
+}
+
 .switch .slider {
-  position: absolute; inset: 0;
-  background: var(--surface-2);
-  border: 1px solid var(--border);
-  border-radius: 999px;
-  transition: background .15s ease;
+    position: absolute;
+    inset: 0;
+    background: var(--surface-2);
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    transition: background .15s ease;
 }
+
 .switch .slider:before {
-  content: "";
-  position: absolute; top: 50%; left: 3px;
-  width: 16px; height: 16px;
-  border-radius: 50%;
-  background: var(--ink);
-  transform: translateY(-50%);
-  transition: transform .15s ease, background .15s ease;
+    content: "";
+    position: absolute;
+    top: 50%;
+    left: 3px;
+    width: 16px;
+    height: 16px;
+    border-radius: 50%;
+    background: var(--ink);
+    transform: translateY(-50%);
+    transition: transform .15s ease, background .15s ease;
 }
-.switch input:checked + .slider {
-  background: color-mix(in srgb, var(--primary) 15%, transparent);
-  border-color: var(--primary);
+
+.switch input:checked+.slider {
+    background: color-mix(in srgb, var(--primary) 15%, transparent);
+    border-color: var(--primary);
 }
-.switch input:checked + .slider:before {
-  transform: translate(19px, -50%);
-  background: var(--primary);
+
+.switch input:checked+.slider:before {
+    transform: translate(19px, -50%);
+    background: var(--primary);
 }
 
 /* Footer buttons */
 .sheet-foot {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 12px 18px;
-  border-top: 1px solid var(--border);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 12px 18px;
+    border-top: 1px solid var(--border);
 }
+
 .btn {
-  border-radius: var(--radius-md);
-  padding: 10px 14px;
-  font-weight: 600;
-  cursor: pointer;
-  border: 1px solid var(--border);
-  background: var(--surface);
-  color: var(--ink);
+    border-radius: var(--radius-md);
+    padding: 10px 14px;
+    font-weight: 600;
+    cursor: pointer;
+    border: 1px solid var(--border);
+    background: var(--surface);
+    color: var(--ink);
 }
-.btn:hover { background: var(--surface-2); }
+
+.btn:hover {
+    background: var(--surface-2);
+}
+
 .btn.primary {
-  background: var(--primary);
-  border-color: var(--primary);
-  color: #fff;
+    background: var(--primary);
+    border-color: var(--primary);
+    color: #fff;
 }
+
 .btn.primary:hover {
-  filter: brightness(0.96);
+    filter: brightness(0.96);
 }
+
 .btn.ghost {
-  background: transparent;
+    background: transparent;
 }
 
 /* Narrow screens */
-@media (max-width: 740px){
-  .section-grid { grid-template-columns: 1fr; }
-  .fld.span2 { grid-column: 1; }
+@media (max-width: 740px) {
+    .section-grid {
+        grid-template-columns: 1fr;
+    }
+
+    .fld.span2 {
+        grid-column: 1;
+    }
 }
+
 /* =========================================================
    Specialty form — field & layout styling (ADD-ON)
    Append to end of your existing Specialty.css
@@ -584,123 +658,132 @@ body.modal-open { overflow: hidden !important; }
 
 /* ---------- Sheet head / title (show active specialty clearly) ---------- */
 .sheet-head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 14px 16px;
-  border-bottom: 1px solid var(--border);
-  background: var(--surface);
-  border-top-left-radius: var(--radius-lg);
-  border-top-right-radius: var(--radius-lg);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 14px 16px;
+    border-bottom: 1px solid var(--border);
+    background: var(--surface);
+    border-top-left-radius: var(--radius-lg);
+    border-top-right-radius: var(--radius-lg);
 }
 
 .sheet-title {
-  display: flex;
-  align-items: center;
-  gap: 10px;
+    display: flex;
+    align-items: center;
+    gap: 10px;
 }
 
 .spec-pill {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  padding: 6px 12px;
-  border-radius: 999px;
-  background: color-mix(in srgb, var(--primary) 15%, transparent);
-  color: var(--ink);
-  border: 1px solid color-mix(in srgb, var(--primary) 40%, var(--border));
-  font-weight: 600;
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 12px;
+    border-radius: 999px;
+    background: color-mix(in srgb, var(--primary) 15%, transparent);
+    color: var(--ink);
+    border: 1px solid color-mix(in srgb, var(--primary) 40%, var(--border));
+    font-weight: 600;
 }
 
 .step-info {
-  font-size: 12px;
-  color: var(--ink-subtle);
-  padding: 3px 8px;
-  border-radius: 999px;
-  border: 1px dashed var(--border);
+    font-size: 12px;
+    color: var(--ink-subtle);
+    padding: 3px 8px;
+    border-radius: 999px;
+    border: 1px dashed var(--border);
 }
 
 /* close icon */
 .icon-btn {
-  appearance: none;
-  border: 1px solid var(--border);
-  background: var(--surface);
-  color: var(--ink);
-  border-radius: var(--radius-sm);
-  padding: 6px 10px;
-  cursor: pointer;
+    appearance: none;
+    border: 1px solid var(--border);
+    background: var(--surface);
+    color: var(--ink);
+    border-radius: var(--radius-sm);
+    padding: 6px 10px;
+    cursor: pointer;
 }
-.icon-btn:hover { background: var(--surface-2); }
+
+.icon-btn:hover {
+    background: var(--surface-2);
+}
 
 /* ---------- Progress bar ---------- */
 .sheet-progress {
-  height: 6px;
-  background: var(--surface-2);
-  border-bottom: 1px solid var(--border);
+    height: 6px;
+    background: var(--surface-2);
+    border-bottom: 1px solid var(--border);
 }
+
 .sheet-progress .bar {
-  height: 100%;
-  background: var(--primary);
-  transition: width .25s ease;
+    height: 100%;
+    background: var(--primary);
+    transition: width .25s ease;
 }
 
 /* ---------- Body & grid ---------- */
 .sheet-body {
-  padding: 16px;
-  background: var(--surface);
-  color: var(--ink);
+    padding: 16px;
+    background: var(--surface);
+    color: var(--ink);
 }
 
 .section-grid {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 14px 16px;
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 14px 16px;
 }
 
 .section-title {
-  grid-column: 1/-1;
-  font-weight: 700;
-  letter-spacing: .2px;
-  font-size: 15px;
-  color: var(--ink-muted);
-  margin: 2px 0 4px;
+    grid-column: 1/-1;
+    font-weight: 700;
+    letter-spacing: .2px;
+    font-size: 15px;
+    color: var(--ink-muted);
+    margin: 2px 0 4px;
 }
 
-.field-wrap { min-width: 0; }
+.field-wrap {
+    min-width: 0;
+}
 
 /* Responsive: single column on narrow screens */
 @media (max-width: 860px) {
-  .section-grid { grid-template-columns: 1fr; }
+    .section-grid {
+        grid-template-columns: 1fr;
+    }
 }
 
 /* ---------- Field blocks ---------- */
 .fld {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
 }
 
 .fld.span2 {
-  grid-column: 1 / -1;
+    grid-column: 1 / -1;
 }
 
-.fld label, .fld .lbl {
-  font-size: 13px;
-  color: var(--ink-subtle);
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
+.fld label,
+.fld .lbl {
+    font-size: 13px;
+    color: var(--ink-subtle);
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
 }
 
 .fld .unit {
-  font-style: normal;
-  color: var(--ink-subtle);
-  opacity: .85;
+    font-style: normal;
+    color: var(--ink-subtle);
+    opacity: .85;
 }
 
 .req {
-  color: var(--primary);
-  font-weight: 700;
+    color: var(--primary);
+    font-weight: 700;
 }
 
 /* ---------- Inputs & Textareas ---------- */
@@ -709,16 +792,16 @@ body.modal-open { overflow: hidden !important; }
 .fld input[type="date"],
 .fld select,
 .fld textarea {
-  appearance: none;
-  border: 1px solid var(--border);
-  background: var(--surface-2);
-  color: var(--ink);
-  border-radius: var(--radius-md);
-  padding: 10px 12px;
-  font: inherit;
-  outline: none;
-  transition: border-color .15s ease, box-shadow .15s ease, background .15s ease;
-  width: 100%;
+    appearance: none;
+    border: 1px solid var(--border);
+    background: var(--surface-2);
+    color: var(--ink);
+    border-radius: var(--radius-md);
+    padding: 10px 12px;
+    font: inherit;
+    outline: none;
+    transition: border-color .15s ease, box-shadow .15s ease, background .15s ease;
+    width: 100%;
 }
 
 .fld input[type="text"]:hover,
@@ -726,7 +809,7 @@ body.modal-open { overflow: hidden !important; }
 .fld input[type="date"]:hover,
 .fld select:hover,
 .fld textarea:hover {
-  background: var(--surface);
+    background: var(--surface);
 }
 
 .fld input[type="text"]:focus,
@@ -734,154 +817,208 @@ body.modal-open { overflow: hidden !important; }
 .fld input[type="date"]:focus,
 .fld select:focus,
 .fld textarea:focus {
-  border-color: color-mix(in srgb, var(--primary) 65%, var(--border));
-  box-shadow: 0 0 0 3px color-mix(in srgb, var(--primary) 18%, transparent);
-  background: var(--surface);
+    border-color: color-mix(in srgb, var(--primary) 65%, var(--border));
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--primary) 18%, transparent);
+    background: var(--surface);
 }
 
 .fld textarea {
-  min-height: 96px;
-  resize: vertical;
+    min-height: 96px;
+    resize: vertical;
 }
 
 /* ---------- Select arrow (subtle) ---------- */
 .fld select {
-  background-image:
-    linear-gradient(45deg, transparent 50%, var(--ink-subtle) 50%),
-    linear-gradient(135deg, var(--ink-subtle) 50%, transparent 50%);
-  background-position:
-    calc(100% - 18px) calc(50% - 4px),
-    calc(100% - 12px) calc(50% - 4px);
-  background-size: 6px 6px, 6px 6px;
-  background-repeat: no-repeat;
-  padding-right: 36px;
+    background-image:
+        linear-gradient(45deg, transparent 50%, var(--ink-subtle) 50%),
+        linear-gradient(135deg, var(--ink-subtle) 50%, transparent 50%);
+    background-position:
+        calc(100% - 18px) calc(50% - 4px),
+        calc(100% - 12px) calc(50% - 4px);
+    background-size: 6px 6px, 6px 6px;
+    background-repeat: no-repeat;
+    padding-right: 36px;
 }
 
 /* ---------- Radio & Multiselect chips ---------- */
-.radio-row, .chips {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
+.radio-row,
+.chips {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
 }
 
 .chip {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  padding: 8px 12px;
-  border-radius: 999px;
-  border: 1px solid var(--border);
-  background: var(--surface-2);
-  color: var(--ink);
-  cursor: pointer;
-  user-select: none;
-  transition: background .15s ease, border-color .15s ease, color .15s ease, transform .06s ease;
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 12px;
+    border-radius: 999px;
+    border: 1px solid var(--border);
+    background: var(--surface-2);
+    color: var(--ink);
+    cursor: pointer;
+    user-select: none;
+    transition: background .15s ease, border-color .15s ease, color .15s ease, transform .06s ease;
 }
 
 .chip:hover {
-  background: var(--surface);
-  border-color: color-mix(in srgb, var(--ink) 10%, var(--border));
+    background: var(--surface);
+    border-color: color-mix(in srgb, var(--ink) 10%, var(--border));
 }
 
 .chip.sel {
-  background: color-mix(in srgb, var(--primary) 14%, transparent);
-  border-color: color-mix(in srgb, var(--primary) 55%, var(--border));
+    background: color-mix(in srgb, var(--primary) 14%, transparent);
+    border-color: color-mix(in srgb, var(--primary) 55%, var(--border));
 }
 
-.chip input { display: none; }
+.chip input {
+    display: none;
+}
 
-.chip:active { transform: translateY(1px); }
+.chip:active {
+    transform: translateY(1px);
+}
 
 /* ---------- Toggle switch ---------- */
 .fld.toggle {
-  display: flex;
-  align-items: center;
-  gap: 10px;
+    display: flex;
+    align-items: center;
+    gap: 10px;
 }
 
 .switch {
-  position: relative;
-  display: inline-block;
-  width: 44px;
-  height: 26px;
+    position: relative;
+    display: inline-block;
+    width: 44px;
+    height: 26px;
 }
 
-.switch input { display: none; }
+.switch input {
+    display: none;
+}
 
 .slider {
-  position: absolute;
-  inset: 0;
-  background: var(--surface-2);
-  border: 1px solid var(--border);
-  border-radius: 999px;
-  transition: background .15s ease, border-color .15s ease;
+    position: absolute;
+    inset: 0;
+    background: var(--surface-2);
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    transition: background .15s ease, border-color .15s ease;
 }
 
 .slider:before {
-  content: "";
-  position: absolute;
-  height: 20px;
-  width: 20px;
-  left: 3px;
-  top: 2px;
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: 50%;
-  transition: transform .15s ease, background .15s ease, border-color .15s ease;
+    content: "";
+    position: absolute;
+    height: 20px;
+    width: 20px;
+    left: 3px;
+    top: 2px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 50%;
+    transition: transform .15s ease, background .15s ease, border-color .15s ease;
 }
 
-.switch input:checked + .slider {
-  background: color-mix(in srgb, var(--primary) 22%, var(--surface-2));
-  border-color: color-mix(in srgb, var(--primary) 55%, var(--border));
+.switch input:checked+.slider {
+    background: color-mix(in srgb, var(--primary) 22%, var(--surface-2));
+    border-color: color-mix(in srgb, var(--primary) 55%, var(--border));
 }
 
-.switch input:checked + .slider:before {
-  transform: translateX(18px);
-  background: var(--surface);
-  border-color: color-mix(in srgb, var(--primary) 40%, var(--border));
+.switch input:checked+.slider:before {
+    transform: translateX(18px);
+    background: var(--surface);
+    border-color: color-mix(in srgb, var(--primary) 40%, var(--border));
 }
 
 /* ---------- Footer buttons ---------- */
 .sheet-foot {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 12px 16px;
-  border-top: 1px solid var(--border);
-  background: var(--surface);
-  border-bottom-left-radius: var(--radius-lg);
-  border-bottom-right-radius: var(--radius-lg);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 12px 16px;
+    border-top: 1px solid var(--border);
+    background: var(--surface);
+    border-bottom-left-radius: var(--radius-lg);
+    border-bottom-right-radius: var(--radius-lg);
 }
 
 .btn {
-  appearance: none;
-  border-radius: var(--radius-md);
-  font-weight: 600;
-  padding: 10px 14px;
-  cursor: pointer;
-  border: 1px solid var(--border);
-  background: var(--surface-2);
-  color: var(--ink);
-  transition: background .15s ease, border-color .15s ease, transform .06s ease;
+    appearance: none;
+    border-radius: var(--radius-md);
+    font-weight: 600;
+    padding: 10px 14px;
+    cursor: pointer;
+    border: 1px solid var(--border);
+    background: var(--surface-2);
+    color: var(--ink);
+    transition: background .15s ease, border-color .15s ease, transform .06s ease;
 }
 
-.btn:hover { background: var(--surface); }
-.btn:active { transform: translateY(1px); }
+.btn:hover {
+    background: var(--surface);
+}
+
+.btn:active {
+    transform: translateY(1px);
+}
 
 .btn.primary {
-  background: var(--primary);
-  color: white;
-  border-color: color-mix(in srgb, var(--primary) 70%, var(--border));
+    background: var(--primary);
+    color: white;
+    border-color: color-mix(in srgb, var(--primary) 70%, var(--border));
 }
+
 .btn.primary:hover {
-  background: color-mix(in srgb, var(--primary) 86%, black 0%);
+    background: color-mix(in srgb, var(--primary) 86%, black 0%);
 }
 
 /* ---------- Small polish ---------- */
-.fld ::placeholder { color: color-mix(in srgb, var(--ink) 45%, transparent); }
-.fld input[disabled], .fld select[disabled], .fld textarea[disabled] {
-  opacity: .7;
-  cursor: not-allowed;
+.fld ::placeholder {
+    color: color-mix(in srgb, var(--ink) 45%, transparent);
+}
+
+.fld input[disabled],
+.fld select[disabled],
+.fld textarea[disabled] {
+    opacity: .7;
+    cursor: not-allowed;
+}
+
+/* === Global wave pulse shown after Submit (form closes instantly) === */
+.submit-pulse {
+    position: fixed;
+    inset: 0;
+    pointer-events: none;
+    z-index: 2147483646;
+    background:
+        radial-gradient(closest-side, rgba(0, 170, 255, 0.22), transparent 70%) center/0 0 no-repeat,
+        radial-gradient(closest-side, rgba(0, 170, 255, 0.12), transparent 70%) center/0 0 no-repeat,
+        radial-gradient(closest-side, rgba(0, 170, 255, 0.07), transparent 70%) center/0 0 no-repeat;
+    animation: submitPulseExpand 700ms ease-out forwards;
+}
+
+@keyframes submitPulseExpand {
+    0% {
+        background-size: 0 0, 0 0, 0 0;
+        opacity: 1;
+    }
+
+    50% {
+        background-size: 160vmax 160vmax, 120vmax 120vmax, 80vmax 80vmax;
+        opacity: 0.9;
+    }
+
+    100% {
+        background-size: 220vmax 220vmax, 170vmax 170vmax, 120vmax 120vmax;
+        opacity: 0;
+    }
+}
+
+/* Optional: quick tactile feedback if the button is ever visible a frame longer */
+.sheet-foot .btn.primary:active {
+    transform: translateY(1px);
+    filter: brightness(0.96);
 }
 
 /* End of Specialty.css */

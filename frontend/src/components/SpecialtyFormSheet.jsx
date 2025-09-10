@@ -20,25 +20,21 @@ import "../styles/Specialty.css";
 
 const BACKEND_BASE = "https://ai-doctor-assistant-backend-server.onrender.com";
 
-export default function SpecialtyFormSheet({ onSubmitToChat, sessionId }) {
+export default function SpecialtyFormSheet({ onSubmitToChat, onSubmitToChatStream, sessionId }) {
   const { specialty, clearSpecialty } = useSpecialtyStore();
   const [open, setOpen] = useState(false);
   const schema = useMemo(() => SPECIALTY_SCHEMAS[specialty] || DEFAULT_SCHEMA, [specialty]);
   const [step, setStep] = useState(0);
   const [values, setValues] = useState({});
   const [dragging, setDragging] = useState(false);
-
-  // drag constraints container
   const constraintsRef = useRef(null);
 
-  // Lock page scroll behind the sheet
   useEffect(() => {
     if (open) document.body.classList.add("modal-open");
     else document.body.classList.remove("modal-open");
     return () => document.body.classList.remove("modal-open");
   }, [open]);
 
-  // Open/close when specialty changes
   useEffect(() => {
     if (specialty) {
       setValues({});
@@ -53,7 +49,7 @@ export default function SpecialtyFormSheet({ onSubmitToChat, sessionId }) {
     setOpen(false);
     setTimeout(() => {
       try { clearSpecialty(); } catch {}
-    }, 150);
+    }, 120);
   };
 
   const onChange = (id, v) => setValues((prev) => ({ ...prev, [id]: v }));
@@ -182,25 +178,67 @@ export default function SpecialtyFormSheet({ onSubmitToChat, sessionId }) {
   const next = () => setStep((s) => Math.min(s + 1, total - 1));
   const back = () => setStep((s) => Math.max(s - 1, 0));
 
+  /** quick “wave” confirm on submission (form closes immediately) */
+  const createSubmitPulse = () => {
+    try {
+      const el = document.createElement("div");
+      el.className = "submit-pulse";
+      document.body.appendChild(el);
+      el.addEventListener("animationend", () => {
+        try { document.body.removeChild(el); } catch {}
+      });
+    } catch {}
+  };
+
   const submit = async () => {
+    // 1) immediate UI feedback + close sheet
+    createSubmitPulse();
+    const payload = {
+      session_id: sessionId || "",
+      specialty,
+      form: values,
+    };
+
+    // Close *before* network
+    close();
+
+    // 2) start streaming immediately to chat if supported
+    let started = false;
     try {
       const res = await fetch(`${BACKEND_BASE}/analyze-form-case-stream`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          session_id: sessionId || "",
-          specialty,
-          // align with backend:
-          form: values,
-        }),
+        body: JSON.stringify(payload),
       });
 
-      // keep your simple text approach (backend streams, but text() is fine)
-      const text = await res.text();
-      onSubmitToChat?.(text || "Form submitted.");
-      close();
+      if (res.body && typeof onSubmitToChatStream === "function") {
+        onSubmitToChatStream({ type: "start" });
+        started = true;
+
+        const reader = res.body.getReader();
+        const decoder = new TextDecoder();
+
+        while (true) {
+          const { value, done } = await reader.read();
+          if (done) break;
+          const chunk = decoder.decode(value, { stream: true });
+          if (chunk) onSubmitToChatStream({ type: "chunk", data: chunk });
+        }
+        onSubmitToChatStream({ type: "done" });
+      } else {
+        // fallback: read full text then push once
+        const text = await res.text();
+        if (typeof onSubmitToChat === "function") {
+          onSubmitToChat(text || "Form submitted.");
+        }
+      }
     } catch (e) {
-      onSubmitToChat?.("Something went wrong submitting the form.");
+      if (started) {
+        onSubmitToChatStream?.({ type: "chunk", data: "\n[Network error while streaming.]" });
+        onSubmitToChatStream?.({ type: "done" });
+      } else {
+        onSubmitToChat?.("Something went wrong submitting the form.");
+      }
       console.error(e);
     }
   };
@@ -216,7 +254,6 @@ export default function SpecialtyFormSheet({ onSubmitToChat, sessionId }) {
             exit={{ opacity: 0 }}
             onClick={close}
           />
-          {/* constraint layer for drag */}
           <div ref={constraintsRef} style={{ position: "fixed", inset: 0, zIndex: 2147483647 }}>
             <motion.aside
               className={`sheet ${dragging ? "dragging" : ""}`}

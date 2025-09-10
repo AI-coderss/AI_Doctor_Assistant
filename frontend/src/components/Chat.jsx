@@ -1,30 +1,13 @@
-/* eslint-disable no-useless-escape */
-/* eslint-disable no-unused-vars */
-/* eslint-disable no-useless-concat */
-/* eslint-disable no-loop-func */
-/* eslint-disable react-hooks/exhaustive-deps */
-/* eslint-disable no-unused-vars */
-/* eslint-disable no-useless-concat */
-/* eslint-disable no-loop-func */
 
 /* eslint-disable react-hooks/exhaustive-deps */
 /* eslint-disable no-unused-vars */
 /* eslint-disable no-useless-concat */
 /* eslint-disable no-loop-func */
-// src/components/Chat.jsx
 /* eslint-disable no-useless-escape */
 /* eslint-disable no-unused-vars */
 /* eslint-disable no-useless-concat */
 /* eslint-disable no-loop-func */
 /* eslint-disable react-hooks/exhaustive-deps */
-/* eslint-disable no-unused-vars */
-/* eslint-disable no-useless-concat */
-/* eslint-disable no-loop-func */
-
-/* eslint-disable react-hooks/exhaustive-deps */
-/* eslint-disable no-unused-vars */
-/* eslint-disable no-useless-concat */
-/* eslint-disable no-loop-func */
 import React, { useState, useEffect, useRef } from "react";
 import ChatInputWidget from "./ChatInputWidget.jsx";
 import ReactMarkdown from "react-markdown";
@@ -40,10 +23,10 @@ import useAudioStore from "../store/audioStore.js";
 import { startVolumeMonitoring } from "./audioLevelAnalyzer";
 import VoiceRecorderPanel from "./VoiceRecorderPanel";
 
-// Live transcript store
+// Live transcript store (kept intact)
 import useLiveTranscriptStore from "../store/useLiveTranscriptStore";
 
-/* ==== Full-height specialty form sheet (auto-opens when a specialty is picked) ==== */
+/* ==== Full-height specialty form sheet ==== */
 import SpecialtyFormSheet from "./SpecialtyFormSheet.jsx";
 
 let localStream;
@@ -112,7 +95,7 @@ const Chat = () => {
     };
   }, [dataChannel, micStream, peerConnection]);
 
-  // === reflect store → chat bubbles in real time ===
+  // === reflect store → chat bubbles in real time (kept intact) ===
   useEffect(() => {
     // If streaming resumes, cancel any pending finalization
     if (isStreaming && finalizeTimerRef.current) {
@@ -146,7 +129,7 @@ const Chat = () => {
         });
         liveIdxRef.current = null;
         finalizeTimerRef.current = null;
-        // Do not send here; ChatInputWidget already sent on manual stop with skipEcho:true
+        // Do not send here; ChatInputWidget already handles sending when appropriate
       }, 900);
     }
 
@@ -159,7 +142,7 @@ const Chat = () => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isStreaming, liveText]);
 
-  // ===== Your existing WebRTC (voice assistant) — left intact =====
+  // ===== Voice assistant (kept intact) =====
   const startWebRTC = async () => {
     if (peerConnection || connectionStatus === "connecting") return;
 
@@ -361,7 +344,6 @@ const Chat = () => {
     }
   };
 
-  // Close voice session immediately (DC, PC, tracks, audio, UI)
   const closeVoiceSession = () => {
     try { stopAudio?.(); } catch {}
     try {
@@ -437,7 +419,7 @@ const Chat = () => {
       const chunk = decoder.decode(value, { stream: true });
 
       if (isFirstChunk) {
-        setChats((prev) => [...prev, { msg: "", who: "bot" }]);
+        setChats((prev) => [...prev, { msg: "", who: "bot", streaming: true }]);
         isFirstChunk = false;
       }
 
@@ -448,9 +430,17 @@ const Chat = () => {
         return updated;
       });
     }
+
+    // finalize streaming flag
+    setChats((prev) => {
+      const updated = [...prev];
+      const last = updated[updated.length - 1];
+      if (last && last.streaming) last.streaming = false;
+      return updated;
+    });
   };
 
-  // === Markdown + Mermaid renderer ===
+  // === Markdown + Mermaid renderer (kept intact) ===
   const renderMessage = (message) => {
     const regex = /```mermaid([\s\S]*?)```/g;
     const parts = [];
@@ -489,7 +479,7 @@ const Chat = () => {
     if (!opinionStreamingRef.current) {
       opinionStreamingRef.current = true;
       opinionBufferRef.current = "";
-      setChats((prev) => [...prev, { msg: "", who: "bot" }]);
+      setChats((prev) => [...prev, { msg: "", who: "bot", streaming: true }]);
     }
     opinionBufferRef.current += chunk;
     setChats((prev) => {
@@ -509,6 +499,37 @@ const Chat = () => {
       });
     } catch (e) {
       console.error("Failed to send transcript context for voice assistant:", e);
+    }
+  };
+
+  /** ====== NEW: streaming from SpecialtyFormSheet → bot bubble ====== */
+  const handleFormStreamEvent = (evt) => {
+    if (!evt || !evt.type) return;
+    if (evt.type === "start") {
+      // open a bot bubble with streaming shimmer
+      setChats((prev) => [...prev, { msg: "", who: "bot", streaming: true }]);
+      return;
+    }
+    if (evt.type === "chunk") {
+      const chunk = String(evt.data || "");
+      setChats((prev) => {
+        const updated = [...prev];
+        const lastIdx = updated.length - 1;
+        if (!updated[lastIdx] || updated[lastIdx].who !== "bot") {
+          updated.push({ msg: "", who: "bot", streaming: true });
+        }
+        updated[updated.length - 1].msg = (updated[updated.length - 1].msg || "") + chunk;
+        return updated;
+      });
+      return;
+    }
+    if (evt.type === "done") {
+      setChats((prev) => {
+        const updated = [...prev];
+        const last = updated[updated.length - 1];
+        if (last && last.streaming) last.streaming = false;
+        return updated;
+      });
     }
   };
 
@@ -553,13 +574,19 @@ const Chat = () => {
       <audio ref={audioPlayerRef} playsInline style={{ display: "none" }} />
       <div className="chat-content">
         {chats.map((chat, index) => (
-          <div key={index} className={`chat-message ${chat.who} ${chat.live ? "live" : ""}`}>
+          <div
+            key={index}
+            className={`chat-message ${chat.who} ${chat.live ? "live" : ""} ${chat.streaming ? "streaming" : ""}`}
+          >
             {chat.who === "bot" && (
               <figure className="avatar">
                 <img src="/av.gif" alt="avatar" />
               </figure>
             )}
-            <div className="message-text">{renderMessage(chat.msg)}</div>
+            <div className="message-text">
+              {renderMessage(chat.msg)}
+              {chat.streaming && <span className="typing-caret" />}
+            </div>
           </div>
         ))}
         <div ref={scrollAnchorRef} />
@@ -592,13 +619,14 @@ const Chat = () => {
         🎙️
       </button>
 
-      {/* FULL-HEIGHT SPECIALTY FORM (appears under navbar when a specialty is chosen) */}
+      {/* Specialty Form Sheet — instant close on submit, streaming to chat */}
       <SpecialtyFormSheet
         sessionId={sessionId}
         onSubmitToChat={(text) => {
-          // push a bot bubble with the analyzed response from the form
+          // fallback (non-stream): push one final bot bubble
           setChats((prev) => [...prev, { msg: text, who: "bot" }]);
         }}
+        onSubmitToChatStream={handleFormStreamEvent}
       />
 
       <VoiceRecorderPanel

@@ -1244,6 +1244,106 @@ def analyze_form_case_stream():
 
     return Response(stream_with_context(generate()), content_type="text/plain")
 
+# --- NEW: Prompt Formatter endpoint (GPT-4o) ---
+@app.post("/prompt-formatter")
+def prompt_formatter():
+    """
+    Body (either form-based or raw):
+      {
+        "session_id": "optional",
+        "specialty": "urology" | "cardiology" | ... (optional but helpful),
+        "form": { ... }                  # preferred: the structured form object
+        "raw": "string of messy text"    # alternative input
+      }
+
+    Returns:
+      { "session_id": "...", "formatted_prompt": "Markdown string" }
+
+    Behavior:
+    - Uses GPT-4o (your existing RAG chain) to produce a clean, concise Markdown
+      case summary with fixed headings.
+    - Prepends strict downstream instructions so the *next* /stream call returns
+      a well-structured clinical answer inside the chat bubble.
+    """
+    data = request.get_json() or {}
+    session_id = data.get("session_id", str(uuid4()))
+    specialty = (data.get("specialty") or "").strip()
+    raw_text = (data.get("raw") or "").strip()
+    form = data.get("form") or data.get("answers") or {}
+
+    # Turn form into readable bullets when raw_text is not provided
+    def dict_to_bullets(d: dict) -> str:
+        lines = []
+        for k, v in (d or {}).items():
+            if v in (None, "", []):
+                continue
+            key = str(k).replace("_", " ").title()
+            if isinstance(v, list):
+                val = ", ".join(map(str, v))
+            else:
+                val = str(v)
+            lines.append(f"- **{key}:** {val}")
+        return "\n".join(lines) if lines else "_No details provided_"
+
+    form_md = raw_text or dict_to_bullets(form)
+
+    # 1) Ask GPT-4o to produce a CLEAN, DEDUPED case prompt (no recommendations)
+    formatter_instruction = (
+        "You are PromptFormatter. Convert the following clinical case details into clean, concise **Markdown** with"
+        " EXACTLY these headings once each and nothing else:\n"
+        "## Patient Summary\n"
+        "## Key Findings\n"
+        "## Risks/Red Flags\n"
+        "## Questions to Clarify (max 3)\n"
+        "Rules:\n"
+        "- English only. No treatment advice. No duplication. No filler.\n"
+        "- Short bullet points. Keep it clinically neutral.\n"
+    )
+
+    user_payload = (
+        f"{formatter_instruction}\n\n"
+        f"**Specialty:** {specialty or 'general'}\n\n"
+        f"**Raw Case Details:**\n{form_md}\n\n"
+        "Return only the four sections in Markdown."
+    )
+
+    try:
+        resp = conversation_rag_chain.invoke({
+            "chat_history": [],  # formatter is stateless
+            "input": user_payload
+        })
+        formatted_case_md = (resp.get("answer") or "").strip()
+    except Exception as e:
+        # Fallback: at least give something usable
+        formatted_case_md = f"## Patient Summary\n- Specialty: {specialty or 'general'}\n\n## Key Findings\n{form_md}\n\n## Risks/Red Flags\n_None_\n\n## Questions to Clarify (max 3)\n- _None_"
+
+    # 2) Downstream strict instructions for /stream response structure
+    downstream_instructions = (
+        "You are a clinical assistant. **Output strictly in Markdown** with these EXACT headings, once each:\n"
+        "## Assessment\n"
+        "## Differential Diagnoses\n"
+        "## Red Flags\n"
+        "## Recommended Tests\n"
+        "## Initial Management\n"
+        "## Patient Advice & Safety-Net\n"
+        "## Follow-up Question (one line)\n"
+        "Rules:\n"
+        "- Concise bullet points. English only. No repetition across sections.\n"
+        "- No code, no JSON. If a section is not applicable, write _None_.\n"
+        "- Base your answer only on the Case Summary below (and retrieved knowledge if available).\n"
+    )
+
+    # 3) Final prompt to send to /stream
+    formatted_prompt = (
+        f"{downstream_instructions}\n"
+        f"---\n"
+        f"### Case Summary\n{formatted_case_md}\n"
+    )
+
+    return jsonify({
+        "session_id": session_id,
+        "formatted_prompt": formatted_prompt
+    }), 200
 
 
 if __name__ == "__main__":

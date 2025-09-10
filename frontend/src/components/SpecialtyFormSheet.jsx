@@ -12,6 +12,9 @@
 // src/components/SpecialtyFormSheet.jsx
 /* eslint-disable jsx-a11y/label-has-associated-control */
 // src/components/SpecialtyFormSheet.jsx
+/* eslint-disable react-hooks/exhaustive-deps */
+/* eslint-disable jsx-a11y/label-has-associated-control */
+// src/components/SpecialtyFormSheet.jsx
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import useSpecialtyStore from "../store/useSpecialtyStore";
@@ -190,34 +193,20 @@ export default function SpecialtyFormSheet({ onSubmitToChat, onSubmitToChatStrea
     } catch {}
   };
 
-  const submit = async () => {
-    // 1) immediate UI feedback + close sheet
-    createSubmitPulse();
-    const payload = {
-      session_id: sessionId || "",
-      specialty,
-      form: values,
-    };
-
-    // Close *before* network
-    close();
-
-    // 2) start streaming immediately to chat if supported
+  const streamFinalFromPrompt = async (finalPrompt) => {
     let started = false;
     try {
-      const res = await fetch(`${BACKEND_BASE}/analyze-form-case-stream`, {
+      const res = await fetch(`${BACKEND_BASE}/stream`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload),
+        body: JSON.stringify({ message: finalPrompt, session_id: sessionId || "" }),
       });
 
       if (res.body && typeof onSubmitToChatStream === "function") {
         onSubmitToChatStream({ type: "start" });
         started = true;
-
         const reader = res.body.getReader();
         const decoder = new TextDecoder();
-
         while (true) {
           const { value, done } = await reader.read();
           if (done) break;
@@ -226,11 +215,8 @@ export default function SpecialtyFormSheet({ onSubmitToChat, onSubmitToChatStrea
         }
         onSubmitToChatStream({ type: "done" });
       } else {
-        // fallback: read full text then push once
         const text = await res.text();
-        if (typeof onSubmitToChat === "function") {
-          onSubmitToChat(text || "Form submitted.");
-        }
+        onSubmitToChat?.(text || "Form submitted.");
       }
     } catch (e) {
       if (started) {
@@ -240,6 +226,70 @@ export default function SpecialtyFormSheet({ onSubmitToChat, onSubmitToChatStrea
         onSubmitToChat?.("Something went wrong submitting the form.");
       }
       console.error(e);
+    }
+  };
+
+  const submit = async () => {
+    // 1) immediate UI feedback + close sheet
+    createSubmitPulse();
+    const basePayload = {
+      session_id: sessionId || "",
+      specialty,
+      form: values,
+    };
+
+    // Close *before* network
+    close();
+
+    // 2) Format with Prompt Formatter → then stream final from /stream
+    try {
+      // show loader in chat immediately
+      onSubmitToChatStream?.({ type: "start" });
+
+      const fmtRes = await fetch(`${BACKEND_BASE}/prompt-formatter`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(basePayload),
+      });
+
+      if (!fmtRes.ok) {
+        // fallback: call legacy analyze endpoint if formatter fails
+        console.warn("Prompt-formatter failed, falling back to analyze-form-case-stream");
+        const legacy = await fetch(`${BACKEND_BASE}/analyze-form-case-stream`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(basePayload),
+        });
+
+        if (legacy.body) {
+          const reader = legacy.body.getReader();
+          const decoder = new TextDecoder();
+          while (true) {
+            const { value, done } = await reader.read();
+            if (done) break;
+            const chunk = decoder.decode(value, { stream: true });
+            if (chunk) onSubmitToChatStream?.({ type: "chunk", data: chunk });
+          }
+          onSubmitToChatStream?.({ type: "done" });
+          return;
+        } else {
+          const text = await legacy.text();
+          onSubmitToChat?.(text || "Form submitted.");
+          return;
+        }
+      }
+
+      const { formatted_prompt } = await fmtRes.json();
+      if (!formatted_prompt) {
+        throw new Error("Formatter response missing 'formatted_prompt'.");
+      }
+
+      // stream final answer from /stream using the formatted prompt
+      await streamFinalFromPrompt(formatted_prompt);
+    } catch (e) {
+      console.error("Submit pipeline error:", e);
+      onSubmitToChatStream?.({ type: "chunk", data: "\n[Error preparing the response.]" });
+      onSubmitToChatStream?.({ type: "done" });
     }
   };
 

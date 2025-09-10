@@ -11,6 +11,7 @@
 /* eslint-disable jsx-a11y/label-has-associated-control */
 // src/components/SpecialtyFormSheet.jsx
 /* eslint-disable jsx-a11y/label-has-associated-control */
+// src/components/SpecialtyFormSheet.jsx
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import useSpecialtyStore from "../store/useSpecialtyStore";
@@ -19,7 +20,7 @@ import "../styles/Specialty.css";
 
 const BACKEND_BASE = "https://ai-doctor-assistant-backend-server.onrender.com";
 
-export default function SpecialtyFormSheet({ onSubmitToChat }) {
+export default function SpecialtyFormSheet({ onSubmitToChat, sessionId }) {
   const { specialty, clearSpecialty } = useSpecialtyStore();
   const [open, setOpen] = useState(false);
   const schema = useMemo(() => SPECIALTY_SCHEMAS[specialty] || DEFAULT_SCHEMA, [specialty]);
@@ -187,11 +188,14 @@ export default function SpecialtyFormSheet({ onSubmitToChat }) {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
+          session_id: sessionId || "",
           specialty,
-          title: schema.title,
-          answers: values,
+          // align with backend:
+          form: values,
         }),
       });
+
+      // keep your simple text approach (backend streams, but text() is fine)
       const text = await res.text();
       onSubmitToChat?.(text || "Form submitted.");
       close();

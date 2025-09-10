@@ -1172,19 +1172,23 @@ def stream_with_template():
 
 # --- ADD to app.py ---
 
-from flask import Response, request, jsonify, stream_with_context
+
+# app.py (only the endpoint shown here)
 
 @app.post("/analyze-form-case-stream")
 def analyze_form_case_stream():
     """
-    Body: { session_id: str, specialty: str, form: dict }
+    Body: { session_id: str, specialty: str, form: dict }  # preferred
+    Legacy accepted: { session_id: str, specialty: str, answers: dict }
     Returns: text/plain (stream)
     Behavior: Builds a plain clinical prompt from 'form' and streams analysis.
     """
     data = request.get_json() or {}
     session_id = str(data.get("session_id") or "")
     specialty = str(data.get("specialty") or "").strip()
-    form = data.get("form") or {}
+
+    # accept either modern 'form' or legacy 'answers'
+    form = data.get("form") or data.get("answers") or {}
 
     if not specialty:
         return jsonify({"error": "specialty is required"}), 400
@@ -1239,6 +1243,7 @@ def analyze_form_case_stream():
         chat_sessions[session_id].append({"role": "assistant", "content": acc})
 
     return Response(stream_with_context(generate()), content_type="text/plain")
+
 
 
 if __name__ == "__main__":

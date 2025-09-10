@@ -11,6 +11,20 @@
 /* eslint-disable no-unused-vars */
 /* eslint-disable no-useless-concat */
 /* eslint-disable no-loop-func */
+// src/components/Chat.jsx
+/* eslint-disable no-useless-escape */
+/* eslint-disable no-unused-vars */
+/* eslint-disable no-useless-concat */
+/* eslint-disable no-loop-func */
+/* eslint-disable react-hooks/exhaustive-deps */
+/* eslint-disable no-unused-vars */
+/* eslint-disable no-useless-concat */
+/* eslint-disable no-loop-func */
+
+/* eslint-disable react-hooks/exhaustive-deps */
+/* eslint-disable no-unused-vars */
+/* eslint-disable no-useless-concat */
+/* eslint-disable no-loop-func */
 import React, { useState, useEffect, useRef } from "react";
 import ChatInputWidget from "./ChatInputWidget.jsx";
 import ReactMarkdown from "react-markdown";
@@ -579,7 +593,13 @@ const Chat = () => {
       </button>
 
       {/* FULL-HEIGHT SPECIALTY FORM (appears under navbar when a specialty is chosen) */}
-      <SpecialtyFormSheet />
+      <SpecialtyFormSheet
+        sessionId={sessionId}
+        onSubmitToChat={(text) => {
+          // push a bot bubble with the analyzed response from the form
+          setChats((prev) => [...prev, { msg: text, who: "bot" }]);
+        }}
+      />
 
       <VoiceRecorderPanel
         transcribeUrl={`${BACKEND_BASE}/transcribe`}

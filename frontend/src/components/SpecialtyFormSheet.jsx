@@ -183,7 +183,7 @@ export default function SpecialtyFormSheet({ onSubmitToChat }) {
 
   const submit = async () => {
     try {
-      const res = await fetch(`${BACKEND_BASE}/analyze-form`, {
+      const res = await fetch(`${BACKEND_BASE}/analyze-form-case-stream`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({

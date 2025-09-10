@@ -82,7 +82,7 @@ CORS(app, resources={
         "allow_headers": ["Content-Type", "Authorization"],
         "supports_credentials": True
     },
-    r"/analyze-form": {
+    r"/analyze-form-case-stream": {
         "origins": [
             "https://ai-doctor-assistant-app-dev.onrender.com",
             "http://localhost:3000"

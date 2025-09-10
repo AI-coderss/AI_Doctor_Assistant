@@ -1,24 +1,38 @@
 // src/store/useSpecialtyStore.js
 import { create } from "zustand";
 
-const useSpecialtyStore = create((set, get) => ({
-  sessionId: (() => {
-    const saved = localStorage.getItem("sessionId");
-    if (saved) return saved;
-    const id = crypto.randomUUID();
-    localStorage.setItem("sessionId", id);
+const SESSION_KEY = "sessionId";
+function getSessionId() {
+  try {
+    let id = localStorage.getItem(SESSION_KEY);
+    if (!id) {
+      id = crypto.randomUUID();
+      localStorage.setItem(SESSION_KEY, id);
+    }
     return id;
-  })(),
-  specialty: "",
-  template: null,
-  active: false,
+  } catch {
+    // Fallback if storage blocked
+    return "session-" + Math.random().toString(36).slice(2);
+  }
+}
 
+const useSpecialtyStore = create((set, get) => ({
+  // Session
+  sessionId: getSessionId(),
+
+  // Active specialty drives the form sheet
+  specialty: null,
   setSpecialty: (s) => set({ specialty: s }),
-  setTemplate: (t) => set({ template: t }),
-  activate: () => set({ active: true }),
-  deactivate: () => set({ active: false }),
+  clearSpecialty: () => set({ specialty: null }),
 
-  reset: () => set({ specialty: "", template: null, active: false })
+  // (Optional) template controls for future use
+  template: null,
+  setTemplate: (t) => set({ template: t }),
+
+  isActive: false,
+  activate: () => set({ isActive: true }),
+  deactivate: () => set({ isActive: false, template: null }),
 }));
 
 export default useSpecialtyStore;
+

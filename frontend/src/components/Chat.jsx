@@ -6,6 +6,11 @@
 /* eslint-disable no-unused-vars */
 /* eslint-disable no-useless-concat */
 /* eslint-disable no-loop-func */
+
+/* eslint-disable react-hooks/exhaustive-deps */
+/* eslint-disable no-unused-vars */
+/* eslint-disable no-useless-concat */
+/* eslint-disable no-loop-func */
 import React, { useState, useEffect, useRef } from "react";
 import ChatInputWidget from "./ChatInputWidget.jsx";
 import ReactMarkdown from "react-markdown";
@@ -24,88 +29,12 @@ import VoiceRecorderPanel from "./VoiceRecorderPanel";
 // Live transcript store
 import useLiveTranscriptStore from "../store/useLiveTranscriptStore";
 
-/* ==== Specialty: form-based intake ==== */
-import SpecialtyFormDock from "./SpecialtyFormDock";
-import useSpecialtyStore from "../store/useSpecialtyStore";
+/* ==== Full-height specialty form sheet (auto-opens when a specialty is picked) ==== */
+import SpecialtyFormSheet from "./SpecialtyFormSheet.jsx";
 
 let localStream;
 
 const BACKEND_BASE = "https://ai-doctor-assistant-backend-server.onrender.com";
-
-/* ---------- Helpers to enforce ONE-QUESTION-AT-A-TIME (client-side guard) ---------- */
-
-/** Try to parse JSON safely from a string that might be JSON or text with JSON inside. */
-function tryParseJson(text) {
-  if (!text) return null;
-  const trimmed = text.trim();
-  const start = trimmed[0];
-  if (start !== "{" && start !== "[") return null;
-  try {
-    return JSON.parse(trimmed);
-  } catch {
-    // attempt to salvage first {...} block
-    const m = trimmed.match(/\{[\s\S]*\}$/);
-    if (m) {
-      try {
-        return JSON.parse(m[0]);
-      } catch {}
-    }
-    return null;
-  }
-}
-
-/** From a plain text assistant message, keep only the first question and queue the rest. */
-function extractQuestionsFromText(raw) {
-  if (!raw || typeof raw !== "string") return { question: raw || "", queue: [] };
-
-  // Normalize bullets/numbers to line breaks
-  const norm = raw
-    .replace(/\r/g, "")
-    .replace(/\n{2,}/g, "\n")
-    .replace(/•|\*|^- /gm, "")
-    .replace(/\d+\)\s+|\(\d+\)\s+|\d+\.\s+/g, "");
-
-  // Split by question marks into sentences that look like questions
-  const parts = norm
-    .split("?")
-    .map((p) => p.trim())
-    .filter(Boolean)
-    .map((p) => p + "?");
-
-  if (!parts.length) {
-    const lines = norm.split("\n").map((l) => l.trim()).filter(Boolean);
-    const qLine = lines.find((l) => l.endsWith("?"));
-    if (qLine) return { question: qLine, queue: [] };
-    return { question: norm.split("\n")[0] || "Please tell me more.", queue: [] };
-  }
-
-  const [first, ...rest] = parts;
-  return { question: first, queue: rest };
-}
-
-/** Post-process an assistant message (raw streamed text) to avoid JSON in chat and keep single-question cadence. */
-function postProcessAssistant(raw) {
-  // If it looks like JSON with sections/followups, convert to a single question.
-  if (/^\s*[\{\[]/.test(raw) && /"sections"|"follow_up_questions"|\"specialty\"/i.test(raw)) {
-    const obj = tryParseJson(raw);
-    if (obj?.follow_up_questions?.length) {
-      const first = obj.follow_up_questions.find((q) => typeof q === "string" && q.trim());
-      return { question: (first || "Let’s proceed step by step. Any allergies?").trim(), queue: [] };
-    }
-    // Fallback safety question
-    return { question: "Let’s proceed step by step. Any allergies?", queue: [] };
-  }
-
-  // If it contains multiple textual questions, keep the first.
-  if (/\?/.test(raw)) {
-    return extractQuestionsFromText(raw);
-  }
-
-  // Otherwise keep the first non-empty line, or a default
-  const firstLine = (raw || "").split("\n").map((l) => l.trim()).filter(Boolean)[0] || "";
-  const defaultQ = firstLine.endsWith("?") ? firstLine : (firstLine || "Could you share the chief complaint?");
-  return { question: defaultQ, queue: [] };
-}
 
 const Chat = () => {
   const [chats, setChats] = useState([
@@ -141,13 +70,6 @@ const Chat = () => {
   const liveText = useLiveTranscriptStore((s) => s.text);
   const isStreaming = useLiveTranscriptStore((s) => s.isStreaming);
 
-  // Specialty form dock
-  const specStore = useSpecialtyStore();
-  const [formOpen, setFormOpen] = useState(false);
-
-  // Follow-up queue (from assistant multi-question outputs)
-  const pendingQueueRef = useRef([]);
-
   // Index of the live "me" bubble in chats (or null)
   const liveIdxRef = useRef(null);
   // Debounce timer to avoid premature finalize on transient pauses
@@ -176,18 +98,21 @@ const Chat = () => {
     };
   }, [dataChannel, micStream, peerConnection]);
 
-  // reflect live transcript to a temporary "me" bubble
+  // === reflect store → chat bubbles in real time ===
   useEffect(() => {
+    // If streaming resumes, cancel any pending finalization
     if (isStreaming && finalizeTimerRef.current) {
       clearTimeout(finalizeTimerRef.current);
       finalizeTimerRef.current = null;
     }
 
+    // streaming started: open a live "me" bubble if not already present
     if (isStreaming && liveIdxRef.current === null) {
       setChats((prev) => [...prev, { msg: "", who: "me", live: true }]);
-      liveIdxRef.current = chats.length;
+      liveIdxRef.current = chats.length; // position at new element
     }
 
+    // update the live bubble text
     if (isStreaming && liveIdxRef.current !== null) {
       setChats((prev) => {
         const arr = [...prev];
@@ -196,6 +121,7 @@ const Chat = () => {
       });
     }
 
+    // streaming stopped: debounce finalization to avoid fugacious cut-offs
     if (!isStreaming && liveIdxRef.current !== null && !finalizeTimerRef.current) {
       finalizeTimerRef.current = setTimeout(() => {
         setChats((prev) => {
@@ -206,6 +132,7 @@ const Chat = () => {
         });
         liveIdxRef.current = null;
         finalizeTimerRef.current = null;
+        // Do not send here; ChatInputWidget already sent on manual stop with skipEcho:true
       }, 900);
     }
 
@@ -215,14 +142,10 @@ const Chat = () => {
         finalizeTimerRef.current = null;
       }
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isStreaming, liveText]);
 
-  // Auto-open the form when a template becomes active
-  useEffect(() => {
-    if (specStore.isActive && specStore.specialty) setFormOpen(true);
-  }, [specStore.isActive, specStore.specialty]);
-
-  // ===== WebRTC voice assistant (unchanged) =====
+  // ===== Your existing WebRTC (voice assistant) — left intact =====
   const startWebRTC = async () => {
     if (peerConnection || connectionStatus === "connecting") return;
 
@@ -424,7 +347,7 @@ const Chat = () => {
     }
   };
 
-  // Close voice session immediately
+  // Close voice session immediately (DC, PC, tracks, audio, UI)
   const closeVoiceSession = () => {
     try { stopAudio?.(); } catch {}
     try {
@@ -468,7 +391,7 @@ const Chat = () => {
   };
 
   /* =========================
-     Send message to backend; stream with JSON-suppression
+     Send message to backend (classic chat)
      ========================= */
   const handleNewMessage = async ({ text, skipEcho = false }) => {
     if (!text || !text.trim()) return;
@@ -481,17 +404,7 @@ const Chat = () => {
     const res = await fetch(`${BACKEND_BASE}/stream`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      // Add a tiny behavior wrapper so the model avoids JSON/code fences
-      body: JSON.stringify({
-        message:
-          [
-            "IMPORTANT: Do NOT output JSON or code fences.",
-            "Ask at most one follow-up question at a time, or provide concise clinical guidance.",
-            "",
-            text,
-          ].join("\n"),
-        session_id: sessionId,
-      }),
+      body: JSON.stringify({ message: text, session_id: sessionId }),
     });
 
     if (!res.ok || !res.body) {
@@ -501,67 +414,26 @@ const Chat = () => {
 
     const reader = res.body.getReader();
     const decoder = new TextDecoder();
-    let buffer = "";
+    let message = "";
     let isFirstChunk = true;
-    let isLikelyJson = false;
-    let botIndex = null;
 
     while (true) {
       const { value, done } = await reader.read();
       if (done) break;
       const chunk = decoder.decode(value, { stream: true });
-      buffer += chunk;
-
-      // Detect JSON early; keep placeholder instead of dumping it
-      if (buffer.length < 2048) {
-        const probe = buffer.trimStart();
-        if (/^[\{\[]/.test(probe) || /"sections"|"follow_up_questions"/i.test(probe)) {
-          isLikelyJson = true;
-        }
-      }
 
       if (isFirstChunk) {
-        setChats((prev) => {
-          const next = [...prev, { msg: isLikelyJson ? "…" : "", who: "bot" }];
-          botIndex = next.length - 1;
-          return next;
-        });
+        setChats((prev) => [...prev, { msg: "", who: "bot" }]);
         isFirstChunk = false;
-        continue;
       }
 
-      if (!isLikelyJson) {
-        setChats((prev) => {
-          const updated = [...prev];
-          if (botIndex == null) botIndex = updated.length - 1;
-          updated[botIndex].msg = buffer;
-          return updated;
-        });
-      } else {
-        // keep placeholder while JSON streams
-        setChats((prev) => {
-          const updated = [...prev];
-          if (botIndex == null) botIndex = updated.length - 1;
-          if (!updated[botIndex].msg) updated[botIndex].msg = "…";
-          return updated;
-        });
-      }
+      message += chunk;
+      setChats((prev) => {
+        const updated = [...prev];
+        updated[updated.length - 1].msg = message;
+        return updated;
+      });
     }
-
-    // Stream ended — post-process to ONE question / no JSON
-    const { question, queue } = postProcessAssistant(buffer);
-    pendingQueueRef.current = Array.isArray(queue) ? queue : [];
-
-    setChats((prev) => {
-      const updated = [...prev];
-      let idx = updated.length - 1;
-      if (!updated[idx] || updated[idx].who !== "bot") {
-        updated.push({ msg: question, who: "bot" });
-      } else {
-        updated[idx].msg = question;
-      }
-      return updated;
-    });
   };
 
   // === Markdown + Mermaid renderer ===
@@ -706,13 +578,8 @@ const Chat = () => {
         🎙️
       </button>
 
-      {/* Draggable specialty intake form (opens when a template is activated) */}
-      <SpecialtyFormDock
-        open={formOpen}
-        onClose={() => setFormOpen(false)}
-        sessionId={sessionId}
-        onSubmitPrompt={(promptText) => handleNewMessage({ text: promptText, skipEcho: false })}
-      />
+      {/* FULL-HEIGHT SPECIALTY FORM (appears under navbar when a specialty is chosen) */}
+      <SpecialtyFormSheet />
 
       <VoiceRecorderPanel
         transcribeUrl={`${BACKEND_BASE}/transcribe`}

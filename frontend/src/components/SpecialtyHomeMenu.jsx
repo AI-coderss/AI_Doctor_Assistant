@@ -1,14 +1,24 @@
 /* eslint-disable jsx-a11y/anchor-is-valid */
 import React from "react";
 import useSpecialtyStore from "../store/useSpecialtyStore";
-import { generateTemplate, activateTemplate } from "../api/specialtyTemplate";
 
 /**
- * Pure multi-level dropdown markup. No modal, no framer-motion.
- * Visibility is controlled via CSS :hover / :focus-within in Specialty.css.
+ * Pure multi-level dropdown menu.
+ * - No API calls here.
+ * - On click of a specialty, we just set it in the store.
+ * - The form sheet (mounted in Chat.jsx) will auto-open on specialty change.
  *
- * Props:
- * - onPicked?: () => void   // called after a specialty is selected (to force-close the menu)
+ * Structure:
+ * <ul class="dd-l1">
+ *   <li class="has-subs">
+ *     <a class="dd-link">Medicine <span class="caret">›</span></a>
+ *     <ul class="dd-l2">
+ *       <li><button class="dd-action" onClick=...>cardiology</button></li>
+ *       ...
+ *     </ul>
+ *   </li>
+ *   ...
+ * </ul>
  */
 
 const TREE = {
@@ -40,35 +50,34 @@ const TREE = {
   "Sense & Skin": ["dermatology", "ophthalmology", "ent"],
 };
 
-export default function SpecialtyHomeMenu({ onPicked }) {
-  const { sessionId, specialty, setSpecialty, setTemplate, activate } = useSpecialtyStore();
+export default function SpecialtyHomeMenu() {
+  const { setSpecialty } = useSpecialtyStore();
 
-  const onPick = async (s) => {
+  const onPick = (s) => {
+    // 1) Set specialty -> opens the full-height form sheet (mounted in Chat.jsx)
+    setSpecialty(s);
+
+    // 2) Best-effort: notify navbar to close its dropdown (if it listens for this event)
     try {
-      setSpecialty(s);
-      const gen = await generateTemplate(sessionId, s);
-      if (gen?.template) {
-        setTemplate(gen.template);
-        await activateTemplate(sessionId, s, gen.template);
-        activate();
+      window.dispatchEvent(new CustomEvent("specialty:chosen", { detail: { specialty: s } }));
+    } catch (_e) {}
+
+    // 3) Remove focus to collapse any :focus-within CSS states
+    try {
+      if (document.activeElement && document.activeElement.blur) {
+        document.activeElement.blur();
       }
-    } catch (e) {
-      console.error("Failed to generate/activate template:", e);
-    } finally {
-      // tell parent to force-close even if cursor still hovers
-      try { document.activeElement?.blur?.(); } catch {}
-      onPicked?.();
-    }
+    } catch (_e) {}
   };
 
   return (
     <ul className="dd-l1" role="menu" aria-label="Specialty categories">
       {Object.entries(TREE).map(([group, specs]) => (
         <li className="has-subs" key={group}>
-          {/* Top-level category row (non-clickable) */}
+          {/* Top-level category row (non-navigating) */}
           <a href="#" className="dd-link" onClick={(e) => e.preventDefault()}>
             <span>{group}</span>
-            <span className="caret">›</span>
+            <span className="caret" aria-hidden="true">›</span>
           </a>
 
           {/* Second-level: specialties */}
@@ -77,7 +86,7 @@ export default function SpecialtyHomeMenu({ onPicked }) {
               <li key={`${group}:${s}`}>
                 <button
                   type="button"
-                  className={`dd-action ${specialty === s ? "active" : ""}`}
+                  className="dd-action"
                   onClick={() => onPick(s)}
                 >
                   {s}

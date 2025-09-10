@@ -1,0 +1,230 @@
+/* src/styles/SpecialtyFormSheet.css */
+/* Clean, compact, non-glass style using your tokens */
+
+:root {
+  --sf-width: 760px;
+  --sf-maxh: 82vh;
+  --sf-gap: 14px;
+}
+
+.sf-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,.24);
+  display: grid;
+  place-items: center;
+  z-index: 60;
+}
+
+.sf-sheet {
+  background: var(--surface);
+  color: var(--ink);
+  width: min(92vw, var(--sf-width));
+  max-height: var(--sf-maxh);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-2);
+  display: grid;
+  grid-template-rows: auto 1fr auto;
+  overflow: hidden;
+}
+
+.sf-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: start;
+  gap: 12px;
+  padding: 16px 20px 8px;
+  border-bottom: 1px solid var(--border);
+}
+
+.sf-kicker {
+  font-size: 12px;
+  color: var(--ink-subtle);
+  text-transform: uppercase;
+  letter-spacing: .04em;
+  margin-bottom: 2px;
+}
+
+.sf-title {
+  margin: 0;
+  font-size: 18px;
+}
+
+.sf-intro {
+  margin: 6px 0 0;
+  color: var(--ink-subtle);
+  font-size: 13px;
+}
+
+.sf-close {
+  border: 0;
+  background: transparent;
+  color: var(--ink);
+  font-size: 18px;
+  cursor: pointer;
+  line-height: 1;
+}
+
+.sf-sections {
+  overflow: hidden; /* container */
+  padding: 8px 12px 0;
+}
+
+.sf-section {
+  border-bottom: 1px dashed var(--border);
+}
+
+.sf-section:last-child {
+  border-bottom: 0;
+}
+
+.sf-section-toggle {
+  width: 100%;
+  text-align: left;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  color: var(--ink);
+  border-radius: var(--radius-md);
+  padding: 10px 12px;
+  margin: 8px 0;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  cursor: pointer;
+}
+
+.sf-section.open .sf-section-toggle {
+  background: var(--surface);
+}
+
+.sf-section .chev {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  border-right: 2px solid var(--ink);
+  border-bottom: 2px solid var(--ink);
+  transform: rotate(45deg);
+  transition: transform .2s ease;
+}
+
+.sf-section .chev.up {
+  transform: rotate(-135deg);
+}
+
+.sf-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--sf-gap);
+  padding: 6px 2px 12px;
+  max-height: 42vh;          /* keep each section compact */
+  overflow: auto;             /* local scroll only WHEN needed */
+}
+
+.sf-field {
+  display: grid;
+  gap: 6px;
+}
+
+.sf-label,
+.sf-field > label {
+  font-size: 13px;
+  color: var(--ink-muted);
+}
+
+.sf-field input[type="text"],
+.sf-field input[type="number"],
+.sf-field input[type="date"],
+.sf-field select,
+.sf-field textarea {
+  width: 100%;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 10px 12px;
+  background: var(--surface);
+  color: var(--ink);
+  font-size: 14px;
+}
+
+.sf-inputwrap {
+  position: relative;
+}
+
+.sf-unit {
+  position: absolute;
+  right: 8px;
+  top: 50%;
+  transform: translateY(-50%);
+  color: var(--ink-subtle);
+  font-size: 12px;
+}
+
+.sf-radio-row {
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.sf-radio input {
+  margin-right: 6px;
+}
+
+.sf-chips-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.sf-chip {
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 6px 10px;
+  background: var(--surface-2);
+  color: var(--ink);
+  cursor: pointer;
+  font-size: 13px;
+}
+
+.sf-chip.active {
+  background: var(--primary);
+  border-color: var(--primary);
+  color: #fff;
+}
+
+.sf-help {
+  font-size: 12px;
+  color: var(--ink-subtle);
+}
+
+.req { color: #c23; margin-left: 4px; }
+
+.sf-footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  padding: 12px 16px;
+  border-top: 1px solid var(--border);
+}
+
+.sf-submit {
+  background: var(--primary);
+  color: #fff;
+  border: 0;
+  padding: 10px 16px;
+  border-radius: var(--radius-md);
+  cursor: pointer;
+}
+
+.sf-cancel {
+  background: transparent;
+  color: var(--ink);
+  border: 1px solid var(--border);
+  padding: 10px 16px;
+  border-radius: var(--radius-md);
+  cursor: pointer;
+}
+
+/* Single-column on narrow screens */
+@media (max-width: 820px) {
+  .sf-grid { grid-template-columns: 1fr; max-height: 46vh; }
+}

@@ -1162,6 +1162,188 @@ def stream_with_template():
 
     return Response(stream_with_context(generate()), content_type="text/plain")
 
+# === BEGIN: Specialty Form Endpoints (non-breaking additions) ===
+
+from typing import List, Dict, Any, Optional
+
+# Curated, deterministic form schemas per specialty (expand as needed)
+SPECIALTY_FORM_SCHEMAS: Dict[str, Dict[str, Any]] = {
+    "pediatrics": {
+        "specialty": "pediatrics",
+        "title": "Pediatrics Intake",
+        "sections": [
+            {
+                "title": "Subjective",
+                "fields": [
+                    {"key": "chief_complaint", "label": "Chief Complaint", "type": "text", "required": True, "placeholder": "Fever, cough, poor feeding…"},
+                    {"key": "hpi", "label": "History of Present Illness", "type": "textarea", "required": True, "rows": 4},
+                    {"key": "duration", "label": "Duration (days)", "type": "number", "min": 0},
+                    {"key": "fever", "label": "Fever?", "type": "select", "options": ["no", "low-grade", "high"], "required": False},
+                    {"key": "feeding", "label": "Feeding/Hydration", "type": "text", "placeholder": "Oral intake, wet diapers"},
+                    {"key": "sick_contacts", "label": "Sick Contacts", "type": "text", "placeholder": "Daycare exposure, family members"},
+                    {"key": "allergies", "label": "Allergies", "type": "text"},
+                    {"key": "meds", "label": "Current Medications", "type": "text"},
+                    {"key": "pmh", "label": "Past Medical History", "type": "textarea", "rows": 3},
+                    {"key": "vaccines_up_to_date", "label": "Vaccinations Up-to-date", "type": "select", "options": ["yes", "no", "unknown"]},
+                ]
+            },
+            {
+                "title": "Objective",
+                "fields": [
+                    {"key": "age_years", "label": "Age (years)", "type": "number", "step": 0.1, "min": 0, "required": True},
+                    {"key": "weight_kg", "label": "Weight (kg)", "type": "number", "step": 0.1, "min": 0, "required": True},
+                    {"key": "vitals", "label": "Vital Signs", "type": "textarea", "rows": 3, "placeholder": "T, HR, RR, BP, SpO₂"},
+                    {"key": "exam_respiratory", "label": "Respiratory Exam", "type": "textarea", "rows": 3},
+                    {"key": "exam_heent", "label": "HEENT", "type": "textarea", "rows": 2},
+                    {"key": "exam_skin", "label": "Skin", "type": "textarea", "rows": 2},
+                ]
+            },
+            {
+                "title": "Clinician Priorities",
+                "fields": [
+                    {"key": "concerns", "label": "Main Concerns", "type": "textarea", "rows": 3},
+                    {"key": "goals", "label": "Visit Goals", "type": "textarea", "rows": 2},
+                ]
+            }
+        ]
+    },
+
+    "orthopedics": {
+        "specialty": "orthopedics",
+        "title": "Orthopedics Intake",
+        "sections": [
+            {
+                "title": "Subjective",
+                "fields": [
+                    {"key": "chief_complaint", "label": "Chief Complaint", "type": "text", "required": True, "placeholder": "Rib pain, shoulder pain…"},
+                    {"key": "mechanism", "label": "Mechanism of Injury", "type": "textarea", "rows": 3},
+                    {"key": "onset", "label": "Onset & Duration", "type": "text"},
+                    {"key": "pain_scale", "label": "Pain Scale (0–10)", "type": "number", "min": 0, "max": 10, "step": 1},
+                    {"key": "prior_surgery", "label": "Prior Surgery?", "type": "select", "options": ["no", "yes"]},
+                    {"key": "red_flags", "label": "Red Flags", "type": "textarea", "rows": 2, "placeholder": "Numbness, weakness, SOB…"},
+                ]
+            },
+            {
+                "title": "Objective",
+                "fields": [
+                    {"key": "vitals", "label": "Vital Signs", "type": "textarea", "rows": 2},
+                    {"key": "inspection", "label": "Inspection", "type": "textarea", "rows": 2},
+                    {"key": "palpation", "label": "Palpation", "type": "textarea", "rows": 2},
+                    {"key": "rom", "label": "Range of Motion", "type": "textarea", "rows": 2},
+                    {"key": "neuro", "label": "Neurovascular", "type": "textarea", "rows": 2},
+                    {"key": "imaging", "label": "Imaging Available?", "type": "select", "options": ["no", "X-ray", "CT", "MRI"]},
+                ]
+            }
+        ]
+    },
+
+    "cardiology": {
+        "specialty": "cardiology",
+        "title": "Cardiology Intake",
+        "sections": [
+            {
+                "title": "Subjective",
+                "fields": [
+                    {"key": "chief_complaint", "label": "Chief Complaint", "type": "text", "required": True, "placeholder": "Chest pain, dyspnea…"},
+                    {"key": "hpi", "label": "HPI", "type": "textarea", "rows": 4},
+                    {"key": "risk_factors", "label": "Risk Factors", "type": "textarea", "rows": 3, "placeholder": "HTN, DM, smoking…"},
+                    {"key": "meds", "label": "Cardiac Medications", "type": "textarea", "rows": 2},
+                    {"key": "allergies", "label": "Allergies", "type": "text"},
+                ]
+            },
+            {
+                "title": "Objective",
+                "fields": [
+                    {"key": "vitals", "label": "Vital Signs", "type": "textarea", "rows": 3},
+                    {"key": "exam_cardiac", "label": "Cardiac Exam", "type": "textarea", "rows": 3},
+                    {"key": "ecg", "label": "ECG Summary", "type": "textarea", "rows": 2},
+                    {"key": "labs", "label": "Key Labs", "type": "textarea", "rows": 2},
+                ]
+            }
+        ]
+    },
+}
+
+def _normalize_specialty_name(name: str) -> str:
+    return (name or "").strip().lower().replace("_", " ").replace("-", " ")
+
+@app.route("/specialty/form-schema", methods=["GET"])
+def specialty_form_schema():
+    """
+    GET /specialty/form-schema?specialty=pediatrics
+    Returns a deterministic UI schema for building the draggable form on the frontend.
+    """
+    s = _normalize_specialty_name(request.args.get("specialty", ""))
+    if not s:
+        return jsonify({"error": "Missing 'specialty' parameter"}), 400
+
+    # simple fuzzy match
+    key = None
+    for k in SPECIALTY_FORM_SCHEMAS.keys():
+        if _normalize_specialty_name(k) == s:
+            key = k
+            break
+    if key is None:
+        # default to pediatrics if unknown (or return 404; choose your behavior)
+        return jsonify({"error": f"No schema for specialty '{s}'"}), 404
+
+    return jsonify(SPECIALTY_FORM_SCHEMAS[key]), 200
+
+@app.route("/specialty/form-compose", methods=["POST"])
+def specialty_form_compose():
+    """
+    POST { session_id, specialty, data: { fieldKey: value, ... } }
+    Returns a *plain text* prompt ready to send to /stream (no JSON, no code fences).
+    """
+    body = request.get_json() or {}
+    session_id = body.get("session_id") or ""
+    specialty = _normalize_specialty_name(body.get("specialty", ""))
+    data = body.get("data") or {}
+
+    if not specialty or not isinstance(data, dict):
+        return jsonify({"error": "Missing 'specialty' or 'data'"}), 400
+
+    # Gentle canonicalization: labelize keys
+    def labelize(k: str) -> str:
+        return k.replace("_", " ").replace("-", " ").strip().title()
+
+    # Build a deterministic, clinical text intake (no JSON)
+    lines: List[str] = []
+    lines.append(f"Specialty: {specialty.title()}")
+    # Attempt to align sections if we have a schema
+    schema = SPECIALTY_FORM_SCHEMAS.get(specialty)
+    if schema:
+        for sec in schema.get("sections", []):
+            title = sec.get("title", "").strip()
+            fields = sec.get("fields", [])
+            section_lines = []
+            for f in fields:
+                key = f.get("key")
+                label = f.get("label") or labelize(key or "")
+                val = data.get(key)
+                if val not in (None, ""):
+                    section_lines.append(f"- {label}: {val}")
+            if section_lines:
+                lines.append(f"\n{title}:")
+                lines.extend(section_lines)
+    else:
+        # fallback: just dump provided fields as labeled bullets (still text)
+        for k, v in data.items():
+            if v not in (None, ""):
+                lines.append(f"- {labelize(k)}: {v}")
+
+    # Clinical behavior instruction (single-question cadence left to your /stream prompt style)
+    lines.append(
+        "\nPlease produce a concise, clinically-structured response for this case. "
+        "Avoid echoing forms or JSON. Default to a SOAP-style or specialty-appropriate structure, "
+        "include differential, key red flags, investigations, and a safe plan with dosing ranges where appropriate. "
+        "Be succinct."
+    )
+
+    composed = "\n".join(lines).strip()
+    return jsonify({"prompt": composed, "session_id": session_id}), 200
+
+# === END: Specialty Form Endpoints ===
 
 
 if __name__ == "__main__":

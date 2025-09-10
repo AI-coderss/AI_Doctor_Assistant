@@ -1,8 +1,3 @@
-
-/* eslint-disable react-hooks/exhaustive-deps */
-/* eslint-disable no-unused-vars */
-/* eslint-disable no-useless-concat */
-/* eslint-disable no-loop-func */
 /* eslint-disable no-useless-escape */
 /* eslint-disable no-unused-vars */
 /* eslint-disable no-useless-concat */
@@ -22,16 +17,50 @@ import { encodeWAV } from "./pcmToWav.js";
 import useAudioStore from "../store/audioStore.js";
 import { startVolumeMonitoring } from "./audioLevelAnalyzer";
 import VoiceRecorderPanel from "./VoiceRecorderPanel";
-
-// Live transcript store (kept intact)
 import useLiveTranscriptStore from "../store/useLiveTranscriptStore";
-
-/* ==== Full-height specialty form sheet ==== */
 import SpecialtyFormSheet from "./SpecialtyFormSheet.jsx";
 
 let localStream;
-
 const BACKEND_BASE = "https://ai-doctor-assistant-backend-server.onrender.com";
+
+/** === Simple end-of-stream Markdown normalization ===
+ * - Remove exact consecutive duplicate lines
+ * - Collapse >1 blank line to a single blank line
+ * - Normalize list bullets and numbered items
+ */
+function normalizeMarkdown(input = "") {
+  const lines = String(input).split(/\r?\n/);
+
+  const out = [];
+  let prev = "";
+  for (let raw of lines) {
+    let line = raw.replace(/\s+$/g, ""); // rtrim
+    // Normalize bullets: 1) -> 1. , * -> - , • -> -
+    line = line
+      .replace(/^(\s*)\d+\)\s+/g, "$11. ")
+      .replace(/^(\s*)[\*\u2022]\s+/g, "$1- ");
+    // Drop consecutive duplicate lines (case/space-insensitive)
+    if (line.trim().toLowerCase() === prev.trim().toLowerCase()) continue;
+    out.push(line);
+    prev = line;
+  }
+
+  // Collapse multiple blank lines → single blank
+  const collapsed = [];
+  let blank = false;
+  for (const l of out) {
+    if (l.trim() === "") {
+      if (!blank) collapsed.push("");
+      blank = true;
+    } else {
+      collapsed.push(l);
+      blank = false;
+    }
+  }
+
+  // If the model forgot headings, we leave as-is; we already asked backend to enforce them.
+  return collapsed.join("\n").trim();
+}
 
 const Chat = () => {
   const [chats, setChats] = useState([
@@ -63,21 +92,16 @@ const Chat = () => {
     return id;
   });
 
-  // Live transcript store
   const liveText = useLiveTranscriptStore((s) => s.text);
   const isStreaming = useLiveTranscriptStore((s) => s.isStreaming);
 
-  // Index of the live "me" bubble in chats (or null)
   const liveIdxRef = useRef(null);
-  // Debounce timer to avoid premature finalize on transient pauses
   const finalizeTimerRef = useRef(null);
 
-  // auto-scroll
   useEffect(() => {
     scrollAnchorRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [chats, liveText, isStreaming]);
 
-  // suggestions
   useEffect(() => {
     fetch(`${BACKEND_BASE}/suggestions`)
       .then((res) => res.json())
@@ -85,7 +109,6 @@ const Chat = () => {
       .catch((err) => console.error("Failed to fetch suggestions:", err));
   }, []);
 
-  // cleanup on unmount
   useEffect(() => {
     return () => {
       micStream?.getTracks().forEach((track) => track.stop());
@@ -95,41 +118,44 @@ const Chat = () => {
     };
   }, [dataChannel, micStream, peerConnection]);
 
-  // === reflect store → chat bubbles in real time (kept intact) ===
+  // live transcript bubbles (unchanged)
   useEffect(() => {
-    // If streaming resumes, cancel any pending finalization
     if (isStreaming && finalizeTimerRef.current) {
       clearTimeout(finalizeTimerRef.current);
       finalizeTimerRef.current = null;
     }
 
-    // streaming started: open a live "me" bubble if not already present
     if (isStreaming && liveIdxRef.current === null) {
       setChats((prev) => [...prev, { msg: "", who: "me", live: true }]);
-      liveIdxRef.current = chats.length; // position at new element
+      liveIdxRef.current = chats.length;
     }
 
-    // update the live bubble text
     if (isStreaming && liveIdxRef.current !== null) {
       setChats((prev) => {
         const arr = [...prev];
-        arr[liveIdxRef.current] = { ...arr[liveIdxRef.current], msg: liveText || "" };
+        arr[liveIdxRef.current] = {
+          ...arr[liveIdxRef.current],
+          msg: liveText || "",
+        };
         return arr;
       });
     }
 
-    // streaming stopped: debounce finalization to avoid fugacious cut-offs
-    if (!isStreaming && liveIdxRef.current !== null && !finalizeTimerRef.current) {
+    if (
+      !isStreaming &&
+      liveIdxRef.current !== null &&
+      !finalizeTimerRef.current
+    ) {
       finalizeTimerRef.current = setTimeout(() => {
         setChats((prev) => {
           const arr = [...prev];
           const idx = liveIdxRef.current;
-          if (arr[idx]) arr[idx] = { msg: liveText || arr[idx].msg || "", who: "me" };
+          if (arr[idx])
+            arr[idx] = { msg: liveText || arr[idx].msg || "", who: "me" };
           return arr;
         });
         liveIdxRef.current = null;
         finalizeTimerRef.current = null;
-        // Do not send here; ChatInputWidget already handles sending when appropriate
       }, 900);
     }
 
@@ -139,24 +165,19 @@ const Chat = () => {
         finalizeTimerRef.current = null;
       }
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isStreaming, liveText]);
 
-  // ===== Voice assistant (kept intact) =====
+  // Voice assistant (unchanged)
   const startWebRTC = async () => {
     if (peerConnection || connectionStatus === "connecting") return;
-
     setConnectionStatus("connecting");
     setIsMicActive(false);
-
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       const { setAudioScale } = useAudioForVisualizerStore.getState();
       startVolumeMonitoring(stream, setAudioScale);
-
       localStream = stream;
       stream.getAudioTracks().forEach((track) => (track.enabled = true));
-
       const pc = new RTCPeerConnection({
         iceServers: [{ urls: "stun:stun.l.google.com:19302" }],
       });
@@ -164,12 +185,12 @@ const Chat = () => {
       pc.ontrack = (event) => {
         const [stream] = event.streams;
         if (!audioPlayerRef.current) return;
-
         audioPlayerRef.current.srcObject = stream;
         setAudioUrl(stream);
-        audioPlayerRef.current.play().catch((err) => console.error("live stream play failed:", err));
+        audioPlayerRef.current
+          .play()
+          .catch((err) => console.error("live stream play failed:", err));
       };
-
       pc.oniceconnectionstatechange = () => {
         if (pc.iceConnectionState === "failed") {
           console.error("ICE connection failed.");
@@ -177,21 +198,25 @@ const Chat = () => {
           setConnectionStatus("error");
         }
       };
-
       pc.onicecandidateerror = (e) => console.error("ICE candidate error:", e);
       pc.onnegotiationneeded = () => {};
       pc.onconnectionstatechange = () => {
-        if (pc.connectionState === "closed" || pc.connectionState === "failed") {
+        if (
+          pc.connectionState === "closed" ||
+          pc.connectionState === "failed"
+        ) {
           setConnectionStatus("error");
           setIsMicActive(false);
         }
       };
 
-      if (!localStream) console.error("localStream undefined when adding track.");
-      stream.getAudioTracks().forEach((track) => pc.addTrack(track, localStream));
+      if (!localStream)
+        console.error("localStream undefined when adding track.");
+      stream
+        .getAudioTracks()
+        .forEach((track) => pc.addTrack(track, localStream));
 
       const channel = pc.createDataChannel("response");
-
       channel.onopen = () => {
         setConnectionStatus("connected");
         setIsMicActive(true);
@@ -208,7 +233,6 @@ const Chat = () => {
         channel.send(JSON.stringify({ type: "response.create" }));
         micStream?.getAudioTracks().forEach((track) => (track.enabled = true));
       };
-
       channel.onclose = () => {
         if (pc.connectionState !== "closed") {
           console.warn("Data channel closed unexpectedly.", pc.connectionState);
@@ -216,7 +240,6 @@ const Chat = () => {
         setConnectionStatus("idle");
         setIsMicActive(false);
       };
-
       channel.onerror = (error) => {
         console.error("Data channel error:", error);
         setConnectionStatus("error");
@@ -224,12 +247,13 @@ const Chat = () => {
       };
 
       let pcmBuffer = new ArrayBuffer(0);
-
       channel.onmessage = async (event) => {
         const msg = JSON.parse(event.data);
         switch (msg.type) {
           case "response.audio.delta": {
-            const chunk = Uint8Array.from(atob(msg.delta), (c) => c.charCodeAt(0));
+            const chunk = Uint8Array.from(atob(msg.delta), (c) =>
+              c.charCodeAt(0)
+            );
             const tmp = new Uint8Array(pcmBuffer.byteLength + chunk.byteLength);
             tmp.set(new Uint8Array(pcmBuffer), 0);
             tmp.set(chunk, pcmBuffer.byteLength);
@@ -240,40 +264,40 @@ const Chat = () => {
             const wav = encodeWAV(pcmBuffer, 24000, 1);
             const blob = new Blob([wav], { type: "audio/wav" });
             const url = URL.createObjectURL(blob);
-
             const el = audioPlayerRef.current;
             el.src = url;
             el.volume = 1;
             el.muted = false;
             if (!audioContextRef.current) {
-              audioContextRef.current = new (window.AudioContext || window.webkitAudioContext)();
+              audioContextRef.current = new (window.AudioContext ||
+                window.webkitAudioContext)();
             }
-
             if (!audioSourceRef.current) {
-              audioSourceRef.current = audioContextRef.current.createMediaElementSource(el);
+              audioSourceRef.current =
+                audioContextRef.current.createMediaElementSource(el);
               analyserRef.current = audioContextRef.current.createAnalyser();
               audioSourceRef.current.connect(analyserRef.current);
               analyserRef.current.connect(audioContextRef.current.destination);
               analyserRef.current.smoothingTimeConstant = 0.8;
               analyserRef.current.fftSize = 256;
             }
-
             const analyser = analyserRef.current;
             const dataArray = new Uint8Array(analyser.frequencyBinCount);
             const { setAudioScale } = useAudioForVisualizerStore.getState();
-
             const monitorBotVolume = () => {
               analyser.getByteFrequencyData(dataArray);
-              const avg = dataArray.reduce((sum, val) => sum + val, 0) / dataArray.length;
+              const avg =
+                dataArray.reduce((sum, val) => sum + val, 0) / dataArray.length;
               const normalized = Math.max(0.5, Math.min(2, avg / 50));
               setAudioScale(normalized);
-
-              if (!el.paused && !el.ended) requestAnimationFrame(monitorBotVolume);
+              if (!el.paused && !el.ended)
+                requestAnimationFrame(monitorBotVolume);
             };
-
             monitorBotVolume();
             setAudioWave(true);
-            el.play().catch((err) => console.error("play error:", err.name, err.message));
+            el.play().catch((err) =>
+              console.error("play error:", err.name, err.message)
+            );
             pcmBuffer = new ArrayBuffer(0);
             break;
           }
@@ -288,15 +312,18 @@ const Chat = () => {
         }
       };
 
-      // Offer
       let offer;
       try {
-        offer = await pc.createOffer({ offerToReceiveAudio: true, offerToReceiveVideo: false });
+        offer = await pc.createOffer({
+          offerToReceiveAudio: true,
+          offerToReceiveVideo: false,
+        });
         const modifiedOffer = {
           ...offer,
           sdp: offer.sdp.replace(
             /a=rtpmap:\d+ opus\/48000\/2/g,
-            "a=rtpmap:111 opus/48000/2\r\n" + "a=fmtp:111 minptime=10;useinbandfec=1"
+            "a=rtpmap:111 opus/48000/2\r\n" +
+              "a=fmtp:111 minptime=10;useinbandfec=1"
           ),
         };
         await pc.setLocalDescription(modifiedOffer);
@@ -317,12 +344,15 @@ const Chat = () => {
         `https://ai-doctor-assistant-voice-mode-webrtc.onrender.com/api/rtc-connect?session_id=${sessionId}`,
         {
           method: "POST",
-          headers: { "Content-Type": "application/sdp", "X-Session-Id": sessionId },
+          headers: {
+            "Content-Type": "application/sdp",
+            "X-Session-Id": sessionId,
+          },
           body: offer.sdp,
         }
       );
-
-      if (!res.ok) throw new Error(`Server responded with status ${res.status}`);
+      if (!res.ok)
+        throw new Error(`Server responded with status ${res.status}`);
       const answer = await res.text();
       await pc.setRemoteDescription({ type: "answer", sdp: answer });
     } catch (error) {
@@ -340,37 +370,46 @@ const Chat = () => {
     if (connectionStatus === "connected" && localStream) {
       const newMicState = !isMicActive;
       setIsMicActive(newMicState);
-      localStream.getAudioTracks().forEach((track) => (track.enabled = newMicState));
+      localStream
+        .getAudioTracks()
+        .forEach((track) => (track.enabled = newMicState));
     }
   };
 
   const closeVoiceSession = () => {
-    try { stopAudio?.(); } catch {}
+    try {
+      stopAudio?.();
+    } catch {}
     try {
       const { setAudioScale } = useAudioForVisualizerStore.getState();
       setAudioScale(1);
     } catch {}
-
     if (audioPlayerRef.current) {
-      try { audioPlayerRef.current.pause(); } catch {}
+      try {
+        audioPlayerRef.current.pause();
+      } catch {}
       audioPlayerRef.current.srcObject = null;
       audioPlayerRef.current.src = "";
     }
-
     if (dataChannel && dataChannel.readyState !== "closed") {
-      try { dataChannel.close(); } catch {}
+      try {
+        dataChannel.close();
+      } catch {}
     }
-
     if (peerConnection) {
-      try { peerConnection.getSenders?.().forEach(s => s.track?.stop()); } catch {}
-      try { peerConnection.close(); } catch {}
+      try {
+        peerConnection.getSenders?.().forEach((s) => s.track?.stop());
+      } catch {}
+      try {
+        peerConnection.close();
+      } catch {}
     }
-
     if (localStream) {
-      try { localStream.getTracks().forEach(t => t.stop()); } catch {}
+      try {
+        localStream.getTracks().forEach((t) => t.stop());
+      } catch {}
       localStream = null;
     }
-
     setDataChannel(null);
     setPeerConnection(null);
     setIsMicActive(false);
@@ -386,15 +425,11 @@ const Chat = () => {
     }
   };
 
-  /* =========================
-     Send message to backend (classic chat)
-     ========================= */
+  // === Classic text chat → backend /stream (unchanged except normalize at end) ===
   const handleNewMessage = async ({ text, skipEcho = false }) => {
     if (!text || !text.trim()) return;
 
-    if (!skipEcho) {
-      setChats((prev) => [...prev, { msg: text, who: "me" }]);
-    }
+    if (!skipEcho) setChats((prev) => [...prev, { msg: text, who: "me" }]);
     setSuggestedQuestions((prev) => prev.filter((q) => q !== text));
 
     const res = await fetch(`${BACKEND_BASE}/stream`, {
@@ -404,7 +439,10 @@ const Chat = () => {
     });
 
     if (!res.ok || !res.body) {
-      setChats((prev) => [...prev, { msg: "Something went wrong.", who: "bot" }]);
+      setChats((prev) => [
+        ...prev,
+        { msg: "Something went wrong.", who: "bot" },
+      ]);
       return;
     }
 
@@ -431,16 +469,18 @@ const Chat = () => {
       });
     }
 
-    // finalize streaming flag
     setChats((prev) => {
       const updated = [...prev];
       const last = updated[updated.length - 1];
-      if (last && last.streaming) last.streaming = false;
+      if (last && last.streaming) {
+        last.streaming = false;
+        last.msg = normalizeMarkdown(last.msg);
+      }
       return updated;
     });
   };
 
-  // === Markdown + Mermaid renderer (kept intact) ===
+  // === Render Markdown (unchanged) ===
   const renderMessage = (message) => {
     const regex = /```mermaid([\s\S]*?)```/g;
     const parts = [];
@@ -467,7 +507,7 @@ const Chat = () => {
     );
   };
 
-  // === Opinion panel hooks (unchanged) ===
+  // Opinion panel hooks (unchanged)
   const opinionBufferRef = useRef("");
   const opinionStreamingRef = useRef(false);
   const handleOpinionStream = (chunkOrFull, done = false) => {
@@ -492,21 +532,26 @@ const Chat = () => {
   const handleAssistantContextTranscript = async (transcript) => {
     try {
       if (!transcript || !transcript.trim()) return;
-      await fetch("https://ai-doctor-assistant-voice-mode-webrtc.onrender.com/api/session-context", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ session_id: sessionId, transcript }),
-      });
+      await fetch(
+        "https://ai-doctor-assistant-voice-mode-webrtc.onrender.com/api/session-context",
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ session_id: sessionId, transcript }),
+        }
+      );
     } catch (e) {
-      console.error("Failed to send transcript context for voice assistant:", e);
+      console.error(
+        "Failed to send transcript context for voice assistant:",
+        e
+      );
     }
   };
 
-  /** ====== NEW: streaming from SpecialtyFormSheet → bot bubble ====== */
+  /** ====== SpecialtyFormSheet → streaming events (normalize at end) ====== */
   const handleFormStreamEvent = (evt) => {
     if (!evt || !evt.type) return;
     if (evt.type === "start") {
-      // open a bot bubble with streaming shimmer
       setChats((prev) => [...prev, { msg: "", who: "bot", streaming: true }]);
       return;
     }
@@ -518,7 +563,8 @@ const Chat = () => {
         if (!updated[lastIdx] || updated[lastIdx].who !== "bot") {
           updated.push({ msg: "", who: "bot", streaming: true });
         }
-        updated[updated.length - 1].msg = (updated[updated.length - 1].msg || "") + chunk;
+        updated[updated.length - 1].msg =
+          (updated[updated.length - 1].msg || "") + chunk;
         return updated;
       });
       return;
@@ -527,13 +573,15 @@ const Chat = () => {
       setChats((prev) => {
         const updated = [...prev];
         const last = updated[updated.length - 1];
-        if (last && last.streaming) last.streaming = false;
+        if (last) {
+          if (last.streaming) last.streaming = false;
+          last.msg = normalizeMarkdown(last.msg);
+        }
         return updated;
       });
     }
   };
 
-  // === Render ===
   if (isVoiceMode) {
     return (
       <div className="voice-assistant-wrapper">
@@ -576,7 +624,9 @@ const Chat = () => {
         {chats.map((chat, index) => (
           <div
             key={index}
-            className={`chat-message ${chat.who} ${chat.live ? "live" : ""} ${chat.streaming ? "streaming" : ""}`}
+            className={`chat-message ${chat.who} ${chat.live ? "live" : ""} ${
+              chat.streaming ? "streaming" : ""
+            }`}
           >
             {chat.who === "bot" && (
               <figure className="avatar">
@@ -595,7 +645,9 @@ const Chat = () => {
       <div className="chat-footer">
         <SuggestedQuestionsAccordion
           questions={suggestedQuestions}
-          onQuestionClick={({ text }) => handleNewMessage({ text, skipEcho: false })}
+          onQuestionClick={({ text }) =>
+            handleNewMessage({ text, skipEcho: false })
+          }
         />
         <ChatInputWidget onSendMessage={handleNewMessage} />
       </div>
@@ -619,13 +671,14 @@ const Chat = () => {
         🎙️
       </button>
 
-      {/* Specialty Form Sheet — instant close on submit, streaming to chat */}
       <SpecialtyFormSheet
         sessionId={sessionId}
-        onSubmitToChat={(text) => {
-          // fallback (non-stream): push one final bot bubble
-          setChats((prev) => [...prev, { msg: text, who: "bot" }]);
-        }}
+        onSubmitToChat={(text) =>
+          setChats((prev) => [
+            ...prev,
+            { msg: normalizeMarkdown(text), who: "bot" },
+          ])
+        }
         onSubmitToChatStream={handleFormStreamEvent}
       />
 
@@ -649,7 +702,10 @@ const CollapsibleDiagram = ({ chart }) => {
   const [isOpen, setIsOpen] = useState(false);
   return (
     <div className="collapsible-diagram">
-      <div className="collapsible-header" onClick={() => setIsOpen((prev) => !prev)}>
+      <div
+        className="collapsible-header"
+        onClick={() => setIsOpen((prev) => !prev)}
+      >
         <span className="toggle-icon">{isOpen ? "–" : "+"}</span> View Diagram
       </div>
       <AnimatePresence initial={false}>

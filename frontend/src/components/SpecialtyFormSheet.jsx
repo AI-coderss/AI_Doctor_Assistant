@@ -1,11 +1,3 @@
-/* eslint-disable no-unused-vars */
-// src/components/SpecialtyFormSheet.jsx
-/* eslint-disable jsx-a11y/label-has-associated-control */
-// src/components/SpecialtyFormSheet.jsx
-/* eslint-disable react-hooks/exhaustive-deps */
-// src/components/SpecialtyFormSheet.jsx
-/* eslint-disable jsx-a11y/label-has-associated-control */
-// src/components/SpecialtyFormSheet.jsx
 /* eslint-disable jsx-a11y/label-has-associated-control */
 // src/components/SpecialtyFormSheet.jsx
 /* eslint-disable jsx-a11y/label-has-associated-control */
@@ -18,15 +10,27 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import useSpecialtyStore from "../store/useSpecialtyStore";
-import { SPECIALTY_SCHEMAS, DEFAULT_SCHEMA, FIELD_TYPES, SPECIALTY_LABELS } from "../specialty/schema";
+import {
+  SPECIALTY_SCHEMAS,
+  DEFAULT_SCHEMA,
+  FIELD_TYPES,
+  SPECIALTY_LABELS,
+} from "../specialty/schema";
 import "../styles/Specialty.css";
 
 const BACKEND_BASE = "https://ai-doctor-assistant-backend-server.onrender.com";
 
-export default function SpecialtyFormSheet({ onSubmitToChat, onSubmitToChatStream, sessionId }) {
+export default function SpecialtyFormSheet({
+  onSubmitToChat,
+  onSubmitToChatStream,
+  sessionId,
+}) {
   const { specialty, clearSpecialty } = useSpecialtyStore();
   const [open, setOpen] = useState(false);
-  const schema = useMemo(() => SPECIALTY_SCHEMAS[specialty] || DEFAULT_SCHEMA, [specialty]);
+  const schema = useMemo(
+    () => SPECIALTY_SCHEMAS[specialty] || DEFAULT_SCHEMA,
+    [specialty]
+  );
   const [step, setStep] = useState(0);
   const [values, setValues] = useState({});
   const [dragging, setDragging] = useState(false);
@@ -51,7 +55,9 @@ export default function SpecialtyFormSheet({ onSubmitToChat, onSubmitToChatStrea
   const close = () => {
     setOpen(false);
     setTimeout(() => {
-      try { clearSpecialty(); } catch {}
+      try {
+        clearSpecialty();
+      } catch {}
     }, 120);
   };
 
@@ -59,14 +65,19 @@ export default function SpecialtyFormSheet({ onSubmitToChat, onSubmitToChatStrea
 
   const renderField = (f) => {
     const v = values[f.id] ?? (f.type === FIELD_TYPES.TOGGLE ? false : "");
-    const common = { id: f.id, value: v, onChange: (e) => onChange(f.id, e.target.value) };
+    const common = {
+      id: f.id,
+      value: v,
+      onChange: (e) => onChange(f.id, e.target.value),
+    };
 
     switch (f.type) {
       case FIELD_TYPES.TEXT:
         return (
           <div className="fld">
             <label htmlFor={f.id}>
-              {f.label}{f.required && <span className="req">*</span>}
+              {f.label}
+              {f.required && <span className="req">*</span>}
             </label>
             <input type="text" {...common} placeholder={f.placeholder || ""} />
           </div>
@@ -75,7 +86,8 @@ export default function SpecialtyFormSheet({ onSubmitToChat, onSubmitToChatStrea
         return (
           <div className="fld span2">
             <label htmlFor={f.id}>
-              {f.label}{f.required && <span className="req">*</span>}
+              {f.label}
+              {f.required && <span className="req">*</span>}
             </label>
             <textarea {...common} rows={3} placeholder={f.placeholder || ""} />
           </div>
@@ -84,7 +96,9 @@ export default function SpecialtyFormSheet({ onSubmitToChat, onSubmitToChatStrea
         return (
           <div className="fld">
             <label htmlFor={f.id}>
-              {f.label}{f.unit && <em className="unit">{` (${f.unit})`}</em>}{f.required && <span className="req">*</span>}
+              {f.label}
+              {f.unit && <em className="unit">{` (${f.unit})`}</em>}
+              {f.required && <span className="req">*</span>}
             </label>
             <input type="number" inputMode="decimal" {...common} />
           </div>
@@ -93,20 +107,35 @@ export default function SpecialtyFormSheet({ onSubmitToChat, onSubmitToChatStrea
         return (
           <div className="fld">
             <label htmlFor={f.id}>
-              {f.label}{f.required && <span className="req">*</span>}
+              {f.label}
+              {f.required && <span className="req">*</span>}
             </label>
-            <input type="date" id={f.id} value={v} onChange={(e) => onChange(f.id, e.target.value)} />
+            <input
+              type="date"
+              id={f.id}
+              value={v}
+              onChange={(e) => onChange(f.id, e.target.value)}
+            />
           </div>
         );
       case FIELD_TYPES.SELECT:
         return (
           <div className="fld">
             <label htmlFor={f.id}>
-              {f.label}{f.required && <span className="req">*</span>}
+              {f.label}
+              {f.required && <span className="req">*</span>}
             </label>
-            <select id={f.id} value={v} onChange={(e) => onChange(f.id, e.target.value)}>
+            <select
+              id={f.id}
+              value={v}
+              onChange={(e) => onChange(f.id, e.target.value)}
+            >
               <option value="">— Select —</option>
-              {f.options.map((o) => <option key={o} value={o}>{o}</option>)}
+              {f.options.map((o) => (
+                <option key={o} value={o}>
+                  {o}
+                </option>
+              ))}
             </select>
           </div>
         );
@@ -114,7 +143,8 @@ export default function SpecialtyFormSheet({ onSubmitToChat, onSubmitToChatStrea
         return (
           <div className="fld">
             <span className="lbl">
-              {f.label}{f.required && <span className="req">*</span>}
+              {f.label}
+              {f.required && <span className="req">*</span>}
             </span>
             <div className="radio-row">
               {f.options.map((o) => (
@@ -188,18 +218,23 @@ export default function SpecialtyFormSheet({ onSubmitToChat, onSubmitToChatStrea
       el.className = "submit-pulse";
       document.body.appendChild(el);
       el.addEventListener("animationend", () => {
-        try { document.body.removeChild(el); } catch {}
+        try {
+          document.body.removeChild(el);
+        } catch {}
       });
     } catch {}
   };
 
-  const streamFinalFromPrompt = async (finalPrompt) => {
+  /**
+   * PRIMARY: Stream *directly* from /form-report-stream (de-duplicated backend)
+   */
+  const streamFromFormDirect = async (payload) => {
     let started = false;
     try {
-      const res = await fetch(`${BACKEND_BASE}/stream`, {
+      const res = await fetch(`${BACKEND_BASE}/form-report-stream`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ message: finalPrompt, session_id: sessionId || "" }),
+        body: JSON.stringify(payload),
       });
 
       if (res.body && typeof onSubmitToChatStream === "function") {
@@ -220,15 +255,59 @@ export default function SpecialtyFormSheet({ onSubmitToChat, onSubmitToChatStrea
       }
     } catch (e) {
       if (started) {
-        onSubmitToChatStream?.({ type: "chunk", data: "\n[Network error while streaming.]" });
+        onSubmitToChatStream?.({
+          type: "chunk",
+          data: "\n[Network error while streaming.]",
+        });
         onSubmitToChatStream?.({ type: "done" });
       } else {
         onSubmitToChat?.("Something went wrong submitting the form.");
       }
       console.error(e);
+      throw e; // allow caller to trigger fallback
     }
   };
 
+  /**
+   * FALLBACK: legacy analyzer (if the new endpoint is unavailable)
+   */
+  const legacyStream = async (payload) => {
+    try {
+      const res = await fetch(`${BACKEND_BASE}/analyze-form-case-stream`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+
+      if (res.body && typeof onSubmitToChatStream === "function") {
+        onSubmitToChatStream({ type: "start" });
+        const reader = res.body.getReader();
+        const decoder = new TextDecoder();
+        while (true) {
+          const { value, done } = await reader.read();
+          if (done) break;
+          const chunk = decoder.decode(value, { stream: true });
+          if (chunk) onSubmitToChatStream({ type: "chunk", data: chunk });
+        }
+        onSubmitToChatStream({ type: "done" });
+      } else {
+        const text = await res.text();
+        onSubmitToChat?.(text || "Form submitted.");
+      }
+    } catch (e) {
+      console.error("Legacy fallback failed:", e);
+      onSubmitToChatStream?.({
+        type: "chunk",
+        data: "\n[Error preparing the response.]",
+      });
+      onSubmitToChatStream?.({ type: "done" });
+    }
+  };
+
+  /**
+   * SUBMIT: close sheet, then call the new endpoint; if it fails, fallback.
+   * (Removed prompt-formatter + /stream roundtrip — per your new design)
+   */
   const submit = async () => {
     // 1) immediate UI feedback + close sheet
     createSubmitPulse();
@@ -241,55 +320,12 @@ export default function SpecialtyFormSheet({ onSubmitToChat, onSubmitToChatStrea
     // Close *before* network
     close();
 
-    // 2) Format with Prompt Formatter → then stream final from /stream
+    // 2) Stream directly from the dedicated backend endpoint
     try {
-      // show loader in chat immediately
-      onSubmitToChatStream?.({ type: "start" });
-
-      const fmtRes = await fetch(`${BACKEND_BASE}/prompt-formatter`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(basePayload),
-      });
-
-      if (!fmtRes.ok) {
-        // fallback: call legacy analyze endpoint if formatter fails
-        console.warn("Prompt-formatter failed, falling back to analyze-form-case-stream");
-        const legacy = await fetch(`${BACKEND_BASE}/analyze-form-case-stream`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(basePayload),
-        });
-
-        if (legacy.body) {
-          const reader = legacy.body.getReader();
-          const decoder = new TextDecoder();
-          while (true) {
-            const { value, done } = await reader.read();
-            if (done) break;
-            const chunk = decoder.decode(value, { stream: true });
-            if (chunk) onSubmitToChatStream?.({ type: "chunk", data: chunk });
-          }
-          onSubmitToChatStream?.({ type: "done" });
-          return;
-        } else {
-          const text = await legacy.text();
-          onSubmitToChat?.(text || "Form submitted.");
-          return;
-        }
-      }
-
-      const { formatted_prompt } = await fmtRes.json();
-      if (!formatted_prompt) {
-        throw new Error("Formatter response missing 'formatted_prompt'.");
-      }
-
-      // stream final answer from /stream using the formatted prompt
-      await streamFinalFromPrompt(formatted_prompt);
-    } catch (e) {
-      console.error("Submit pipeline error:", e);
-      onSubmitToChatStream?.({ type: "chunk", data: "\n[Error preparing the response.]" });
-      onSubmitToChatStream?.({ type: "done" });
+      await streamFromFormDirect(basePayload);
+    } catch {
+      // 3) Fallback: legacy analyzer
+      await legacyStream(basePayload);
     }
   };
 
@@ -304,7 +340,10 @@ export default function SpecialtyFormSheet({ onSubmitToChat, onSubmitToChatStrea
             exit={{ opacity: 0 }}
             onClick={close}
           />
-          <div ref={constraintsRef} style={{ position: "fixed", inset: 0, zIndex: 2147483647 }}>
+          <div
+            ref={constraintsRef}
+            style={{ position: "fixed", inset: 0, zIndex: 2147483647 }}
+          >
             <motion.aside
               className={`sheet ${dragging ? "dragging" : ""}`}
               role="dialog"
@@ -325,13 +364,24 @@ export default function SpecialtyFormSheet({ onSubmitToChat, onSubmitToChatStrea
                   <span className="spec-pill">
                     {SPECIALTY_LABELS[specialty] || schema.title}
                   </span>
-                  <span className="step-info">Step {step + 1} / {total}</span>
+                  <span className="step-info">
+                    Step {step + 1} / {total}
+                  </span>
                 </div>
-                <button className="icon-btn" onClick={close} aria-label="Close form">✖</button>
+                <button
+                  className="icon-btn"
+                  onClick={close}
+                  aria-label="Close form"
+                >
+                  ✖
+                </button>
               </header>
 
               <div className="sheet-progress">
-                <div className="bar" style={{ width: `${((step + 1) / total) * 100}%` }} />
+                <div
+                  className="bar"
+                  style={{ width: `${((step + 1) / total) * 100}%` }}
+                />
               </div>
 
               <main className="sheet-body">
@@ -346,7 +396,9 @@ export default function SpecialtyFormSheet({ onSubmitToChat, onSubmitToChatStrea
                   >
                     <h3 className="section-title">{section.title}</h3>
                     {section.fields.map((f) => (
-                      <div key={f.id} className="field-wrap">{renderField(f)}</div>
+                      <div key={f.id} className="field-wrap">
+                        {renderField(f)}
+                      </div>
                     ))}
                   </motion.div>
                 </AnimatePresence>
@@ -354,13 +406,23 @@ export default function SpecialtyFormSheet({ onSubmitToChat, onSubmitToChatStrea
 
               <footer className="sheet-foot">
                 <div className="foot-left">
-                  <button className="btn ghost" onClick={back} disabled={step === 0}>Back</button>
+                  <button
+                    className="btn ghost"
+                    onClick={back}
+                    disabled={step === 0}
+                  >
+                    Back
+                  </button>
                 </div>
                 <div className="foot-right">
                   {step < total - 1 ? (
-                    <button className="btn primary" onClick={next}>Next</button>
+                    <button className="btn primary" onClick={next}>
+                      Next
+                    </button>
                   ) : (
-                    <button className="btn primary" onClick={submit}>Submit</button>
+                    <button className="btn primary" onClick={submit}>
+                      Submit
+                    </button>
                   )}
                 </div>
               </footer>

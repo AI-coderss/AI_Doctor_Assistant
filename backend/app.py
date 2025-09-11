@@ -1344,6 +1344,123 @@ def prompt_formatter():
         "session_id": session_id,
         "formatted_prompt": formatted_prompt
     }), 200
+# --- NEW: Form Report Stream endpoint (GPT-4o + anti-duplication) ---
+
+@app.post("/form-report-stream")
+def form_report_stream():
+    """
+    Body: {
+      "session_id": "optional",
+      "specialty": "cardiology" | "...",
+      "form": { ... }       # structured form object (preferred)
+    }
+
+    Streams a *structured* clinical note in Markdown with strong anti-duplication
+    filtering applied server-side (token & line level).
+    """
+    data = request.get_json() or {}
+    session_id  = data.get("session_id", str(uuid4()))
+    specialty   = (data.get("specialty") or "").strip() or "general"
+    form        = data.get("form") or data.get("answers") or {}
+
+    if session_id not in chat_sessions:
+        chat_sessions[session_id] = []
+
+    # ---- 1) Case details (Markdown bullets) ----
+    def dict_to_md(d: dict) -> str:
+        lines = []
+        for k, v in (d or {}).items():
+            if v in (None, "", []): 
+                continue
+            label = str(k).replace("_", " ").title()
+            if isinstance(v, list):
+                val = ", ".join(map(str, v))
+            else:
+                val = str(v)
+            lines.append(f"- **{label}:** {val}")
+        return "\n".join(lines) if lines else "_No details provided_"
+
+    case_md = dict_to_md(form)
+
+    # ---- 2) Strict downstream instruction (no repetition, Markdown-only) ----
+    instruction = (
+        "You are a clinical assistant. Output strictly in **Markdown** using these EXACT headings once each:\n"
+        "## Assessment\n"
+        "## Differential Diagnoses\n"
+        "## Recommended Tests\n"
+        "## Initial Management\n"
+        "## Patient Advice & Safety-Net\n"
+        "## Follow-up Question (one line)\n"
+        "Rules:\n"
+        "- English only"
+        "- Do **not** echo the input. Do **not** repeat words or lines.\n"
+        "- If information is missing, write _Unknown_ (do not invent).\n"
+        "- No JSON. No code blocks other than Markdown lists.\n"
+        "- Base your answer only on the case details and any retrieved knowledge.\n"
+        f"\n### Specialty\n- {specialty}\n"
+        f"\n### Case Details\n{case_md}\n"
+    )
+
+    # ---- 3) Streaming sanitizer to kill token/line repetition ----
+    import re
+    acc = []          # chunks we’ve emitted (as list for efficiency)
+    buf = ""          # working buffer for cleaning
+
+    # collapse repeated words: "pain pain pain" -> "pain"
+    RE_WORD_REPEAT = re.compile(r"\b(\w+)(\s+\1){1,}\b", flags=re.IGNORECASE)
+    # later we also de-dupe identical consecutive lines case-insensitive
+
+    def sanitize_and_diff(new_text: str, old_clean: str) -> str:
+        """
+        1) collapse repeated words (any 2+ in a row)
+        2) collapse multiple spaces
+        3) collapse identical consecutive lines
+        return ONLY the incremental part relative to old_clean
+        """
+        cleaned = RE_WORD_REPEAT.sub(r"\1", new_text)
+        cleaned = re.sub(r"[ \t]{2,}", " ", cleaned)
+
+        # line-level de-dupe (consecutive equals, case/space-insensitive)
+        lines = cleaned.splitlines()
+        out_lines = []
+        prev_norm = None
+        for ln in lines:
+            norm = re.sub(r"\s+", " ", ln.strip().lower())
+            if norm == prev_norm:
+                continue
+            out_lines.append(ln)
+            prev_norm = norm
+        cleaned = "\n".join(out_lines)
+
+        # diff vs already-sent content
+        if cleaned.startswith(old_clean):
+            return cleaned[len(old_clean):]
+        # if not aligned (rare), send only the new tail to avoid re-sends
+        return cleaned[-max(0, len(cleaned) - len(old_clean)):]
+
+    def generate():
+        nonlocal buf
+        try:
+            for chunk in conversation_rag_chain.stream(
+                {"chat_history": chat_sessions[session_id], "input": instruction}
+            ):
+                token = chunk.get("answer", "")
+                if not token:
+                    continue
+                buf += token
+                already = "".join(acc)
+                emit = sanitize_and_diff(buf, already)
+                if emit:
+                    acc.append(emit)
+                    yield emit
+        except Exception as e:
+            yield f"\n[Vector error: {str(e)}]"
+
+        # persist
+        chat_sessions[session_id].append({"role": "user", "content": f"[Form:{specialty}] (structured submission)"})
+        chat_sessions[session_id].append({"role": "assistant", "content": "".join(acc)})
+
+    return Response(stream_with_context(generate()), content_type="text/plain")
 
 
 if __name__ == "__main__":

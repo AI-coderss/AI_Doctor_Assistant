@@ -11,7 +11,7 @@ import useLiveTranscriptStore from "../store/useLiveTranscriptStore";
 import { Howl } from "howler";
 
 /** Backend */
-const API_BASE = "https://ai-platform-dsah-backend-chatbot.onrender.com";
+const API_BASE = "https://ai-doctor-assistant-backend-server.onrender.com";
 const SDP_URL = `${API_BASE}/api/rtc-transcribe-connect`;
 
 /**

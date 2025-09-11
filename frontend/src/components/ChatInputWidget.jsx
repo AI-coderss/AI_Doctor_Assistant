@@ -2,18 +2,16 @@
 /* eslint-disable no-unused-vars */
 /* eslint-disable react-hooks/exhaustive-deps */
 /* eslint-disable no-unused-vars */
-/* eslint-disable react-hooks/exhaustive-deps */
-/* eslint-disable no-unused-vars */
-/* eslint-disable react-hooks/exhaustive-deps */
-/* eslint-disable no-unused-vars */
 import React, { useEffect, useRef, useState } from "react";
 import SendIcon from "@mui/icons-material/Send";
 import MicIcon from "@mui/icons-material/Mic";
 import "../styles/ChatInputWidget.css";
 import useLiveTranscriptStore from "../store/useLiveTranscriptStore";
+/* 🔊 NEW: Howler for UI sound */
+import { Howl } from "howler";
 
 /** Backend */
-const API_BASE = "https://ai-doctor-assistant-backend-server.onrender.com";
+const API_BASE = "https://ai-platform-dsah-backend-chatbot.onrender.com";
 const SDP_URL = `${API_BASE}/api/rtc-transcribe-connect`;
 
 /**
@@ -47,6 +45,21 @@ const ChatInputWidget = ({ onSendMessage }) => {
   const pcRef = useRef(null);
   const streamRef = useRef(null);
   const dcRef = useRef(null);
+
+  // 🔊 NEW: Toggle sound (from /public/toggle.mp3)
+  const toggleSfxRef = useRef(null);
+  useEffect(() => {
+    try {
+      toggleSfxRef.current = new Howl({
+        src: ["/toggle.mp3"],
+        volume: 0.35,     // reasonable level
+        preload: true
+      });
+    } catch {}
+    return () => {
+      try { toggleSfxRef.current?.unload(); } catch {}
+    };
+  }, []);
 
   // Textarea autosize
   const textAreaRef = useRef(null);
@@ -457,6 +470,13 @@ const ChatInputWidget = ({ onSendMessage }) => {
         adjustTextAreaHeight(true);
         return;
       }
+      /* 🔊 NEW: play subtle toggle sound on mic start */
+      try {
+        if (toggleSfxRef.current) {
+          toggleSfxRef.current.stop();
+          toggleSfxRef.current.play();
+        }
+      } catch {}
       await startLiveTranscription(); // start and STAY recording; VAD will auto-send utterances
     } else {
       // voice mode: tap → manual stop (finalize + send)
@@ -543,8 +563,4 @@ const ChatInputWidget = ({ onSendMessage }) => {
 };
 
 export default ChatInputWidget;
-
-
-
-
 

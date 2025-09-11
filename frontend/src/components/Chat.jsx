@@ -19,6 +19,7 @@ import { startVolumeMonitoring } from "./audioLevelAnalyzer";
 import VoiceRecorderPanel from "./VoiceRecorderPanel";
 import useLiveTranscriptStore from "../store/useLiveTranscriptStore";
 import SpecialtyFormSheet from "./SpecialtyFormSheet.jsx";
+import { Howl } from "howler";
 
 let localStream;
 const BACKEND_BASE = "https://ai-doctor-assistant-backend-server.onrender.com";
@@ -85,6 +86,7 @@ const Chat = () => {
 
   const scrollAnchorRef = useRef(null);
   const audioPlayerRef = useRef(null);
+  const toggleSfxRef = useRef(null);
 
   const [sessionId] = useState(() => {
     const id = localStorage.getItem("sessionId") || crypto.randomUUID();
@@ -97,6 +99,21 @@ const Chat = () => {
 
   const liveIdxRef = useRef(null);
   const finalizeTimerRef = useRef(null);
+
+  useEffect(() => {
+    toggleSfxRef.current = new Howl({
+      src: ["/assistant.mp3"], // from /public
+      volume: 0.20, // reasonable volume
+      preload: true, // prefetch for instant play
+    });
+
+    return () => {
+      // cleanup when component unmounts
+      try {
+        toggleSfxRef.current?.unload();
+      } catch {}
+    };
+  }, []);
 
   useEffect(() => {
     scrollAnchorRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -423,6 +440,13 @@ const Chat = () => {
       audioPlayerRef.current.muted = true;
       audioPlayerRef.current.play().catch(() => {});
     }
+    // subtle click/toggle sound on mic start
+    try {
+      if (toggleSfxRef.current) {
+        toggleSfxRef.current.stop(); // ensure fresh playback
+        toggleSfxRef.current.play();
+      }
+    } catch {}
   };
 
   // === Classic text chat → backend /stream (unchanged except normalize at end) ===

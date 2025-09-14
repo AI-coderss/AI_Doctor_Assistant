@@ -1461,7 +1461,185 @@ def form_report_stream():
         chat_sessions[session_id].append({"role": "assistant", "content": "".join(acc)})
 
     return Response(stream_with_context(generate()), content_type="text/plain")
+# ---------- NEW: WebRTC connect for clinical notes (no name conflicts) ----------
+@app.post("/api/rtc-notes-connect")
+def rtc_notes_connect():
+    """
+    Browser sends SDP offer (bytes). We:
+      1) Create a Realtime Transcription Session (ephemeral client_secret)
+      2) POST the browser SDP to OpenAI Realtime ?intent=transcription
+      3) Return the raw SDP answer bytes
+    """
+    offer_sdp = request.get_data()
+    if not offer_sdp:
+        return Response(b"No SDP provided", status=400, mimetype="text/plain")
 
+    session_payload = {
+        "input_audio_transcription": {"model": "gpt-4o-transcribe"},
+        "turn_detection": {"type": "server_vad", "threshold": 0.5,
+                           "prefix_padding_ms": 300, "silence_duration_ms": 500},
+        "input_audio_noise_reduction": {"type": "near_field"}
+    }
+
+    # 1) ephemeral transcription session
+    try:
+        sess = requests.post(
+            f"{OAI_BASE}/realtime/transcription_sessions",
+            headers=COMMON_JSON_HEADERS,
+            data=json.dumps(session_payload),
+            timeout=20
+        )
+    except Exception as e:
+        return Response(f"Session error: {e}".encode(), status=502, mimetype="text/plain")
+
+    if not sess.ok:
+        return Response(sess.content or b"Failed to create session",
+                        status=sess.status_code,
+                        mimetype="text/plain")
+
+    client_secret = (sess.json().get("client_secret") or {}).get("value")
+    if not client_secret:
+        return Response(b"Missing client_secret", status=502, mimetype="text/plain")
+
+    # 2) exchange SDP
+    sdp_headers = {
+        "Authorization": f"Bearer {client_secret}",
+        "Content-Type": "application/sdp",
+        "OpenAI-Beta": "realtime=v1",
+        "Cache-Control": "no-cache",
+    }
+    try:
+        ans = requests.post(
+            f"{OAI_BASE}/realtime",
+            params={"intent": "transcription"},
+            headers=sdp_headers,
+            data=offer_sdp,
+            timeout=30
+        )
+    except Exception as e:
+        return Response(f"SDP exchange error: {e}".encode(), status=502, mimetype="text/plain")
+
+    if not ans.ok:
+        return Response(ans.content or b"SDP exchange failed",
+                        status=ans.status_code,
+                        mimetype=ans.headers.get("Content-Type", "text/plain"))
+
+    answer_bytes = ans.content or b""
+    if not answer_bytes.startswith(b"v="):
+        return Response(answer_bytes, status=502, mimetype="text/plain")
+
+    resp = Response(answer_bytes, status=200, mimetype="application/sdp")
+    resp.headers["Content-Disposition"] = "inline; filename=answer.sdp"
+    resp.headers["Cache-Control"] = "no-store"
+    return resp
+
+# ---------- Helper: stream Chat Completions ----------
+def _openai_chat_stream(messages, model="gpt-4o-mini", temperature=0.2):
+    url = f"{OAI_BASE}/chat/completions"
+    headers = {
+        "Authorization": f"Bearer {OPENAI_API_KEY}",
+        "Content-Type": "application/json",
+    }
+    payload = {
+        "model": model,
+        "temperature": temperature,
+        "stream": True,
+        "messages": messages,
+    }
+    with requests.post(url, headers=headers, data=json.dumps(payload), stream=True, timeout=120) as r:
+        r.raise_for_status()
+        for line in r.iter_lines(decode_unicode=True):
+            if not line:
+                continue
+            # OpenAI streams 'data: {...}' lines
+            if line.startswith("data: "):
+                data = line[len("data: "):]
+                if data == "[DONE]":
+                    break
+                try:
+                    delta = json.loads(data)
+                    chunk = delta.get("choices", [{}])[0].get("delta", {}).get("content")
+                    if chunk:
+                        yield chunk
+                except Exception:
+                    # best-effort: ignore malformed lines
+                    continue
+
+# ---------- NEW: streaming structured clinical notes ----------
+@app.post("/api/notes-structure-stream")
+def notes_structure_stream():
+    """
+    Body: { transcript: "full or partial transcript text" }
+    Returns: text/plain streamed markdown for clinical notes sections.
+    """
+    data = request.get_json() or {}
+    transcript = (data.get("transcript") or "").strip()
+    if not transcript:
+        return Response("No transcript provided", status=400, mimetype="text/plain")
+
+    system = (
+        "You are a clinical scribe. Convert dialogue into clean, succinct "
+        "clinical notes in Markdown with these headings only:\n"
+        "## Reason for Visit\n"
+        "## History of Present Illness\n"
+        "## Past Medical History\n"
+        "## Medications\n"
+        "## Allergies\n"
+        "## Physical Examination\n"
+        "## Labs & Imaging (available)\n"
+        "## Recommended Tests & Investigations\n"
+        "## Assessment & Plan\n\n"
+        "- Use short, factual bullet points.\n"
+        "- Infer missing fields only if strongly implied; otherwise write '—'.\n"
+        "- Keep protected health info generic.\n"
+    )
+    user = f"Dialogue transcript (may be partial):\n\n{transcript}"
+
+    def generate():
+        yield ""  # kick headers
+        for chunk in _openai_chat_stream(
+            messages=[{"role": "system", "content": system},
+                      {"role": "user", "content": user}],
+            model="gpt-4o-mini",
+            temperature=0.1
+        ):
+            yield chunk
+
+    return Response(generate(), mimetype="text/plain")
+
+# ---------- NEW: streaming structured second opinion ----------
+@app.post("/api/notes-second-opinion-stream")
+def notes_second_opinion_stream():
+    """
+    Body: { note_markdown: "the structured note" }
+    Returns: text/plain streamed expert second opinion (concise, structured).
+    """
+    data = request.get_json() or {}
+    note_md = (data.get("note_markdown") or "").strip()
+    if not note_md:
+        return Response("No note provided", status=400, mimetype="text/plain")
+
+    system = (
+        "You are a senior clinician generating a concise, structured second opinion. "
+        "Analyze the provided clinical note. Provide:\n"
+        "### Differential Diagnoses (ranked)\n"
+        "### Red Flags\n"
+        "### Recommended Next Steps\n"
+        "### Patient-Friendly Summary\n"
+        "Be specific but brief. Bullet points, no fluff."
+    )
+
+    def generate():
+        yield ""
+        for chunk in _openai_chat_stream(
+            messages=[{"role": "system", "content": system},
+                      {"role": "user", "content": f"Clinical note:\n\n{note_md}"}],
+            model="gpt-4o-mini",
+            temperature=0.2
+        ):
+            yield chunk
+
+    return Response(generate(), mimetype="text/plain")
 
 if __name__ == "__main__":
     app.run(host="127.0.0.1", port=5050, debug=True)

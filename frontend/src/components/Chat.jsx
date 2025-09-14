@@ -19,6 +19,7 @@ import { startVolumeMonitoring } from "./audioLevelAnalyzer";
 import VoiceRecorderPanel from "./VoiceRecorderPanel";
 import useLiveTranscriptStore from "../store/useLiveTranscriptStore";
 import SpecialtyFormSheet from "./SpecialtyFormSheet.jsx";
+import MicClinicalNotesButton from "./MicClinicalNotesButton.jsx";
 import { Howl } from "howler";
 
 let localStream;
@@ -673,6 +674,13 @@ const Chat = () => {
             handleNewMessage({ text, skipEcho: false })
           }
         />
+        {/* Clinical Notes Recorder Component */}
+       <MicClinicalNotesButton
+         sessionId={sessionId}
+         onStream={handleFormStreamEvent}   // this should already stream markdown into chat
+         showInlineTranscript={true}        // optional HUD; set false to hide
+         secondOpinion={true}               // auto after stop
+       />
         <ChatInputWidget onSendMessage={handleNewMessage} />
       </div>
 

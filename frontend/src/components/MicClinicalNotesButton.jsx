@@ -1,7 +1,7 @@
 // src/components/MicClinicalNotesButton.jsx
 /* eslint-disable react-hooks/exhaustive-deps */
 import React, { useEffect, useRef, useState } from "react";
-import { useReactMediaRecorder } from "react-media-recorder"; // npm i react-media-recorder
+import { useReactMediaRecorder } from "react-media-recorder"; // UX only
 import "../styles/MicClinicalNotesButton.css";
 
 const BACKEND_BASE =
@@ -12,7 +12,7 @@ const STRUCTURE_URL = `${BACKEND_BASE}/api/notes-structure-stream`;
 const SECOND_OPINION_URL = `${BACKEND_BASE}/api/notes-second-opinion-stream`;
 const RTC_URL = `${BACKEND_BASE}/api/rtc-notes-connect`;
 
-// ——— Utility: debounce ———
+// ——— debounce helper ———
 const debounce = (fn, ms = 900) => {
   let t = null;
   function debounced(...args) {
@@ -27,7 +27,7 @@ export default function MicClinicalNotesButton({
   sessionId,
   onStream, // ({type:"start"|"chunk"|"done", data?})
   secondOpinion = true,
-  showInlineTranscript = true, // small on-screen transcript preview
+  showInlineTranscript = true,
 }) {
   const [recording, setRecording] = useState(false);
   const [connecting, setConnecting] = useState(false);
@@ -41,20 +41,17 @@ export default function MicClinicalNotesButton({
   const dataChannelRef = useRef(null);
   const localStreamRef = useRef(null);
 
-  // Media-recorder: for UX/status only (we stream via WebRTC)
+  // UX only; actual audio goes via WebRTC
   const { status, startRecording, stopRecording, clearBlobUrl } =
     useReactMediaRecorder({
       audio: true,
-      onStart: () => {
-        clearBlobUrl();
-      },
+      onStart: () => clearBlobUrl(),
     });
 
   const emitStart = () => onStream && onStream({ type: "start" });
   const emitChunk = (txt) => onStream && onStream({ type: "chunk", data: txt });
   const emitDone = () => onStream && onStream({ type: "done" });
 
-  // Stream clinical notes (structured) from transcript
   const streamStructuredNotes = async (fullText) => {
     try {
       emitStart();
@@ -101,45 +98,68 @@ export default function MicClinicalNotesButton({
       });
       pcRef.current = pc;
 
-      // Attach mic
+      // Attach mic to PeerConnection
       stream.getTracks().forEach((t) => pc.addTrack(t, stream));
 
-      // DataChannel (receive transcript deltas)
+      // DataChannel for receiving JSON events
       const channel = pc.createDataChannel("notes");
       dataChannelRef.current = channel;
 
-      let partial = "";
+      let rollingTranscript = "";
 
-      channel.onopen = () => setConnected(true);
+      channel.onopen = () => {
+        setConnected(true);
+        // Enable transcription & VAD; keep model silent
+        const sessionUpdate = {
+          type: "session.update",
+          session: {
+            input_audio_transcription: { model: "gpt-4o-transcribe" },
+            turn_detection: {
+              type: "server_vad",
+              threshold: 0.5,
+              prefix_padding_ms: 300,
+              silence_duration_ms: 500,
+              create_response: false,
+            },
+            input_audio_noise_reduction: { type: "near_field" },
+            instructions: "Silent scribe mode. Do not speak.",
+          },
+        };
+        try { channel.send(JSON.stringify(sessionUpdate)); } catch {}
+      };
+
       channel.onclose = () => setConnected(false);
       channel.onerror = () => setConnected(false);
-      channel.onmessage = (evt) => {
-        try {
-          const msg = JSON.parse(evt.data);
-          // Adjust the event types if your backend emits different ones
-          if (
-            msg.type === "response.audio_transcript.delta" &&
-            typeof msg.delta === "string"
-          ) {
-            partial += msg.delta;
-            setTranscript((prev) => prev + msg.delta);
 
-            // Continuously re-structure the growing transcript
-            debouncedStructure(partial);
+      channel.onmessage = (evt) => {
+        let msg;
+        try { msg = JSON.parse(evt.data); } catch { return; }
+
+        // User mic transcripts (per VAD turn)
+        if (msg.type === "conversation.item.input_audio_transcription.completed") {
+          const t = (msg.transcript || "").trim();
+          if (t) {
+            rollingTranscript += (rollingTranscript ? " " : "") + t;
+            setTranscript((prev) => (prev ? prev + " " : "") + t);
+            debouncedStructure(rollingTranscript);
           }
-        } catch {
-          // ignore non-JSON payloads
+          return;
         }
+
+        // Optional: you can react to VAD edges
+        if (msg.type === "input_audio_buffer.speech_started") return;
+        if (msg.type === "input_audio_buffer.speech_stopped") return;
+
+        // If you later allow the model to respond:
+        if (msg.type === "response.text.delta") return;
+        if (msg.type === "response.audio_transcript.delta") return;
       };
 
       // Offer/Answer
-      const offer = await pc.createOffer({
-        offerToReceiveAudio: false,
-        offerToReceiveVideo: false,
-      });
+      const offer = await pc.createOffer({ offerToReceiveAudio: false, offerToReceiveVideo: false });
       await pc.setLocalDescription(offer);
 
-      const res = await fetch(`${RTC_URL}?session_id=${encodeURIComponent(sessionId)}`, {
+      const res = await fetch(`${RTC_URL}?session_id=${encodeURIComponent(sessionId || "")}`, {
         method: "POST",
         headers: {
           "Content-Type": "application/sdp",
@@ -147,6 +167,7 @@ export default function MicClinicalNotesButton({
         },
         body: offer.sdp,
       });
+
       if (!res.ok) throw new Error(`RTC connect failed (${res.status})`);
       const answer = await res.text();
       await pc.setRemoteDescription({ type: "answer", sdp: answer });
@@ -155,14 +176,13 @@ export default function MicClinicalNotesButton({
     } catch (err) {
       setConnecting(false);
       cleanupRTC();
+      console.error("RTC error:", err);
       throw err;
     }
   };
 
   const cleanupRTC = () => {
-    try {
-      dataChannelRef.current?.close();
-    } catch {}
+    try { dataChannelRef.current?.close(); } catch {}
     try {
       pcRef.current?.getSenders?.().forEach((s) => s.track?.stop());
       pcRef.current?.close();
@@ -171,25 +191,23 @@ export default function MicClinicalNotesButton({
     dataChannelRef.current = null;
 
     if (localStreamRef.current) {
-      try {
-        localStreamRef.current.getTracks().forEach((t) => t.stop());
-      } catch {}
+      try { localStreamRef.current.getTracks().forEach((t) => t.stop()); } catch {}
     }
     localStreamRef.current = null;
     setConnected(false);
   };
 
-  // Toggle handler (single circular button)
   const handleToggle = async () => {
     if (recording || status === "recording" || connected) {
       // STOP
       setRecording(false);
       stopRecording();
-      // finalize: one last structure pass with full transcript
+
+      // Final structure pass
       if (transcript.trim()) {
         await streamStructuredNotes(transcript);
       }
-      // optional: second opinion
+      // Optional: second opinion
       if (secondOpinion && noteMarkdown.trim()) {
         emitStart();
         try {
@@ -215,6 +233,7 @@ export default function MicClinicalNotesButton({
           emitDone();
         }
       }
+
       cleanupRTC();
       return;
     }
@@ -223,11 +242,10 @@ export default function MicClinicalNotesButton({
     setTranscript("");
     setNoteMarkdown("");
     setRecording(true);
-    await startRecording();
+    await startRecording(); // UX (LED/pulse/etc.)
     await startWebRTC();
   };
 
-  // Cleanup on unmount
   useEffect(() => () => cleanupRTC(), []);
 
   const isBusy = connecting;
@@ -246,33 +264,21 @@ export default function MicClinicalNotesButton({
         aria-label={isActive ? "Stop clinical notes" : "Start clinical notes"}
         onClick={handleToggle}
       >
-        {/* Pulsing outer ring */}
         <span className="mic-pulse-ring" aria-hidden="true" />
-        {/* Core circular surface */}
         <span className="mic-core" aria-hidden="true">
-          {/* SVG mic icon */}
-          <svg
-            className="mic-icon"
-            viewBox="0 0 24 24"
-            role="img"
-            aria-hidden="true"
-          >
-            <path
-              d="M12 14a3 3 0 0 0 3-3V6a3 3 0 0 0-6 0v5a3 3 0 0 0 3 3Z"
-              fill="currentColor"
-            />
+          <svg className="mic-icon" viewBox="0 0 24 24" role="img" aria-hidden="true">
+            <path d="M12 14a3 3 0 0 0 3-3V6a3 3 0 0 0-6 0v5a3 3 0 0 0 3 3Z" fill="currentColor" />
             <path
               d="M5 11a1 1 0 1 0-2 0 9 9 0 0 0 8 8v3H9a1 1 0 1 0 0 2h6a1 1 0 1 0 0-2h-2v-3a9 9 0 0 0 8-8 1 1 0 1 0-2 0 7 7 0 0 1-14 0Z"
               fill="currentColor"
               opacity="0.8"
             />
           </svg>
-          {/* Recording LED dot */}
           <span className="mic-led" />
         </span>
       </button>
 
-      {/* Optional tiny inline transcript HUD (can be hidden by prop) */}
+      {/* Inline transcript HUD */}
       {showInlineTranscript && (
         <div className={`mic-transcript-hud ${isActive ? "show" : ""}`} aria-live="polite">
           <div className="hud-title">

@@ -1461,32 +1461,16 @@ def form_report_stream():
         chat_sessions[session_id].append({"role": "assistant", "content": "".join(acc)})
 
     return Response(stream_with_context(generate()), content_type="text/plain")
-# GA Realtime base & models
-OAI_BASE = "https://api.openai.com/v1"
-REALTIME_MODEL = os.environ.get("REALTIME_MODEL", "gpt-realtime")
-TRANSCRIBE_MODEL = os.environ.get("TRANSCRIBE_MODEL", "gpt-4o-transcribe")
+
+
+
+# ---------- OpenAI Chat Completions streaming helper ----------
+# You can tweak these without changing the flow
 STRUCTURE_MODEL = os.environ.get("STRUCTURE_MODEL", "gpt-4o-mini")
 SECOND_OPINION_MODEL = os.environ.get("SECOND_OPINION_MODEL", "gpt-4o-mini")
 
-JSON_HEADERS = {
-    "Authorization": f"Bearer {OPENAI_API_KEY}",
-    "Content-Type": "application/json",
-}
-
-logging.basicConfig(level=logging.INFO)
-log = logging.getLogger("clinical-notes-backend")
-
-app = Flask(__name__)
-CORS(app, resources={r"/*": {"origins": "*"}},
-     supports_credentials=False,
-     allow_headers=["content-type", "x-session-id"],
-     methods=["GET", "POST", "OPTIONS"])
-
-# ---------- Utilities ----------
-def _openai_chat_stream(messages, model=STRUCTURE_MODEL, temperature=0.2):
-    """
-    Yields text chunks from OpenAI's Chat Completions streaming endpoint.
-    """
+def _openai_chat_stream(messages, model=STRUCTURE_MODEL, temperature=0.2, timeout=180):
+    """Stream text chunks from Chat Completions."""
     url = f"{OAI_BASE}/chat/completions"
     headers = {
         "Authorization": f"Bearer {OPENAI_API_KEY}",
@@ -1498,7 +1482,7 @@ def _openai_chat_stream(messages, model=STRUCTURE_MODEL, temperature=0.2):
         "stream": True,
         "messages": messages,
     }
-    with requests.post(url, headers=headers, data=json.dumps(payload), stream=True, timeout=180) as r:
+    with requests.post(url, headers=headers, data=json.dumps(payload), stream=True, timeout=timeout) as r:
         r.raise_for_status()
         for line in r.iter_lines(decode_unicode=True):
             if not line:
@@ -1517,86 +1501,91 @@ def _openai_chat_stream(messages, model=STRUCTURE_MODEL, temperature=0.2):
 
 
 
-# ---------- WebRTC: mint ephemeral & exchange SDP ----------
-@app.post("/api/rtc-notes-connect")
-def rtc_notes_connect():
+# ---------- WebRTC: transcription intent (renamed endpoint) ----------
+@app.post("/api/rtc-transcribe-nodes-connect")
+def rtc_transcribe_nodes_connect():
     """
-    Browser sends SDP offer (bytes). We:
-      1) Mint ephemeral client_secret via POST /v1/realtime/client_secrets
-      2) POST the offer SDP to /v1/realtime?model=REALTIME_MODEL
-      3) Return raw SDP answer bytes
+    Browser sends an SDP offer (bytes).
+      1) Create a Realtime Transcription Session -> ephemeral client_secret
+      2) POST the browser SDP to Realtime WebRTC endpoint with ?intent=transcription
+         (Do NOT pass model here; model is defined by the session)
+      3) Return the answer SDP (application/sdp) back to the browser as raw bytes
     """
-    offer_sdp = request.get_data()
+    offer_sdp = request.get_data()  # raw bytes
     if not offer_sdp:
         return Response(b"No SDP provided", status=400, mimetype="text/plain")
 
-    # 1) Mint ephemeral client_secret with our desired session defaults
-    sess_payload = {
-        "session": {
-            "type": "realtime",
-            "model": REALTIME_MODEL,
-            "turn_detection": {
-                "type": "server_vad",
-                "threshold": 0.5,
-                "prefix_padding_ms": 300,
-                "silence_duration_ms": 500,
-                "create_response": False  # we don't want the model to speak
-            },
-            "input_audio_transcription": {"model": TRANSCRIBE_MODEL},
-            "input_audio_noise_reduction": {"type": "near_field"},
-            "instructions": (
-                "Silent clinical scribe. Do not speak. "
-                "Only transcribe user input; the client will format notes."
-            ),
-        }
+    # 1) Create ephemeral transcription session
+    # NOTE: Do NOT force input_audio_format; WebRTC uses RTP/Opus.
+    session_payload = {
+        "input_audio_transcription": { "model": "gpt-4o-transcribe" },
+        "turn_detection": {
+            "type": "server_vad",
+            "threshold": 0.5,
+            "prefix_padding_ms": 300,
+            "silence_duration_ms": 500
+        },
+        "input_audio_noise_reduction": { "type": "near_field" }
     }
+
     try:
-        mint = requests.post(
-            f"{OAI_BASE}/realtime/client_secrets",
-            headers=JSON_HEADERS,
-            data=json.dumps(sess_payload),
-            timeout=20,
+        sess = requests.post(
+            f"{OAI_BASE}/realtime/transcription_sessions",
+            headers=COMMON_JSON_HEADERS,
+            data=json.dumps(session_payload),
+            timeout=20
         )
     except Exception as e:
-        log.exception("Ephemeral mint error")
-        return Response(f"Ephemeral mint error: {e}".encode(), status=502, mimetype="text/plain")
+        log.exception("Failed to create transcription session")
+        return Response(f"Session error: {e}".encode(), status=502, mimetype="text/plain")
 
-    if not mint.ok:
-        return Response(mint.content or b"Failed to mint client_secret",
-                        status=mint.status_code, mimetype="text/plain")
+    if not sess.ok:
+        log.error("Session create failed (%s): %s", sess.status_code, sess.text)
+        return Response(sess.content or b"Failed to create session",
+                        status=sess.status_code,
+                        mimetype="text/plain")
 
-    client_secret = (mint.json().get("client_secret") or {}).get("value")
+    client_secret = (sess.json().get("client_secret") or {}).get("value")
     if not client_secret:
-        return Response(b"Missing client_secret in mint response", status=502, mimetype="text/plain")
+        log.error("Missing client_secret in session response")
+        return Response(b"Missing client_secret", status=502, mimetype="text/plain")
 
-    # 2) Exchange SDP with OpenAI Realtime
+    # 2) Exchange SDP with Realtime endpoint using ephemeral secret
     sdp_headers = {
         "Authorization": f"Bearer {client_secret}",
         "Content-Type": "application/sdp",
-        "OpenAI-Beta": "realtime=v1",  # required for WebRTC path
+        "OpenAI-Beta": "realtime=v1",
         "Cache-Control": "no-cache",
     }
+    upstream_url = f"{OAI_BASE}/realtime"
+    params = {"intent": "transcription"}
+    log.info("Posting SDP offer to %s with params=%s (offer %d bytes)",
+             upstream_url, params, len(offer_sdp or b""))
+
     try:
         ans = requests.post(
-            f"{OAI_BASE}/realtime",
-            params={"model": REALTIME_MODEL},
+            upstream_url,
+            params=params,
             headers=sdp_headers,
-            data=offer_sdp,
-            timeout=60
+            data=offer_sdp,   # exact bytes
+            timeout=30
         )
     except Exception as e:
         log.exception("SDP exchange error")
         return Response(f"SDP exchange error: {e}".encode(), status=502, mimetype="text/plain")
 
     if not ans.ok:
-        # Bubble up useful error body and content-type
+        log.error("SDP exchange failed (%s): %s", ans.status_code, ans.text)
         return Response(ans.content or b"SDP exchange failed",
                         status=ans.status_code,
                         mimetype=ans.headers.get("Content-Type", "text/plain"))
 
     answer_bytes = ans.content or b""
+    log.info("Upstream answered SDP (%d bytes)", len(answer_bytes))
+
     if not answer_bytes.startswith(b"v="):
-        # Should be raw SDP beginning with "v="
+        preview = answer_bytes[:2000]
+        log.error("Upstream returned non-SDP body (first bytes): %r", preview)
         return Response(answer_bytes, status=502, mimetype="text/plain")
 
     resp = Response(answer_bytes, status=200, mimetype="application/sdp")
@@ -1604,7 +1593,7 @@ def rtc_notes_connect():
     resp.headers["Cache-Control"] = "no-store"
     return resp
 
-# ---------- Streaming: Notes structuring ----------
+# ---------- Streaming: structure notes from transcript ----------
 @app.post("/api/notes-structure-stream")
 def notes_structure_stream():
     """
@@ -1646,7 +1635,7 @@ def notes_structure_stream():
 
     return Response(generate(), mimetype="text/plain")
 
-# ---------- Streaming: Second opinion ----------
+# ---------- Streaming: second opinion from structured note ----------
 @app.post("/api/notes-second-opinion-stream")
 def notes_second_opinion_stream():
     """

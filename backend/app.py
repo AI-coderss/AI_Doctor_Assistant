@@ -90,9 +90,17 @@ CORS(app, resources={
         "methods": ["POST"],
         "allow_headers": ["Content-Type", "Authorization"],
         "supports_credentials": True
+    },
+    r"api/rtc-transcribe-nodes-connect": {
+        "origins": [
+            "https://ai-doctor-assistant-app-dev.onrender.com",
+            "http://localhost:3000"
+        ],
+        "methods": ["POST"],
+        "allow_headers": ["Content-Type", "Authorization"],
+        "supports_credentials": True
     }
-
- }})
+}})
 
 chat_sessions = {}
 collection_name = os.getenv("QDRANT_COLLECTION_NAME")

@@ -18,7 +18,7 @@ import useAudioStore from "../store/audioStore.js";
 import { startVolumeMonitoring } from "./audioLevelAnalyzer";
 import VoiceRecorderPanel from "./VoiceRecorderPanel";
 import useLiveTranscriptStore from "../store/useLiveTranscriptStore";
-import SpecialtyFormSheet from "./SpecialtyFormSheet.jsx";
+
 
 import { Howl } from "howler";
 
@@ -696,17 +696,7 @@ const Chat = () => {
         🎙️
       </button>
 
-      <SpecialtyFormSheet
-        sessionId={sessionId}
-        onSubmitToChat={(text) =>
-          setChats((prev) => [
-            ...prev,
-            { msg: normalizeMarkdown(text), who: "bot" },
-          ])
-        }
-        onSubmitToChatStream={handleFormStreamEvent}
-      />
-
+   
       <VoiceRecorderPanel
         transcribeUrl={`${BACKEND_BASE}/transcribe`}
         opinionUrl={`${BACKEND_BASE}/case-second-opinion-stream`}

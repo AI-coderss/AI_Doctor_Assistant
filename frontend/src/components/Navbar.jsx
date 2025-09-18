@@ -1,8 +1,9 @@
+/* eslint-disable no-unused-vars */
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useLocation } from "react-router-dom";
 import "../styles/Navbar.css";
 import "../styles/Specialty.css";
-import SpecialtyHomeMenu from "./SpecialtyHomeMenu";
+
 
 const THEME_KEY = "theme";
 
@@ -131,7 +132,7 @@ const Navbar = () => {
             </Link>
 
             {/* Multi-level dropdown */}
-            <SpecialtyHomeMenu onPicked={handleMenuPicked} />
+          
           </div>
 
           {/* Other nav items */}

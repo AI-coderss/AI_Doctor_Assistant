@@ -7,7 +7,7 @@ import React, {
 } from "react";
 import "../styles/LabResultsUploader.css";
 
-const BACKEND_BASE = process.env.REACT_APP_BACKEND_BASE;
+const BACKEND_BASE = process.env.REACT_APP_BACKEND_BASE || "";
 const OCR_URL = `${BACKEND_BASE}/ocr`;
 const STREAM_URL = `${BACKEND_BASE}/stream`;
 
@@ -19,10 +19,38 @@ const ACCEPTED = [
   "image/tiff",
 ];
 
+// --- Utilities ---
+async function readJsonSafe(res) {
+  const ct = res.headers.get("content-type") || "";
+  // If JSON, parse normally
+  if (ct.includes("application/json")) {
+    return await res.json();
+  }
+  // Not JSON → try text
+  const text = await res.text();
+  // Sometimes upstream still returns JSON but with wrong CT
+  try {
+    return JSON.parse(text);
+  } catch {
+    // HTML page or random text → throw a helpful error
+    const snippet = text.slice(0, 300).replace(/\s+/g, " ");
+    const maybeHtml =
+      snippet.toLowerCase().includes("<!doctype") ||
+      snippet.toLowerCase().includes("<html");
+    const msg = maybeHtml
+      ? `Server returned an HTML error page (${res.status}). Common causes: 413 (file too large), gateway error, or proxy error. Snippet: ${snippet}`
+      : `Unexpected non-JSON response (${res.status}): ${snippet}`;
+    const err = new Error(msg);
+    err._rawText = text;
+    err._status = res.status;
+    throw err;
+  }
+}
+
 const LabResultsUploader = forwardRef(function LabResultsUploader(
   {
     autoSend = true,
-    ocrLanguage = "eng",
+    ocrLanguage = "eng", // switch to "ara" for Arabic reports
     engine = "2",
     overlay = false,
     maxSizeMB = 20,
@@ -40,7 +68,6 @@ const LabResultsUploader = forwardRef(function LabResultsUploader(
   const [fileMeta, setFileMeta] = useState(null);
   const [extractedText, setExtractedText] = useState("");
 
-  // Expose an imperative API for opening the file dialog
   useImperativeHandle(ref, () => ({
     open: () => inputRef.current?.click(),
   }));
@@ -74,6 +101,21 @@ const LabResultsUploader = forwardRef(function LabResultsUploader(
       });
 
       const ct = res.headers.get("content-type") || "";
+
+      // HTML error page?
+      if (
+        !ct.includes("application/json") &&
+        !ct.includes("text/event-stream") &&
+        !ct.includes("application/octet-stream")
+      ) {
+        const txt = await res.text();
+        const snippet = txt.slice(0, 300).replace(/\s+/g, " ");
+        throw new Error(
+          `Stream endpoint returned non-JSON (${res.status}). Snippet: ${snippet}`
+        );
+      }
+
+      // Non-stream fallback (plain JSON or text)
       if (
         !res.body ||
         (!ct.includes("text/event-stream") &&
@@ -87,7 +129,7 @@ const LabResultsUploader = forwardRef(function LabResultsUploader(
         return;
       }
 
-      // Streaming read
+      // Streaming (SSE/raw)
       const reader = res.body.getReader();
       const decoder = new TextDecoder("utf-8");
       let full = "";
@@ -118,15 +160,32 @@ const LabResultsUploader = forwardRef(function LabResultsUploader(
     setStatus("extracting");
 
     const form = new FormData();
-    form.append("image", file); // must be 'image' to match backend
+    form.append("image", file); // field MUST be 'image' for backend
     form.append("language", ocrLanguage);
     form.append("engine", engine);
     form.append("overlay", overlay ? "true" : "false");
 
     try {
       const res = await fetch(OCR_URL, { method: "POST", body: form });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data?.error || "OCR failed");
+
+      // Try to read JSON, but tolerate HTML/text errors too
+      let data;
+      try {
+        data = await readJsonSafe(res);
+      } catch (e) {
+        // Surface helpful cause, e.g., 413 or gateway HTML
+        throw e;
+      }
+
+      if (!res.ok) {
+        // Show provider/backend error message if present
+        const msg =
+          data?.error ||
+          data?.message ||
+          data?.details?.ErrorMessage ||
+          `OCR failed (${res.status})`;
+        throw new Error(msg);
+      }
 
       const text = data?.text || "";
       const meta = data?.meta || {
@@ -134,6 +193,9 @@ const LabResultsUploader = forwardRef(function LabResultsUploader(
         mimetype: file.type,
         size: file.size,
       };
+
+      if (!text.trim()) throw new Error("OCR returned empty text");
+
       setExtractedText(text);
       setFileMeta(meta);
       onExtracted?.(text, meta);

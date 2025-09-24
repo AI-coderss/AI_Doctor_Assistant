@@ -12,30 +12,35 @@ OCR_SPACE_API_KEY = os.getenv("OCR_SPACE_API_KEY")
 ALLOWED_EXTS = {"pdf", "png", "jpg", "jpeg", "tif", "tiff", "webp"}
 MAX_BYTES = int(os.getenv("OCR_MAX_BYTES", 20 * 1024 * 1024))  # 20MB
 
+def _json_error(message, status=400, **extra):
+  payload = {"error": message}
+  if extra:
+    payload.update(extra)
+  return jsonify(payload), status
 
 @ocr_bp.route("/ocr", methods=["POST"])
 def ocr_from_image():
     if not OCR_SPACE_API_KEY:
-        return jsonify({"error": "OCR_SPACE_API_KEY is not configured"}), 500
+        return _json_error("OCR_SPACE_API_KEY is not configured", 500)
 
     # Accept 'image' (preferred) or 'file' as a fallback
     f = request.files.get("image") or request.files.get("file")
     if not f:
-        return jsonify({"error": "No image file uploaded", "hint": "Use form field 'image'"}), 400
+        return _json_error("No image file uploaded. Use form field 'image'", 400)
 
     filename = secure_filename(f.filename or "upload")
     ext = (os.path.splitext(filename)[1].lstrip(".") or "png").lower()
     if ext not in ALLOWED_EXTS:
-        return jsonify({"error": "Unsupported file type", "allowed": sorted(ALLOWED_EXTS)}), 400
+        return _json_error("Unsupported file type", 400, allowed=sorted(ALLOWED_EXTS))
 
-    # Prevent huge uploads
+    # Avoid huge uploads (proxy might still reject first; see NGINX note)
     if request.content_length and request.content_length > MAX_BYTES:
-        return jsonify({"error": f"File too large (> {MAX_BYTES // (1024*1024)}MB)"}), 413
+        return _json_error(f"File too large (> {MAX_BYTES // (1024*1024)}MB)", 413)
 
-    # Optional passthrough tuning (defaults work well)
+    # Tunables
     language = request.form.get("language", "eng")   # e.g., "eng", "ara"
     overlay  = request.form.get("overlay", "false")  # "true"/"false"
-    engine   = request.form.get("engine", "2")       # "1" | "2" | "3" (per OCR.Space)
+    engine   = request.form.get("engine", "2")       # "1"|"2"|"3"
     is_table = request.form.get("isTable")           # optional
     scale    = request.form.get("scale")             # optional
     detect_orientation = request.form.get("detectOrientation")  # optional
@@ -57,20 +62,34 @@ def ocr_from_image():
         data["detectOrientation"] = detect_orientation
 
     try:
+        # NOTE: pass file stream; requests handles multipart
         resp = requests.post(
             "https://api.ocr.space/parse/image",
             files={"file": (forced_name, f.stream, forced_mime)},
             data=data,
             timeout=180,
+            headers={"Accept": "application/json"},
         )
-        resp.raise_for_status()
-        result = resp.json()
-    except requests.exceptions.RequestException as e:
-        return jsonify({"error": "OCR request failed", "detail": str(e)}), 502
-    except ValueError:
-        return jsonify({"error": "OCR provider returned non-JSON response"}), 502
+        # Some providers send 200 OK even for errors; don't assume status
+        text_ct = resp.headers.get("Content-Type", "")
+        # Try to read JSON either way
+        try:
+            result = resp.json()
+        except ValueError:
+            # Upstream returned non-JSON; bubble up text safely
+            snippet = (resp.text or "").strip()[:300]
+            return _json_error(
+                "OCR provider returned non-JSON response",
+                502,
+                provider_status=resp.status_code,
+                provider_ct=text_ct,
+                snippet=snippet,
+            )
 
-    # Success path
+    except requests.exceptions.RequestException as e:
+        return _json_error("OCR request failed", 502, detail=str(e))
+
+    # Success?
     if not result.get("IsErroredOnProcessing") and "ParsedResults" in result:
         pages = result.get("ParsedResults") or []
         texts = []
@@ -81,7 +100,7 @@ def ocr_from_image():
         parsed_text = "\n\n".join(texts).strip()
 
         if not parsed_text:
-            return jsonify({"error": "OCR succeeded but returned no text", "details": result}), 502
+            return _json_error("OCR succeeded but returned no text", 502, provider=result)
 
         return jsonify({
             "text": parsed_text,
@@ -94,9 +113,10 @@ def ocr_from_image():
             }
         })
 
-    # Error from provider
-    return jsonify({
-        "error": "OCR failed",
-        "message": result.get("ErrorMessage", "No detailed message"),
-        "details": result,
-    }), 400
+    # Provider signaled an error
+    return _json_error(
+        "OCR failed",
+        400,
+        message=result.get("ErrorMessage", "No detailed message"),
+        details=result,
+    )

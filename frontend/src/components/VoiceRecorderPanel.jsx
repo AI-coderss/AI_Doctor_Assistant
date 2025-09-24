@@ -293,8 +293,8 @@ const VoiceRecorderPanel = ({
           </div>
 
           {loading && (
-            <div className="loader">
-              <div className="spinner" />
+            <div className="loaders">
+              <div className="spinners" />
               <p>Processing…</p>
             </div>
           )}

@@ -1,23 +1,77 @@
 /* src/styles/LabResultsUploader.css */
-.lab-uploader {
-    display: grid;
-    gap: 12px;
+
+/* ========= Positioning knobs ========= */
+:root {
+    /* Desktop / large screens */
+    --lab-uploader-left: 16px;
+    /* Raise it well above bottom items (voice panel, etc.) */
+    --lab-uploader-bottom: 260px;
+    /* increase to raise further */
+    --lab-uploader-width: 320px;
+    --lab-uploader-z: 80;
+
+    /* Mobile / narrow screens */
+    --lab-uploader-left-mobile: 12px;
+    --lab-uploader-top-mobile: 88px;
+    /* stick near the top on mobile */
+    --lab-uploader-width-mobile: 92vw;
 }
 
+/* Float the uploader so it doesn't intermingle with footer/other fixed widgets */
+.lab-uploader {
+    position: fixed;
+    left: var(--lab-uploader-left);
+    bottom: calc(var(--lab-uploader-bottom) + env(safe-area-inset-bottom, 0px));
+    width: min(90vw, var(--lab-uploader-width));
+    z-index: var(--lab-uploader-z);
+
+    /* Layout inside the card */
+    display: grid;
+    gap: 12px;
+
+    /* Make it pop above content behind */
+    pointer-events: auto;
+}
+
+/* Mobile: anchor to top-left instead of bottom to avoid overlap */
+@media (max-width: 900px) {
+    .lab-uploader {
+        left: var(--lab-uploader-left-mobile);
+        bottom: auto;
+        top: calc(var(--lab-uploader-top-mobile) + env(safe-area-inset-top, 0px));
+        width: var(--lab-uploader-width-mobile);
+    }
+}
+
+/* Optional: extra raised variant (apply alongside .lab-uploader if you want more lift)
+   <div class="lab-uploader lab-uploader--raised"> */
+.lab-uploader--raised {
+    bottom: calc(340px + env(safe-area-inset-bottom, 0px));
+}
+
+/* ======= Card styles ======= */
 .dropzone {
     user-select: none;
-    border: 2px dashed rgba(0, 0, 0, .2);
+    border: 2px dashed rgba(0, 0, 0, .18);
     border-radius: 14px;
     padding: 18px;
-    background: rgba(255, 255, 255, .6);
+    background: rgba(255, 255, 255, .8);
+    -webkit-backdrop-filter: blur(6px);
     backdrop-filter: blur(6px);
     cursor: pointer;
-    transition: transform .12s ease, border-color .12s ease, background .12s ease;
+    transition: transform .12s ease, border-color .12s ease, background .12s ease, box-shadow .12s ease;
+    box-shadow:
+        0 8px 24px rgba(0, 0, 0, 0.08),
+        0 2px 8px rgba(0, 0, 0, 0.06);
 }
 
 .dropzone.drag-over {
     border-color: rgba(0, 0, 0, .45);
-    transform: scale(1.01);
+    transform: translateY(-1px) scale(1.01);
+    background: rgba(255, 255, 255, .92);
+    box-shadow:
+        0 10px 28px rgba(0, 0, 0, 0.10),
+        0 3px 10px rgba(0, 0, 0, 0.08);
 }
 
 .dz-inner {
@@ -78,6 +132,7 @@
     opacity: .7;
 }
 
+/* Extracted box */
 .extracted textarea {
     width: 100%;
     min-height: 160px;
@@ -85,7 +140,7 @@
     padding: 10px 12px;
     border-radius: 10px;
     border: 1px solid rgba(0, 0, 0, .12);
-    background: rgba(255, 255, 255, .75);
+    background: rgba(255, 255, 255, .85);
     font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
 }
 
@@ -113,10 +168,43 @@
     cursor: pointer;
 }
 
+.send-btn:hover {
+    filter: brightness(1.05);
+}
+
 .error {
     color: #b00020;
     font-weight: 600;
     padding: 8px 10px;
     border-radius: 10px;
     background: rgba(176, 0, 32, .08);
+}
+
+/* Optional: dark mode polish */
+@media (prefers-color-scheme: dark) {
+    .dropzone {
+        border-color: rgba(255, 255, 255, .16);
+        background: rgba(22, 22, 22, .7);
+        box-shadow:
+            0 8px 24px rgba(0, 0, 0, 0.5),
+            0 2px 8px rgba(0, 0, 0, 0.4);
+    }
+
+    .dropzone.drag-over {
+        background: rgba(30, 30, 30, .86);
+    }
+
+    .loader .dot {
+        background: rgba(255, 255, 255, .8);
+    }
+
+    .badge {
+        background: rgba(255, 255, 255, .12);
+    }
+
+    .extracted textarea {
+        background: rgba(30, 30, 30, .75);
+        border-color: rgba(255, 255, 255, .12);
+        color: #fff;
+    }
 }

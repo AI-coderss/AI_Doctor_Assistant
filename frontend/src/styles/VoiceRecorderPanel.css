@@ -374,7 +374,7 @@
    Loader
    =========================== */
 
-.loader {
+.loaders {
     display: grid;
     place-items: center;
     gap: 8px;
@@ -385,7 +385,7 @@
     background: rgba(79, 70, 229, .08);
 }
 
-.spinner {
+.spinners {
     width: 18px;
     height: 18px;
     border: 3px solid rgba(79, 70, 229, .18);
@@ -552,7 +552,7 @@
         font-size: .8rem;
     }
 
-    .spinner {
+    .spinners {
         width: 16px;
         height: 16px;
     }

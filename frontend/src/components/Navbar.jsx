@@ -1,9 +1,10 @@
 /* eslint-disable no-unused-vars */
 import React, { useEffect, useMemo, useRef, useState } from "react";
-import { Link, useLocation } from "react-router-dom";
+import { Link, NavLink, useLocation, useNavigate } from "react-router-dom";
 import "../styles/Navbar.css";
 import "../styles/Specialty.css";
 
+import LabResultsUploader from "./LabResultsUploader";
 
 const THEME_KEY = "theme";
 
@@ -29,6 +30,8 @@ function applyTheme(t) {
 
 const Navbar = () => {
   const location = useLocation();
+  const navigate = useNavigate();
+
   const [menuOpen, setMenuOpen] = useState(false);
 
   // 🚫 No initial "light" flash: pick & apply BEFORE first paint
@@ -38,12 +41,33 @@ const Navbar = () => {
     return initial;
   });
 
+  const [isSmall, setIsSmall] = useState(() =>
+    typeof window !== "undefined"
+      ? window.matchMedia("(max-width: 900px)").matches
+      : false
+  );
+
+  useEffect(() => {
+    const mq = window.matchMedia?.("(max-width: 900px)");
+    if (!mq) return;
+    const handler = (e) => setIsSmall(e.matches);
+    try {
+      mq.addEventListener("change", handler);
+    } catch {
+      // Safari fallback
+      mq.addListener(handler);
+    }
+    return () => {
+      try {
+        mq.removeEventListener("change", handler);
+      } catch {
+        mq.removeListener(handler);
+      }
+    };
+  }, []);
+
   const navLinksRef = useRef(null);
   const mobileBtnRef = useRef(null);
-
-  // NEW: programmatic close state for the Home dropdown
-  const [homeForceClose, setHomeForceClose] = useState(false);
-  const homeRef = useRef(null);
 
   const navItems = useMemo(
     () => [
@@ -90,14 +114,17 @@ const Navbar = () => {
   const toggleTheme = () => setTheme((t) => (t === "light" ? "dark" : "light"));
   const isActive = (to) => location.pathname === to;
 
-  // When a specialty is picked, force-close the hover menu briefly
-  const handleMenuPicked = () => {
-    // blur any focused element to end :focus-within visibility
-    try { document.activeElement?.blur?.(); } catch {}
-    setHomeForceClose(true);
-    // After transition time, allow hovering again
-    setTimeout(() => setHomeForceClose(false), 220);
+  // ---- Smooth Back navigation (with fallback) ----
+  const canGoBack = typeof window !== "undefined" ? window.history.length > 1 : false;
+  const goBack = () => {
+    if (canGoBack) {
+      navigate(-1);
+    } else {
+      // fallback to Home if there's no history entry
+      navigate("/", { replace: true });
+    }
   };
+  // -----------------------------------------------
 
   return (
     <nav className="premium-nav" role="navigation" aria-label="Main Navigation">
@@ -115,38 +142,20 @@ const Navbar = () => {
           role="menubar"
           aria-label="Primary"
         >
-          {/* Home: multi-level dropdown */}
-          <div
-            ref={homeRef}
-            className={`home-dd ${isActive("/") ? "active" : ""} ${homeForceClose ? "force-close" : ""}`}
-            onMouseLeave={() => setHomeForceClose(false)}
-          >
-            {/* Prevent navigation; dropdown opens on hover/focus */}
-            <Link
-              to="/"
-              role="menuitem"
-              className={`nav-link home-trigger ${isActive("/") ? "active" : ""}`}
-              onClick={(e) => e.preventDefault()}
-            >
-              <span>Home 🏠</span>
-            </Link>
-
-            {/* Multi-level dropdown */}
-          
-          </div>
-
-          {/* Other nav items */}
-          {navItems.slice(1).map((item, idx) => (
-            <Link
+          {/* Core nav items */}
+          {navItems.map((item, idx) => (
+            <NavLink
               key={item.to}
               to={item.to}
               role="menuitem"
-              className={`nav-link ${isActive(item.to) ? "active" : ""}`}
+              className={({ isActive: act }) =>
+                `nav-link ${act ? "active" : ""}`
+              }
               onClick={() => setMenuOpen(false)}
-              style={{ animation: `navItemFade 0.5s ease forwards ${idx / 7 + 0.3}s` }}
+              style={{ animation: `navItemFade 0.5s ease forwards ${idx / 7 + 0.2}s` }}
             >
               <span>{item.label}</span>
-            </Link>
+            </NavLink>
           ))}
 
           {/* Theme toggle in mobile drawer */}
@@ -160,10 +169,76 @@ const Navbar = () => {
             <i className="ri-sun-line sun-icon" />
             <i className="ri-moon-line moon-icon" />
           </button>
+
+          {/* --- MOBILE-ONLY: Lab Uploader inside hamburger dropdown --- */}
+          {isSmall && menuOpen && (
+            <div
+              className="nav-mobile-uploader"
+              style={{
+                marginTop: 14,
+                paddingTop: 10,
+                borderTop: "1px solid var(--border, rgba(0,0,0,.08))",
+              }}
+            >
+              <div
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "space-between",
+                  marginBottom: 8,
+                }}
+              >
+                <strong style={{ fontSize: 14 }}>
+                  📎 Carica referti (OCR)
+                </strong>
+                <span style={{ fontSize: 12, opacity: 0.7 }}>
+                  PDF/Immagini
+                </span>
+              </div>
+
+              {/* Embed uploader in dense mode; positioned statically & compact via CSS */}
+              <LabResultsUploader
+                dense
+                className="lab-uploader-embedded"
+                style={{
+                  position: "static",
+                  width: "100%",
+                  zIndex: "auto",
+                }}
+                autoSend={true}
+                ocrLanguage="eng"   // "ara" for Arabic
+                engine="2"
+                onBeforeSendToAI={(text, meta) =>
+                  [
+                    "You are a clinical AI assistant.",
+                    "You are given OCR-extracted lab results below.",
+                    "Summarize abnormal values (with units), compare to provided normal ranges, flag critical values,",
+                    "and give a concise, guideline-aligned interpretation.",
+                    `SOURCE FILE: ${meta?.filename || "Unknown"}`,
+                    "",
+                    "=== LAB RESULTS (OCR) ===",
+                    text,
+                  ].join("\n")
+                }
+              />
+            </div>
+          )}
         </div>
 
         {/* Actions (right) */}
         <div className="nav-actions">
+          {/* Back button (smooth return) */}
+          <button
+            className="nav-back-btn"
+            aria-label="Torna indietro"
+            onClick={goBack}
+            type="button"
+            disabled={!canGoBack && location.pathname === "/"}
+            title="Indietro"
+          >
+            <i className="ri-arrow-left-line" />
+          </button>
+
           {/* Theme toggle (desktop) */}
           <button
             className="theme-toggle theme-toggle-desktop"
@@ -176,6 +251,7 @@ const Navbar = () => {
             <i className="ri-moon-line moon-icon" />
           </button>
 
+          {/* Hamburger */}
           <button
             ref={mobileBtnRef}
             className="mobile-menu"
@@ -193,6 +269,8 @@ const Navbar = () => {
 };
 
 export default Navbar;
+
+
 
 
 

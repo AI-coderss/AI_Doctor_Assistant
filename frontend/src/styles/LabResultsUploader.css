@@ -1,23 +1,17 @@
 /* src/styles/LabResultsUploader.css */
 
-/* ========= Positioning knobs ========= */
+/* ========= Positioning knobs (desktop) ========= */
 :root {
-    /* Desktop / large screens */
     --lab-uploader-left: 16px;
-    /* Raise it well above bottom items (voice panel, etc.) */
+    /* desktop floating offset – keep it high above footers */
     --lab-uploader-bottom: 260px;
-    /* increase to raise further */
     --lab-uploader-width: 320px;
     --lab-uploader-z: 80;
-
-    /* Mobile / narrow screens */
-    --lab-uploader-left-mobile: 12px;
-    --lab-uploader-top-mobile: 88px;
-    /* stick near the top on mobile */
-    --lab-uploader-width-mobile: 92vw;
 }
 
-/* Float the uploader so it doesn't intermingle with footer/other fixed widgets */
+/* ========= Default floating uploader (desktop) ========= */
+/* NOTE: this class is used when the uploader is placed as a floating card
+   (e.g., in Chat.jsx). We'll hide this on mobile below. */
 .lab-uploader {
     position: fixed;
     left: var(--lab-uploader-left);
@@ -25,31 +19,12 @@
     width: min(90vw, var(--lab-uploader-width));
     z-index: var(--lab-uploader-z);
 
-    /* Layout inside the card */
     display: grid;
     gap: 12px;
-
-    /* Make it pop above content behind */
     pointer-events: auto;
 }
 
-/* Mobile: anchor to top-left instead of bottom to avoid overlap */
-@media (max-width: 900px) {
-    .lab-uploader {
-        left: var(--lab-uploader-left-mobile);
-        bottom: auto;
-        top: calc(var(--lab-uploader-top-mobile) + env(safe-area-inset-top, 0px));
-        width: var(--lab-uploader-width-mobile);
-    }
-}
-
-/* Optional: extra raised variant (apply alongside .lab-uploader if you want more lift)
-   <div class="lab-uploader lab-uploader--raised"> */
-.lab-uploader--raised {
-    bottom: calc(340px + env(safe-area-inset-bottom, 0px));
-}
-
-/* ======= Card styles ======= */
+/* Card styles */
 .dropzone {
     user-select: none;
     border: 2px dashed rgba(0, 0, 0, .18);
@@ -59,19 +34,19 @@
     -webkit-backdrop-filter: blur(6px);
     backdrop-filter: blur(6px);
     cursor: pointer;
-    transition: transform .12s ease, border-color .12s ease, background .12s ease, box-shadow .12s ease;
-    box-shadow:
-        0 8px 24px rgba(0, 0, 0, 0.08),
-        0 2px 8px rgba(0, 0, 0, 0.06);
+    transition:
+        transform .12s ease,
+        border-color .12s ease,
+        background .12s ease,
+        box-shadow .12s ease;
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.08), 0 2px 8px rgba(0, 0, 0, 0.06);
 }
 
 .dropzone.drag-over {
     border-color: rgba(0, 0, 0, .45);
     transform: translateY(-1px) scale(1.01);
     background: rgba(255, 255, 255, .92);
-    box-shadow:
-        0 10px 28px rgba(0, 0, 0, 0.10),
-        0 3px 10px rgba(0, 0, 0, 0.08);
+    box-shadow: 0 10px 28px rgba(0, 0, 0, 0.10), 0 3px 10px rgba(0, 0, 0, 0.08);
 }
 
 .dz-inner {
@@ -81,6 +56,7 @@
     text-align: center;
 }
 
+/* Loader (animated dots) */
 .loader {
     display: none;
     height: 16px;
@@ -132,7 +108,7 @@
     opacity: .7;
 }
 
-/* Extracted box */
+/* Extracted text box (when autoSend=false) */
 .extracted textarea {
     width: 100%;
     min-height: 160px;
@@ -180,14 +156,12 @@
     background: rgba(176, 0, 32, .08);
 }
 
-/* Optional: dark mode polish */
+/* ========= Dark mode polish ========= */
 @media (prefers-color-scheme: dark) {
     .dropzone {
         border-color: rgba(255, 255, 255, .16);
         background: rgba(22, 22, 22, .7);
-        box-shadow:
-            0 8px 24px rgba(0, 0, 0, 0.5),
-            0 2px 8px rgba(0, 0, 0, 0.4);
+        box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5), 0 2px 8px rgba(0, 0, 0, 0.4);
     }
 
     .dropzone.drag-over {
@@ -206,5 +180,54 @@
         background: rgba(30, 30, 30, .75);
         border-color: rgba(255, 255, 255, .12);
         color: #fff;
+    }
+}
+
+/* ========= MOBILE BEHAVIOR =========
+   On mobile, HIDE any floating uploader instance (e.g. .lab-uploader used in pages).
+   We'll ONLY show a compact uploader inside the hamburger menu.
+*/
+@media (max-width: 900px) {
+
+    /* Hide floating uploader (e.g. Chat’s fixed card) */
+    .lab-uploader {
+        display: none !important;
+    }
+
+    /* If your page wraps the floating card with a helper container: hide it too. */
+    .labs-uploader-fixed {
+        display: none !important;
+    }
+
+    /* Show the embedded uploader INSIDE the nav drawer in compact form */
+    .nav-mobile-uploader .lab-uploader-embedded {
+        display: grid !important;
+        position: static !important;
+        width: 100% !important;
+        z-index: auto !important;
+    }
+
+    /* Compact “dense” sizing for the embedded one */
+    .nav-mobile-uploader .lab-uploader-embedded .dropzone {
+        padding: 12px;
+        border-radius: 12px;
+    }
+
+    .nav-mobile-uploader .lab-uploader-embedded .dz-inner {
+        gap: 6px;
+    }
+
+    .nav-mobile-uploader .lab-uploader-embedded .loader .dot {
+        width: 7px;
+        height: 7px;
+    }
+
+    .nav-mobile-uploader .lab-uploader-embedded .status-label {
+        font-size: 13px;
+        font-weight: 500;
+    }
+
+    .nav-mobile-uploader .lab-uploader-embedded .hint {
+        font-size: 11px;
     }
 }

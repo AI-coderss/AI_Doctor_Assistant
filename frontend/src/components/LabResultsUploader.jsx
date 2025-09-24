@@ -106,6 +106,10 @@ const LabResultsUploader = forwardRef(function LabResultsUploader(
     onAIResponse,     // (payload, { text, meta })
     onExtracted,      // (text, meta)
     onAIStreamToken,  // (chunk)
+    /** embed controls */
+    className = "",
+    style = {},
+    dense = false, // compact spacing for mobile drawer
   },
   ref
 ) {
@@ -275,10 +279,13 @@ const LabResultsUploader = forwardRef(function LabResultsUploader(
     }
   }
 
+  const denseCardStyle = dense ? { padding: 12, borderRadius: 12 } : undefined;
+
   return (
-    <div className="lab-uploader">
+    <div className={`lab-uploader ${className || ""}`} style={style}>
       <div
         className={`dropzone ${dragOver ? "drag-over" : ""}`}
+        style={denseCardStyle}
         onDragOver={(e) => {
           e.preventDefault();
           setDragOver(true);
@@ -310,7 +317,7 @@ const LabResultsUploader = forwardRef(function LabResultsUploader(
           }}
         />
 
-        <div className="dz-inner">
+        <div className="dz-inner" style={dense ? { gap: 6 } : undefined}>
           <div
             className={`loader ${
               ["extracting", "streaming"].includes(status) ? "show" : ""
@@ -320,16 +327,18 @@ const LabResultsUploader = forwardRef(function LabResultsUploader(
             <span className="dot" />
             <span className="dot" />
           </div>
-          <div className="status-label">
-            {status === "idle" && "Drop PDF/image or click to choose"}
+          <div className="status-label" style={dense ? { fontWeight: 500 } : undefined}>
+            {status === "idle" && "Drop PDF/image or tap to choose"}
             {status === "extracting" && "Extracting text…"}
             {status === "streaming" && "Generating interpretation…"}
             {status === "done" && "Done"}
             {status === "error" && (error || "Error")}
           </div>
-          <div className="hint">
-            PDF, PNG, JPG, WEBP, TIFF (≤ {Math.max(PROVIDER_MAX_MB, maxSizeMB)} MB)
-          </div>
+          {!dense && (
+            <div className="hint">
+              PDF, PNG, JPG, WEBP, TIFF (≤ {Math.max(PROVIDER_MAX_MB, maxSizeMB)} MB)
+            </div>
+          )}
         </div>
       </div>
 
@@ -366,5 +375,7 @@ const LabResultsUploader = forwardRef(function LabResultsUploader(
 });
 
 export default LabResultsUploader;
+
+
 
 

@@ -18,7 +18,7 @@ import useAudioStore from "../store/audioStore.js";
 import { startVolumeMonitoring } from "./audioLevelAnalyzer";
 import VoiceRecorderPanel from "./VoiceRecorderPanel";
 import useLiveTranscriptStore from "../store/useLiveTranscriptStore";
-
+import LabResultsUploader from "./LabResultsUploader";
 
 import { Howl } from "howler";
 
@@ -607,6 +607,36 @@ const Chat = () => {
     }
   };
 
+  /* ===================== ADDED: Labs uploader integration ===================== */
+
+  // Uploader ref to programmatically open the file chooser
+  const uploaderRef = useRef(null);
+
+  // Stream buffer for OCR->AI analysis coming from the uploader
+  const labsStreamingRef = useRef(false);
+  const labsBufferRef = useRef("");
+
+  // Heuristic: show a prompt card if the last completed bot message asks for labs
+  const lastBotText = (() => {
+    for (let i = chats.length - 1; i >= 0; i--) {
+      const m = chats[i];
+      if (m?.who === "bot" && !m.streaming) return m.msg || "";
+    }
+    return "";
+  })();
+
+  function wantsLabs(text) {
+    const t = (text || "").toLowerCase();
+    return (
+      t.includes("upload lab") ||
+      t.includes("attach lab") ||
+      t.includes("upload the lab") ||
+      t.includes("[request_labs]")
+    );
+  }
+
+  /* =================== END ADDED: Labs uploader integration =================== */
+
   if (isVoiceMode) {
     return (
       <div className="voice-assistant-wrapper">
@@ -696,7 +726,6 @@ const Chat = () => {
         🎙️
       </button>
 
-   
       <VoiceRecorderPanel
         transcribeUrl={`${BACKEND_BASE}/transcribe`}
         opinionUrl={`${BACKEND_BASE}/case-second-opinion-stream`}
@@ -706,6 +735,120 @@ const Chat = () => {
         onOpinion={handleOpinionStream}
         onTranscriptReady={handleAssistantContextTranscript}
       />
+
+      {/* =================== ADDED: Fixed bottom-left uploader & prompt =================== */}
+      <div
+        className="labs-uploader-fixed"
+        style={{
+          position: "fixed",
+          left: 16,
+          bottom: 16,
+          width: 300,
+          zIndex: 60,
+          display: "grid",
+          gap: 10,
+        }}
+      >
+        {wantsLabs(lastBotText) && (
+          <div
+            className="labs-prompt"
+            style={{
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "space-between",
+              gap: 10,
+              padding: "10px 12px",
+              borderRadius: 12,
+              background: "rgba(255, 235, 59, 0.12)",
+              border: "1px solid rgba(255, 193, 7, 0.35)",
+              boxShadow: "0 4px 16px rgba(0,0,0,.06)",
+            }}
+          >
+            <div style={{ display: "grid", gap: 2 }}>
+              <div style={{ fontWeight: 700, fontSize: 13 }}>
+                Lab results requested
+              </div>
+              <div style={{ fontSize: 12, opacity: 0.8 }}>
+                Attach a PDF/image to interpret instantly.
+              </div>
+            </div>
+            <button
+              style={{
+                padding: "8px 12px",
+                borderRadius: 10,
+                border: 0,
+                cursor: "pointer",
+                background: "#0a66c2",
+                color: "#fff",
+                fontWeight: 600,
+              }}
+              onClick={() => uploaderRef.current?.open()}
+            >
+              Upload
+            </button>
+          </div>
+        )}
+
+        <LabResultsUploader
+          ref={uploaderRef}
+          autoSend={true}
+          ocrLanguage="eng"   // switch to "ara" for Arabic reports
+          engine="2"
+          onBeforeSendToAI={(text, meta) =>
+            [
+              "You are a clinical AI assistant.",
+              "You are given OCR-extracted lab results below.",
+              "Summarize abnormal values (with units), compare to provided normal ranges, flag critical values,",
+              "and give a concise, guideline-aligned interpretation.",
+              `SOURCE FILE: ${meta?.filename || "Unknown"}`,
+              "",
+              "=== LAB RESULTS (OCR) ===",
+              text,
+            ].join("\n")
+          }
+          onAIStreamToken={(chunk) => {
+            // Start streaming a new bot message on first token
+            if (!labsStreamingRef.current) {
+              labsStreamingRef.current = true;
+              labsBufferRef.current = "";
+              setChats((prev) => [
+                ...prev,
+                { msg: "", who: "bot", streaming: true },
+              ]);
+            }
+            labsBufferRef.current += String(chunk || "");
+            setChats((prev) => {
+              const updated = [...prev];
+              const last = updated[updated.length - 1];
+              if (last && last.streaming) last.msg = labsBufferRef.current;
+              return updated;
+            });
+          }}
+          onAIResponse={(payload) => {
+            const full =
+              payload?.text ??
+              (typeof payload === "string" ? payload : JSON.stringify(payload));
+            setChats((prev) => {
+              const updated = [...prev];
+              if (labsStreamingRef.current) {
+                labsStreamingRef.current = false;
+                const last = updated[updated.length - 1];
+                if (last && last.streaming) {
+                  last.streaming = false;
+                  last.msg = normalizeMarkdown(full || "");
+                  return updated;
+                }
+              }
+              // If no streaming occurred, just append a bot message
+              return [
+                ...updated,
+                { msg: normalizeMarkdown(full || ""), who: "bot" },
+              ];
+            });
+          }}
+        />
+      </div>
+      {/* ================= END ADDED: Fixed bottom-left uploader & prompt ================= */}
     </div>
   );
 };

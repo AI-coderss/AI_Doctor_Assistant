@@ -21,10 +21,11 @@ from langchain_qdrant import Qdrant
 from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
 from langchain.chains import create_history_aware_retriever, create_retrieval_chain
 from langchain.chains.combine_documents import create_stuff_documents_chain
-
+from ocr_routes import ocr_bp
 # Load env vars
 load_dotenv()
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
+
 if not OPENAI_API_KEY:
     raise RuntimeError("Missing OPENAI_API_KEY")
 # ===== Adaptive Specialty Templates (session-scoped) =====
@@ -101,7 +102,10 @@ CORS(app, resources={
         "supports_credentials": True
     }
 }})
+# Optional: hard cap request size (mirrors OCR_MAX_BYTES)
+app.config["MAX_CONTENT_LENGTH"] = int(os.environ.get("OCR_MAX_BYTES", 20 * 1024 * 1024))
 
+app.register_blueprint(ocr_bp)
 chat_sessions = {}
 collection_name = os.getenv("QDRANT_COLLECTION_NAME")
 

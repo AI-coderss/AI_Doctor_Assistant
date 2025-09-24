@@ -8,7 +8,9 @@ import logging
 import requests
 import re
 import base64
-
+from werkzeug.exceptions import HTTPException, RequestEntityTooLarge
+from werkzeug.utils import secure_filename
+import os.path as osp
 import random
 from dotenv import load_dotenv
 from flask import Flask, request, jsonify, Response, stream_with_context
@@ -21,7 +23,6 @@ from langchain_qdrant import Qdrant
 from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
 from langchain.chains import create_history_aware_retriever, create_retrieval_chain
 from langchain.chains.combine_documents import create_stuff_documents_chain
-from ocr_routes import ocr_bp
 # Load env vars
 load_dotenv()
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
@@ -30,6 +31,16 @@ if not OPENAI_API_KEY:
     raise RuntimeError("Missing OPENAI_API_KEY")
 # ===== Adaptive Specialty Templates (session-scoped) =====
 ACTIVE_TEMPLATES = {}  # session_id -> {"specialty": str, "template": dict, "activated_at": iso}
+OCR_SPACE_API_KEY = os.getenv("OCR_SPACE_API_KEY")
+
+# Provider plan guard (per OCR.Space docs: Free≈1MB, PRO≈5MB, PRO PDF≈100MB+)
+# This is a best-effort early guard; the provider still enforces its own limits.
+PROVIDER_LIMIT_MB = int(os.getenv("OCR_PROVIDER_LIMIT_MB", "1"))  # 1|5|100
+
+# Flask request cap (bytes); keep >= provider limit (default 20MB)
+MAX_BYTES = int(os.getenv("OCR_MAX_BYTES", 20 * 1024 * 1024))
+
+ALLOWED_EXTS = {"pdf", "png", "jpg", "jpeg", "tif", "tiff", "webp"}
 
 def _build_specialty_template_prompt(specialty: str) -> str:
     """
@@ -100,12 +111,30 @@ CORS(app, resources={
         "methods": ["POST"],
         "allow_headers": ["Content-Type", "Authorization"],
         "supports_credentials": True
+    },
+    r"ocr": {
+        "origins": [
+            "https://ai-doctor-assistant-app-dev.onrender.com",
+            "http://localhost:3000"
+        ],
+        "methods": ["POST"],
+        "allow_headers": ["Content-Type", "Authorization"],
+        "supports_credentials": True
+    }},
+    r"/api/ocr": {
+        "origins": [
+            "https://ai-doctor-assistant-app-dev.onrender.com",
+            "http://localhost:3000"
+        ],
+        "methods": ["POST"],
+        "allow_headers": ["Content-Type", "Authorization"],
+        "supports_credentials": True
     }
-}})
+})
 # Optional: hard cap request size (mirrors OCR_MAX_BYTES)
 app.config["MAX_CONTENT_LENGTH"] = int(os.environ.get("OCR_MAX_BYTES", 20 * 1024 * 1024))
 
-app.register_blueprint(ocr_bp)
+
 chat_sessions = {}
 collection_name = os.getenv("QDRANT_COLLECTION_NAME")
 
@@ -1680,6 +1709,184 @@ def notes_second_opinion_stream():
             yield chunk
 
     return Response(generate(), mimetype="text/plain")
+# ---------- JSON-only error handlers ----------
+@app.errorhandler(RequestEntityTooLarge)
+def handle_413(e):
+    return jsonify({
+        "error": "File too large",
+        "limit_mb": app.config["MAX_CONTENT_LENGTH"] // (1024 * 1024)
+    }), 413
+
+
+@app.errorhandler(HTTPException)
+def handle_http_exception(e: HTTPException):
+    return jsonify({
+        "error": e.name,
+        "code": e.code,
+        "description": e.description
+    }), e.code
+
+
+@app.errorhandler(Exception)
+def handle_uncaught(e: Exception):
+    # Avoid leaking internals; return a generic JSON error.
+    return jsonify({"error": "Internal server error"}), 500
+# ----------------------------------------------
+
+
+
+def _json_error(message, status=400, **extra):
+    payload = {"error": message}
+    if extra:
+        payload.update(extra)
+    return jsonify(payload), status
+
+
+def _post_ocr_space(file_storage, filename, ext, language, overlay, engine,
+                    is_table=None, scale=None, detect_orientation=None):
+    """
+    Sends the uploaded file stream to OCR.Space and returns the parsed JSON or raises.
+    """
+    forced_name = f"upload.{ext}"
+    forced_mime = file_storage.mimetype or ("application/pdf" if ext == "pdf" else "image/png")
+
+    data = {
+        "apikey": OCR_SPACE_API_KEY,
+        "language": language,
+        "isOverlayRequired": overlay,
+        "OCREngine": engine,   # "1" or "2" per OCR.Space
+    }
+    if is_table is not None:
+        data["isTable"] = is_table
+    if scale is not None:
+        data["scale"] = scale
+    if detect_orientation is not None:
+        data["detectOrientation"] = detect_orientation
+
+    resp = requests.post(
+        "https://api.ocr.space/parse/image",
+        files={"file": (forced_name, file_storage.stream, forced_mime)},
+        data=data,
+        timeout=180,
+        headers={"Accept": "application/json"},
+    )
+    content_type = resp.headers.get("Content-Type", "")
+    # Try to parse JSON regardless of status code
+    try:
+        result = resp.json()
+    except ValueError:
+        snippet = (resp.text or "").strip()[:300]
+        raise RuntimeError(
+            f"OCR provider returned non-JSON response (status {resp.status_code}, ct {content_type}). "
+            f"Snippet: {snippet}"
+        )
+    return result, forced_mime
+
+
+def _aggregate_parsed_text(result_json):
+    """
+    Combines text across OCR.Space ParsedResults pages.
+    """
+    if result_json.get("IsErroredOnProcessing") or "ParsedResults" not in result_json:
+        return None, 0
+    pages = result_json.get("ParsedResults") or []
+    texts = []
+    for p in pages:
+        t = (p or {}).get("ParsedText", "")
+        if t:
+            texts.append(t)
+    return ("\n\n".join(texts).strip(), len(pages))
+
+
+# Expose BOTH paths to avoid “Cannot POST /ocr” mismatches:
+@app.route("/ocr", methods=["POST"])
+@app.route("/api/ocr", methods=["POST"])
+def ocr_from_image():
+    # Basic config sanity
+    if not OCR_SPACE_API_KEY:
+        return _json_error("OCR_SPACE_API_KEY is not configured", 500)
+
+    # Accept 'image' (preferred) or 'file'
+    f = request.files.get("image") or request.files.get("file")
+    if not f:
+        return _json_error("No image file uploaded. Use form field 'image'", 400)
+
+    filename = secure_filename(f.filename or "upload")
+    ext = (osp.splitext(filename)[1].lstrip(".") or "png").lower()
+
+    # Extension guard
+    if ext not in ALLOWED_EXTS:
+        return _json_error(
+            "Unsupported file type. Only PDF or images are supported.",
+            400,
+            allowed=sorted(ALLOWED_EXTS)
+        )
+
+    # Block video/audio upfront (OCR.Space does not support them)
+    if f.mimetype and (f.mimetype.startswith("video/") or f.mimetype.startswith("audio/")):
+        return _json_error("Video/audio files are not supported by OCR.Space.", 400)
+
+    # Server-side request size guard (proxy may still need config)
+    if request.content_length and request.content_length > MAX_BYTES:
+        return _json_error(
+            f"File too large for server cap (> {MAX_BYTES // (1024 * 1024)}MB).",
+            413, limit_mb=MAX_BYTES // (1024 * 1024)
+        )
+
+    # Provider plan guard (best-effort; provider still enforces its own limit)
+    provider_limit = PROVIDER_LIMIT_MB * 1024 * 1024
+    if request.content_length and request.content_length > provider_limit:
+        return _json_error(
+            f"File exceeds your OCR plan limit ({PROVIDER_LIMIT_MB}MB). "
+            f"Please compress the file or upgrade your OCR.Space plan.",
+            413, provider_limit_mb=PROVIDER_LIMIT_MB
+        )
+
+    # Tunables
+    language = request.form.get("language", "eng")   # e.g., "eng", "ara"
+    overlay = request.form.get("overlay", "false")   # "true"/"false"
+    engine = request.form.get("engine", "2")         # "1"|"2" (per OCR.Space docs)
+    is_table = request.form.get("isTable")           # optional
+    scale = request.form.get("scale")                # optional
+    detect_orientation = request.form.get("detectOrientation")  # optional
+
+    # Call provider
+    try:
+        result, forced_mime = _post_ocr_space(
+            f, filename, ext, language, overlay, engine,
+            is_table=is_table, scale=scale, detect_orientation=detect_orientation
+        )
+    except requests.exceptions.RequestException as e:
+        return _json_error("OCR request failed", 502, detail=str(e))
+    except RuntimeError as e:
+        # Non-JSON or upstream HTML page, etc.
+        return _json_error(str(e), 502)
+
+    # Aggregate text
+    text, pages = _aggregate_parsed_text(result)
+    if text is None:
+        # Provider signaled error
+        return _json_error(
+            "OCR failed",
+            400,
+            message=result.get("ErrorMessage", "No detailed message"),
+            details=result
+        )
+
+    if not text:
+        return _json_error("OCR succeeded but returned no text", 502, provider=result)
+
+    # Success response (what your frontend expects)
+    return jsonify({
+        "text": text,
+        "meta": {
+            "filename": filename,
+            "mimetype": forced_mime,
+            "pages": pages,
+            "language": language,
+            "engine": engine,
+        }
+    })
 
 
 if __name__ == "__main__":

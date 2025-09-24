@@ -9,21 +9,22 @@ import React, {
 import "../styles/LabResultsUploader.css";
 
 /**
- * IMPORTANT:
- * - Set REACT_APP_BACKEND_BASE to your Flask origin (e.g. https://your-flask-app.onrender.com)
- * - This component first tries `${BACKEND_BASE}/ocr`, and if it gets a 404, it falls back to `${BACKEND_BASE}/api/ocr`.
- * - OCR.Space plan limits (per docs): Free=1MB, PRO=5MB, PRO PDF=100MB+
- *   We expose REACT_APP_OCR_PROVIDER_MAX_MB to control the client-side limit (default 1).
+ * Explicit backend base (your URL):
  */
-
 const BACKEND_BASE = "https://ai-doctor-assistant-backend-server.onrender.com";
-const OCR_URL_PRIMARY = `${BACKEND_BASE}/ocr`;
-const OCR_URL_FALLBACK = `${BACKEND_BASE}/api/ocr`;
+
+const OCR_URLS = [
+  `${BACKEND_BASE}/ocr`,      // primary
+  `${BACKEND_BASE}/api/ocr`,  // fallback (prevents 'Cannot POST /ocr')
+];
+
 const STREAM_URL = `${BACKEND_BASE}/stream`;
 
-/** Target max MB based on your OCR.Space plan (default: 1 MB for Free) */
-const PROVIDER_MAX_MB = 1
-   // 1=Free, 5=PRO, 100=PRO PDF
+/**
+ * OCR.Space reference limits (docs): Free≈1MB, PRO≈5MB, PRO PDF≈100MB+.
+ * Set this to your plan to guard uploads and compress large images client-side.
+ */
+const PROVIDER_MAX_MB = 1; // change to 5 or 100 if your plan allows more
 
 const ACCEPTED = [
   "application/pdf",
@@ -35,7 +36,7 @@ const ACCEPTED = [
 const REJECTED_PREFIXES = ["video/", "audio/"];
 
 // ---------- Utilities ----------
-function isPossiblyHtml(text) {
+function looksHtml(text) {
   const s = (text || "").slice(0, 300).toLowerCase();
   return s.includes("<!doctype") || s.includes("<html");
 }
@@ -48,7 +49,7 @@ async function readJsonSafe(res) {
     return JSON.parse(txt);
   } catch {
     const snippet = txt.slice(0, 300).replace(/\s+/g, " ");
-    const msg = isPossiblyHtml(txt)
+    const msg = looksHtml(txt)
       ? `Server returned an HTML error page (${res.status}). Snippet: ${snippet}`
       : `Unexpected non-JSON response (${res.status}). Snippet: ${snippet}`;
     const err = new Error(msg);
@@ -58,58 +59,53 @@ async function readJsonSafe(res) {
   }
 }
 
-/** Downscale an image file (PNG/JPEG/WebP) to stay under targetMB (best effort). */
+/** Downscale an image (best effort) to fit target MB, keeping quality reasonable. */
 async function downscaleImageIfNeeded(file, targetMB = 1) {
   const maxBytes = targetMB * 1024 * 1024;
   if (!file.type.startsWith("image/")) return file;
   if (file.size <= maxBytes) return file;
 
-  // Only process images (not PDFs)
   const bitmap = await createImageBitmap(file);
   const canvas = document.createElement("canvas");
   const ctx = canvas.getContext("2d");
   let { width, height } = bitmap;
 
-  // Iteratively shrink until size fits or we hit a lower bound
+  // Iteratively shrink until ≤ target or we hit bounds
   let quality = 0.85;
   let blob = file;
 
-  for (let i = 0; i < 6; i++) {
-    // Scale down by ~25% each iteration if still too big
+  for (let i = 0; i < 7; i++) {
     width = Math.max(800, Math.floor(width * 0.75));
     height = Math.max(800, Math.floor(height * 0.75));
     canvas.width = width;
     canvas.height = height;
     ctx.drawImage(bitmap, 0, 0, width, height);
 
-    // Prefer JPEG for smaller byte sizes
-    const type = "image/jpeg";
     blob = await new Promise((resolve) =>
-      canvas.toBlob(resolve, type, quality)
+      canvas.toBlob(resolve, "image/jpeg", quality)
     );
     if (!blob) break;
     if (blob.size <= maxBytes) break;
     quality = Math.max(0.5, quality - 0.1);
   }
+  if (!blob || blob.size > maxBytes) return file;
 
-  if (!blob) return file;
-  // If still too big, return original with a warning handled upstream
-  if (blob.size > maxBytes) return file;
-
-  return new File([blob], (file.name || "image") + ".jpg", { type: "image/jpeg" });
+  return new File([blob], (file.name || "image") + ".jpg", {
+    type: "image/jpeg",
+  });
 }
 
 const LabResultsUploader = forwardRef(function LabResultsUploader(
   {
     autoSend = true,
-    ocrLanguage = "eng", // set "ara" for Arabic labs
+    ocrLanguage = "eng", // set "ara" for Arabic
     engine = "2",
     overlay = false,
-    maxSizeMB = Math.max(PROVIDER_MAX_MB, 1), // UI hint; provider limit enforced too
+    maxSizeMB = PROVIDER_MAX_MB, // UI hint
     onBeforeSendToAI, // (text, meta) => string
     onAIResponse,     // (payload, { text, meta })
     onExtracted,      // (text, meta)
-    onAIStreamToken,  // (tokenChunk)
+    onAIStreamToken,  // (chunk)
   },
   ref
 ) {
@@ -130,16 +126,20 @@ const LabResultsUploader = forwardRef(function LabResultsUploader(
     if (!ACCEPTED.includes(file.type) && !file.name.toLowerCase().endsWith(".pdf")) {
       return "Only PDF or image files are supported (PNG, JPG, WEBP, TIFF).";
     }
-    // Provider-aware check
-    if (file.size > PROVIDER_MAX_MB * 1024 * 1024 && !file.type.startsWith("image/")) {
-      return `This file is larger than your plan’s limit (${PROVIDER_MAX_MB}MB). For PDFs, please compress the file or upgrade your OCR.Space plan.`;
+    // PDFs/others: provider-aware early guard (images can be compressed)
+    if (!file.type.startsWith("image/") && file.size > PROVIDER_MAX_MB * 1024 * 1024) {
+      return `This file is larger than your OCR plan limit (${PROVIDER_MAX_MB}MB). Compress or upgrade plan.`;
     }
     return "";
   };
 
   async function postToStream(text, meta) {
     setStatus("streaming");
-    const payload = { input: text, mode: "lab_results", source: meta?.filename || "unknown" };
+    const payload = {
+      input: text,
+      mode: "lab_results",
+      source: meta?.filename || "unknown",
+    };
 
     try {
       const res = await fetch(STREAM_URL, {
@@ -150,9 +150,11 @@ const LabResultsUploader = forwardRef(function LabResultsUploader(
 
       const ct = res.headers.get("content-type") || "";
 
-      // Non-stream fallbacks
-      if (!res.body || (!ct.includes("text/event-stream") && !ct.includes("application/octet-stream"))) {
-        // Try JSON first; fall back to text
+      // Non-stream: JSON or text
+      if (
+        !res.body ||
+        (!ct.includes("text/event-stream") && !ct.includes("application/octet-stream"))
+      ) {
         let data;
         if (ct.includes("application/json")) data = await res.json();
         else data = { text: await res.text() };
@@ -161,7 +163,7 @@ const LabResultsUploader = forwardRef(function LabResultsUploader(
         return;
       }
 
-      // Stream read (SSE/raw)
+      // Streaming reader
       const reader = res.body.getReader();
       const decoder = new TextDecoder("utf-8");
       let full = "";
@@ -181,21 +183,34 @@ const LabResultsUploader = forwardRef(function LabResultsUploader(
   }
 
   async function postToOcr(form) {
-    // Try primary path, then fallback /api/ocr if 404 (Cannot POST /ocr)
-    let res = await fetch(OCR_URL_PRIMARY, { method: "POST", body: form });
-    if (res.status === 404) {
-      res = await fetch(OCR_URL_FALLBACK, { method: "POST", body: form });
+    // Try /ocr then /api/ocr (in case of path differences)
+    let lastErr;
+    for (const url of OCR_URLS) {
+      try {
+        const res = await fetch(url, { method: "POST", body: form });
+        if (res.status === 404) {
+          lastErr = new Error(`404 at ${url}`);
+          continue;
+        }
+        const data = await readJsonSafe(res); // throws on HTML error pages
+        return { res, data, urlTried: url };
+      } catch (e) {
+        lastErr = e;
+      }
     }
-    const data = await readJsonSafe(res); // throws on HTML
-    return { res, data };
+    throw lastErr || new Error("No OCR endpoint reachable.");
   }
 
   async function handleFile(file) {
     setError("");
     const err = validate(file);
-    if (err) { setError(err); setStatus("error"); return; }
+    if (err) {
+      setError(err);
+      setStatus("error");
+      return;
+    }
 
-    // If over plan and image => try client-side downscale
+    // If image and above plan → try compressing
     let sendFile = file;
     if (file.type.startsWith("image/") && file.size > PROVIDER_MAX_MB * 1024 * 1024) {
       try {
@@ -207,7 +222,7 @@ const LabResultsUploader = forwardRef(function LabResultsUploader(
           setStatus("error");
           return;
         }
-      } catch (e) {
+      } catch {
         setError("Failed to compress image. Please upload a smaller image.");
         setStatus("error");
         return;
@@ -223,7 +238,7 @@ const LabResultsUploader = forwardRef(function LabResultsUploader(
     form.append("overlay", overlay ? "true" : "false");
 
     try {
-      const { res, data } = await postToOcr(form);
+      const { res, data, urlTried } = await postToOcr(form);
 
       if (!res.ok) {
         const msg =
@@ -235,19 +250,23 @@ const LabResultsUploader = forwardRef(function LabResultsUploader(
       }
 
       const text = data?.text || "";
-      const meta = data?.meta || {
-        filename: sendFile.name,
-        mimetype: sendFile.type,
-        size: sendFile.size,
-      };
-
+      const meta =
+        data?.meta || {
+          filename: sendFile.name,
+          mimetype: sendFile.type,
+          size: sendFile.size,
+          urlTried,
+        };
       if (!text.trim()) throw new Error("OCR returned empty text");
 
       setExtractedText(text);
       setFileMeta(meta);
       onExtracted?.(text, meta);
 
-      if (!autoSend) { setStatus("done"); return; }
+      if (!autoSend) {
+        setStatus("done");
+        return;
+      }
       const finalText = onBeforeSendToAI ? onBeforeSendToAI(text, meta) : text;
       await postToStream(finalText, meta);
     } catch (e) {
@@ -260,16 +279,23 @@ const LabResultsUploader = forwardRef(function LabResultsUploader(
     <div className="lab-uploader">
       <div
         className={`dropzone ${dragOver ? "drag-over" : ""}`}
-        onDragOver={(e) => { e.preventDefault(); setDragOver(true); }}
+        onDragOver={(e) => {
+          e.preventDefault();
+          setDragOver(true);
+        }}
         onDragLeave={() => setDragOver(false)}
         onDrop={(e) => {
-          e.preventDefault(); setDragOver(false);
-          const f = e.dataTransfer?.files?.[0]; if (f) handleFile(f);
+          e.preventDefault();
+          setDragOver(false);
+          const f = e.dataTransfer?.files?.[0];
+          if (f) handleFile(f);
         }}
         onClick={() => inputRef.current?.click()}
         role="button"
         tabIndex={0}
-        onKeyDown={(e) => (e.key === "Enter" || e.key === " ") && inputRef.current?.click()}
+        onKeyDown={(e) =>
+          (e.key === "Enter" || e.key === " ") && inputRef.current?.click()
+        }
         aria-label="Upload lab result file"
       >
         <input
@@ -285,8 +311,14 @@ const LabResultsUploader = forwardRef(function LabResultsUploader(
         />
 
         <div className="dz-inner">
-          <div className={`loader ${["extracting","streaming"].includes(status) ? "show" : ""}`}>
-            <span className="dot"/><span className="dot"/><span className="dot"/>
+          <div
+            className={`loader ${
+              ["extracting", "streaming"].includes(status) ? "show" : ""
+            }`}
+          >
+            <span className="dot" />
+            <span className="dot" />
+            <span className="dot" />
           </div>
           <div className="status-label">
             {status === "idle" && "Drop PDF/image or click to choose"}
@@ -304,7 +336,8 @@ const LabResultsUploader = forwardRef(function LabResultsUploader(
       {!autoSend && extractedText && (
         <div className="extracted">
           <div className="extracted-head">
-            <strong>Extracted text</strong><span className="badge">Ready to send</span>
+            <strong>Extracted text</strong>
+            <span className="badge">Ready to send</span>
           </div>
           <textarea
             value={extractedText}
@@ -315,7 +348,9 @@ const LabResultsUploader = forwardRef(function LabResultsUploader(
             className="send-btn"
             onClick={() =>
               postToStream(
-                onBeforeSendToAI ? onBeforeSendToAI(extractedText, fileMeta) : extractedText,
+                onBeforeSendToAI
+                  ? onBeforeSendToAI(extractedText, fileMeta)
+                  : extractedText,
                 fileMeta
               )
             }
@@ -331,4 +366,5 @@ const LabResultsUploader = forwardRef(function LabResultsUploader(
 });
 
 export default LabResultsUploader;
+
 

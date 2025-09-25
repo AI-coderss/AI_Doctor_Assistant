@@ -78,5 +78,5 @@ Your role is to **assist doctors** by enriching clinical reasoning and supplemen
 
 🎯 **Context:**  
 Apply all of the above **strictly within the given context**:\n\n{context}  
-"If lab results would materially improve the assessment, append the exact token [request_labs] once.\n\n"
+
 """

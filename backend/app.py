@@ -178,7 +178,7 @@ def get_conversational_rag_chain():
   retriever_chain = get_context_retriever_chain()
   llm = ChatOpenAI(model="gpt-4o")
   prompt = ChatPromptTemplate.from_messages([
-      ("system", engineeredprompt+"If lab results would materially improve the assessment, append the exact token [request_labs] once.\n\n"),
+      ("system", engineeredprompt),
       MessagesPlaceholder("chat_history"),
       ("user", "{input}"),
   ])

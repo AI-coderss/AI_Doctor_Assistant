@@ -1,90 +1,264 @@
-/* src/styles/LabResultsUploader.css */
+/* =========================================
+   LabResultsUploader — aligned with Record button
+   - Left edge matches .record-case-btn-left
+   - Sits above the button by a constant offset
+   - Hidden on mobile (drawer handles it there)
+   - Purple rectangle styling preserved
+   ========================================= */
 
-/* ========= Positioning knobs (desktop) ========= */
+/* Brand + layout tokens */
 :root {
-    --lab-uploader-left: 16px;
-    /* desktop floating offset – keep it high above footers */
-    --lab-uploader-bottom: 260px;
-    --lab-uploader-width: 320px;
-    --lab-uploader-z: 80;
+    --purple: #6366f1;
+    --purple-soft: rgba(99, 91, 255, .12);
+    --purple-ink: rgba(99, 91, 255, .92);
+    --text-muted: rgba(0, 0, 0, .55);
+
+    /* Match the Record button offsets from VoiceRecorderPanel.css */
+    --labs-left: 0.05rem;
+    /* equals .record-case-btn-left { left } */
+    --record-bottom: 5.5rem;
+    /* equals .record-case-btn-left { bottom } */
+
+    /* How much higher than the Record button the uploader sits */
+    --above-offset: 6.75rem;
+    /* tweak if you want a bit more/less space */
 }
 
-/* ========= Default floating uploader (desktop) ========= */
-/* NOTE: this class is used when the uploader is placed as a floating card
-   (e.g., in Chat.jsx). We'll hide this on mobile below. */
-.lab-uploader {
+/* ===== Fixed container aligned with Record button ===== */
+.labs-uploader-fixed {
     position: fixed;
-    left: var(--lab-uploader-left);
-    bottom: calc(var(--lab-uploader-bottom) + env(safe-area-inset-bottom, 0px));
-    width: min(90vw, var(--lab-uploader-width));
-    z-index: var(--lab-uploader-z);
-
+    left: 1.25rem;
+    bottom: calc(env(safe-area-inset-bottom, 0px) + var(--record-bottom) + var(--above-offset));
+    width: min(150px, 90vw);
+    z-index: 12008;
     display: grid;
-    gap: 12px;
+    gap: 10px;
+    margin: 0;
+    transform: translateX(var(--labs-left));
     pointer-events: auto;
 }
 
-/* Card styles */
-.dropzone {
-    user-select: none;
-    border: 2px dashed rgba(0, 0, 0, .18);
-    border-radius: 14px;
-    padding: 18px;
-    background: rgba(255, 255, 255, .8);
-    -webkit-backdrop-filter: blur(6px);
-    backdrop-filter: blur(6px);
-    cursor: pointer;
-    transition:
-        transform .12s ease,
-        border-color .12s ease,
-        background .12s ease,
-        box-shadow .12s ease;
-    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.08), 0 2px 8px rgba(0, 0, 0, 0.06);
+/* Keep it aligned as the Record button moves in these breakpoints */
+@media (max-width: 900px) {
+    :root {
+        --record-bottom: 6.5rem;
+        /* VoiceRecorderPanel.css at <=900px */
+    }
 }
 
-.dropzone.drag-over {
-    border-color: rgba(0, 0, 0, .45);
-    transform: translateY(-1px) scale(1.01);
-    background: rgba(255, 255, 255, .92);
-    box-shadow: 0 10px 28px rgba(0, 0, 0, 0.10), 0 3px 10px rgba(0, 0, 0, 0.08);
+@media (max-width: 680px) {
+
+    /* On phones the fixed uploader is hidden (drawer shows it) */
+    .labs-uploader-fixed {
+        display: none !important;
+    }
 }
 
-.dz-inner {
+@media (max-width: 480px) {
+    :root {
+        --record-bottom: calc(env(safe-area-inset-bottom, 14px) + 12.5rem);
+    }
+}
+
+@media (max-width: 380px) {
+    :root {
+        --record-bottom: calc(env(safe-area-inset-bottom, 12px) + 13.5rem);
+    }
+}
+
+/* ===== Optional prompt card (unchanged) ===== */
+.labs-prompt {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    padding: 10px 12px;
+    border-radius: 12px;
+    background: rgba(255, 235, 59, .12);
+    border: 1px solid rgba(255, 193, 7, .35);
+    box-shadow: 0 4px 16px rgba(0, 0, 0, .06);
+}
+
+/* ===== Uploader visuals (purple rectangle) ===== */
+
+.lab-uploader {
     display: grid;
-    gap: 8px;
     justify-items: center;
+    gap: 8px;
+}
+
+.upload-label {
+    margin: 0;
+    font-family: Helvetica, Arial, sans-serif;
+    font-size: 14px;
+    color: var(--text-muted);
     text-align: center;
 }
 
-/* Loader (animated dots) */
-.loader {
-    display: none;
-    height: 16px;
-    gap: 8px;
+/* wrapper */
+.file-upload {
+    display: grid;
+    justify-items: center;
+    gap: 6px;
+}
+
+/* Rectangle trigger — width/height as you liked previously */
+.dropzone,
+.drop-zone {
+    width: 150px;
+    height: 56px;
+    /* reduced height kept */
+    position: relative;
+    margin: 9px 0 0 0;
+    /* no extra left margin */
+    padding: 8px;
+    display: flex;
     align-items: center;
+    justify-content: center;
+
+    font-size: 34px;
+    /* symbol size (“+ / ✓ / ⭯”) */
+    text-align: center;
+    font-family: Comfortaa, system-ui, -apple-system, Segoe UI, Roboto, "Helvetica Neue", Arial, "Noto Sans", "Liberation Sans", sans-serif;
+    font-weight: 700;
+
+    border: 3px dashed var(--purple-ink);
+    border-radius: 14px;
+    color: var(--purple-ink);
+
+    background: linear-gradient(180deg, #fff 0%, #faf9ff 100%);
+    box-shadow: 0 2px 8px rgba(0, 0, 0, .08);
+    transition: .35s ease;
+    cursor: pointer;
+    user-select: none;
 }
 
-.loader.show {
-    display: inline-flex;
+.dropzone:hover,
+.drop-zone:hover {
+    color: #fff;
+    background: var(--purple);
+    border-style: solid;
+    box-shadow: 0 10px 24px rgba(99, 91, 255, .25);
 }
 
-.loader .dot {
-    width: 9px;
-    height: 9px;
+.dropzone.dragOver,
+.drop-zone.dragOver {
+    border-style: solid;
+    box-shadow: 0 14px 28px rgba(99, 91, 255, .25),
+        0 10px 10px rgba(99, 91, 255, .18);
+}
+
+/* Uploaded state */
+.dropzone.uploaded,
+.drop-zone.uploaded {
+    background: rgba(99, 91, 255, .10);
+    color: var(--purple);
+    border: 3px solid var(--purple);
+}
+
+/* Phase glow */
+.dropzone.is-extracting {
+    box-shadow: 0 0 0 3px var(--purple-soft),
+        0 8px 22px rgba(99, 91, 255, .22);
+}
+
+.dropzone.is-streaming {
+    box-shadow: 0 0 0 3px var(--purple-soft),
+        0 10px 28px rgba(99, 91, 255, .28);
+}
+
+/* Center glyph */
+.glyph {
+    line-height: 1;
+    pointer-events: none;
+}
+
+/* Loading ring */
+.ring {
+    width: 30px;
+    height: 30px;
     border-radius: 50%;
-    background: rgba(0, 0, 0, .6);
-    animation: bounce 1s infinite ease-in-out;
+    border: 3px solid transparent;
+    border-top-color: var(--purple);
+    animation: spin .9s linear infinite, pulse 1.8s ease-in-out infinite;
 }
 
-.loader .dot:nth-child(2) {
+.is-streaming .ring {
+    border-top-color: var(--purple);
+}
+
+@keyframes spin {
+    to {
+        transform: rotate(360deg);
+    }
+}
+
+@keyframes pulse {
+    0% {
+        box-shadow: 0 0 0 0 var(--purple-soft);
+    }
+
+    70% {
+        box-shadow: 0 0 0 12px rgba(99, 91, 255, 0);
+    }
+
+    100% {
+        box-shadow: 0 0 0 0 rgba(99, 91, 255, 0);
+    }
+}
+
+/* Hide native “No file chosen” text completely */
+.file-input {
+    position: absolute !important;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    margin: 0;
+    border: 0;
+    overflow: hidden;
+    clip: rect(0 0 0 0);
+    clip-path: inset(50%);
+    white-space: nowrap;
+}
+
+.file-input::file-selector-button {
+    display: none;
+}
+
+/* Status line */
+.status-line {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 12px;
+    color: var(--text-muted);
+    min-height: 20px;
+    margin-top: 2px;
+}
+
+.status-line .dots {
+    display: inline-flex;
+    gap: 3px;
+}
+
+.status-line .dots i {
+    width: 5px;
+    height: 5px;
+    border-radius: 50%;
+    background: currentColor;
+    opacity: .6;
+    animation: bounceDots 1.2s infinite ease-in-out;
+}
+
+.status-line .dots i:nth-child(2) {
     animation-delay: .15s;
 }
 
-.loader .dot:nth-child(3) {
-    animation-delay: .3s;
+.status-line .dots i:nth-child(3) {
+    animation-delay: .30s;
 }
 
-@keyframes bounce {
+@keyframes bounceDots {
 
     0%,
     80%,
@@ -94,21 +268,28 @@
     }
 
     40% {
-        transform: translateY(-6px);
+        transform: translateY(-4px);
         opacity: 1;
     }
 }
 
-.status-label {
+.status-line.s-extracting,
+.status-line.s-streaming {
+    color: var(--purple);
     font-weight: 600;
 }
 
-.hint {
-    font-size: 12px;
-    opacity: .7;
+.status-line.s-error {
+    color: #b00020;
+    font-weight: 600;
 }
 
-/* Extracted text box (when autoSend=false) */
+.status-line.s-done {
+    color: var(--purple);
+    font-weight: 700;
+}
+
+/* Manual-send area (unchanged) */
 .extracted textarea {
     width: 100%;
     min-height: 160px;
@@ -116,7 +297,7 @@
     padding: 10px 12px;
     border-radius: 10px;
     border: 1px solid rgba(0, 0, 0, .12);
-    background: rgba(255, 255, 255, .85);
+    background: rgba(255, 255, 255, .75);
     font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
 }
 
@@ -138,14 +319,11 @@
     padding: 10px 14px;
     border: 0;
     border-radius: 10px;
-    background: #0a66c2;
+    background: var(--purple);
     color: #fff;
-    font-weight: 600;
+    font-weight: 700;
     cursor: pointer;
-}
-
-.send-btn:hover {
-    filter: brightness(1.05);
+    box-shadow: 0 8px 20px rgba(99, 91, 255, .25);
 }
 
 .error {
@@ -154,80 +332,4 @@
     padding: 8px 10px;
     border-radius: 10px;
     background: rgba(176, 0, 32, .08);
-}
-
-/* ========= Dark mode polish ========= */
-@media (prefers-color-scheme: dark) {
-    .dropzone {
-        border-color: rgba(255, 255, 255, .16);
-        background: rgba(22, 22, 22, .7);
-        box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5), 0 2px 8px rgba(0, 0, 0, 0.4);
-    }
-
-    .dropzone.drag-over {
-        background: rgba(30, 30, 30, .86);
-    }
-
-    .loader .dot {
-        background: rgba(255, 255, 255, .8);
-    }
-
-    .badge {
-        background: rgba(255, 255, 255, .12);
-    }
-
-    .extracted textarea {
-        background: rgba(30, 30, 30, .75);
-        border-color: rgba(255, 255, 255, .12);
-        color: #fff;
-    }
-}
-
-/* ========= MOBILE BEHAVIOR =========
-   On mobile, HIDE any floating uploader instance (e.g. .lab-uploader used in pages).
-   We'll ONLY show a compact uploader inside the hamburger menu.
-*/
-@media (max-width: 900px) {
-
-    /* Hide floating uploader (e.g. Chat’s fixed card) */
-    .lab-uploader {
-        display: none !important;
-    }
-
-    /* If your page wraps the floating card with a helper container: hide it too. */
-    .labs-uploader-fixed {
-        display: none !important;
-    }
-
-    /* Show the embedded uploader INSIDE the nav drawer in compact form */
-    .nav-mobile-uploader .lab-uploader-embedded {
-        display: grid !important;
-        position: static !important;
-        width: 100% !important;
-        z-index: auto !important;
-    }
-
-    /* Compact “dense” sizing for the embedded one */
-    .nav-mobile-uploader .lab-uploader-embedded .dropzone {
-        padding: 12px;
-        border-radius: 12px;
-    }
-
-    .nav-mobile-uploader .lab-uploader-embedded .dz-inner {
-        gap: 6px;
-    }
-
-    .nav-mobile-uploader .lab-uploader-embedded .loader .dot {
-        width: 7px;
-        height: 7px;
-    }
-
-    .nav-mobile-uploader .lab-uploader-embedded .status-label {
-        font-size: 13px;
-        font-weight: 500;
-    }
-
-    .nav-mobile-uploader .lab-uploader-embedded .hint {
-        font-size: 11px;
-    }
 }

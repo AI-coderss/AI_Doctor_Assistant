@@ -101,7 +101,6 @@ const LabResultsUploader = forwardRef(function LabResultsUploader(
     onExtracted,      // (text, meta)
     onAIStreamToken,  // (chunk)
     className = "",
-    style = {},
     dense = false,
   },
   ref
@@ -112,6 +111,10 @@ const LabResultsUploader = forwardRef(function LabResultsUploader(
   const [error, setError] = useState("");
   const [fileMeta, setFileMeta] = useState(null);
   const [extractedText, setExtractedText] = useState("");
+
+  // purely visual state to mirror the sample (“+ / ✓ / ⭯”)
+  const [hasFile, setHasFile] = useState(false);
+  const [hover, setHover] = useState(false);
 
   useImperativeHandle(ref, () => ({ open: () => inputRef.current?.click() }));
 
@@ -129,7 +132,7 @@ const LabResultsUploader = forwardRef(function LabResultsUploader(
     return "";
   };
 
-  /** 🔧 FIX: send exactly what /stream expects: { message, session_id } */
+  /** 🔧 Send exactly what /stream expects: { message, session_id } */
   async function postToStream(text, meta) {
     setStatus("streaming");
 
@@ -145,10 +148,8 @@ const LabResultsUploader = forwardRef(function LabResultsUploader(
     }
 
     const payload = {
-      message: text,            // <— align with chat payload
-      session_id: sessionId,    // <— align with chat payload
-      // If your backend ignores extras, you can keep these:
-      // meta: { source: meta?.filename, mode: "lab_results" },
+      message: text,
+      session_id: sessionId,
     };
 
     try {
@@ -162,7 +163,6 @@ const LabResultsUploader = forwardRef(function LabResultsUploader(
       });
 
       if (!res.ok) {
-        // read body text for 400 error details
         const bodyTxt = await res.text().catch(() => "");
         throw new Error(`Stream ${res.status} ${res.statusText} — ${bodyTxt.slice(0, 300)}`);
       }
@@ -217,6 +217,9 @@ const LabResultsUploader = forwardRef(function LabResultsUploader(
   }
 
   async function handleFile(file) {
+    // purely visual, like original sample
+    setHasFile(!!file);
+
     setError("");
     const err = validate(file);
     if (err) {
@@ -289,69 +292,116 @@ const LabResultsUploader = forwardRef(function LabResultsUploader(
     }
   }
 
-  const denseCardStyle = dense ? { padding: 12, borderRadius: 12 } : undefined;
+  // Compute icon (visual only): +, ✓, ⭯
+  const glyph = (() => {
+    if (status === "extracting" || status === "streaming") return ""; // spinner instead
+    if (!hasFile) return "+";
+    return hover ? "⭯" : "✓";
+  })();
+
+  const statusText =
+    status === "idle"
+      ? "Drop PDF/Image or click"
+      : status === "extracting"
+      ? "Extracting text…"
+      : status === "streaming"
+      ? "Interpreting result…"
+      : status === "done"
+      ? "Done"
+      : status === "error"
+      ? (error || "Error")
+      : "";
+
+  const containerClass = [
+    "dropzone",
+    dragOver ? "dragOver" : "",
+    hasFile ? "uploaded" : "",
+    status === "extracting" ? "is-extracting" : "",
+    status === "streaming" ? "is-streaming" : "",
+  ]
+    .filter(Boolean)
+    .join(" ");
 
   return (
-    <div className={`lab-uploader ${className || ""}`} style={style}>
-      <div
-        className={`dropzone ${dragOver ? "drag-over" : ""}`}
-        style={denseCardStyle}
-        onDragOver={(e) => {
-          e.preventDefault();
-          setDragOver(true);
-        }}
-        onDragLeave={() => setDragOver(false)}
-        onDrop={(e) => {
-          e.preventDefault();
-          setDragOver(false);
-          const f = e.dataTransfer?.files?.[0];
-          if (f) handleFile(f);
-        }}
-        onClick={() => inputRef.current?.click()}
-        role="button"
-        tabIndex={0}
-        onKeyDown={(e) =>
-          (e.key === "Enter" || e.key === " ") && inputRef.current?.click()
-        }
-        aria-label="Upload lab result file"
-      >
+    <div className={`lab-uploader ${dense ? "dense" : ""} ${className || ""}`}>
+      <div className="file-upload">
+        <p className="upload-label">
+          <label>Please upload lab result</label>
+        </p>
+
+        {/* The square dashed zone */}
+        <div
+          className={containerClass}
+          onDragOver={(e) => {
+            e.preventDefault();
+            setDragOver(true);
+          }}
+          onDragLeave={() => setDragOver(false)}
+          onDrop={(e) => {
+            e.preventDefault();
+            setDragOver(false);
+            const f = e.dataTransfer?.files?.[0];
+            if (f) handleFile(f);
+          }}
+          onClick={() => inputRef.current?.click()}
+          onMouseEnter={() => setHover(true)}
+          onMouseLeave={() => setHover(false)}
+          role="button"
+          tabIndex={0}
+          onKeyDown={(e) =>
+            (e.key === "Enter" || e.key === " ") && inputRef.current?.click()
+          }
+          aria-label="Upload lab result file"
+        >
+          {/* progress ring while extracting/streaming */}
+          {(status === "extracting" || status === "streaming") ? (
+            <div className="ring" aria-hidden="true" />
+          ) : (
+            <span className="glyph">{glyph}</span>
+          )}
+        </div>
+
+        {/* The visible file input (matches sample; no native button) */}
         <input
           ref={inputRef}
           type="file"
           accept=".pdf,image/*"
-          hidden
+          className="file-input"
           onChange={(e) => {
             const f = e.target.files?.[0];
             if (f) handleFile(f);
+            // Reset so the same file can be picked again
             e.target.value = "";
           }}
         />
 
-        <div className="dz-inner" style={dense ? { gap: 6 } : undefined}>
-          <div
-            className={`loader ${
-              ["extracting", "streaming"].includes(status) ? "show" : ""
-            }`}
-          >
-            <span className="dot" />
-            <span className="dot" />
-            <span className="dot" />
-          </div>
-          <div className="status-label" style={dense ? { fontWeight: 500 } : undefined}>
-            {status === "idle" && "Drop PDF/image or tap to choose"}
-            {status === "extracting" && "Extracting text…"}
-            {status === "streaming" && "Generating interpretation…"}
-            {status === "done" && "Done"}
-            {status === "error" && (error || "Error")}
-          </div>
-          {!dense && (
-            <div className="hint">
-              PDF, PNG, JPG, WEBP, TIFF (≤ {Math.max(PROVIDER_MAX_MB, maxSizeMB)} MB)
-            </div>
+        {/* Animated status line under input */}
+        <div
+          className={[
+            "status-line",
+            status === "extracting" ? "s-extracting" : "",
+            status === "streaming" ? "s-streaming" : "",
+            status === "error" ? "s-error" : "",
+            status === "done" ? "s-done" : "",
+          ]
+            .filter(Boolean)
+            .join(" ")}
+          aria-live="polite"
+        >
+          <span className="status-text">{statusText}</span>
+          {(status === "extracting" || status === "streaming") && (
+            <span className="dots">
+              <i />
+              <i />
+              <i />
+            </span>
           )}
         </div>
+
+        {status === "error" && error && <div className="error">{error}</div>}
       </div>
 
+      {/* Optional manual send (kept intact) */}
       {!autoSend && extractedText && (
         <div className="extracted">
           <div className="extracted-head">
@@ -378,13 +428,13 @@ const LabResultsUploader = forwardRef(function LabResultsUploader(
           </button>
         </div>
       )}
-
-      {status === "error" && error && <div className="error">{error}</div>}
     </div>
   );
 });
 
 export default LabResultsUploader;
+
+
 
 
 

@@ -775,12 +775,8 @@ const Chat = () => {
         className="labs-uploader-fixed"
         style={{
           position: "fixed",
-          left: 16,
-          bottom: 16,
-          width: 300,
           zIndex: 60,
           display: "grid",
-          gap: 10,
         }}
       >
         {wantsLabs(lastBotText) && (

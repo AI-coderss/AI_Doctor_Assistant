@@ -8,23 +8,18 @@ import React, {
 } from "react";
 import "../styles/LabResultsUploader.css";
 
-/**
- * Explicit backend base (your URL):
- */
+/** Your backend base */
 const BACKEND_BASE = "https://ai-doctor-assistant-backend-server.onrender.com";
 
 const OCR_URLS = [
-  `${BACKEND_BASE}/ocr`,      // primary
-  `${BACKEND_BASE}/api/ocr`,  // fallback (prevents 'Cannot POST /ocr')
+  `${BACKEND_BASE}/ocr`,
+  `${BACKEND_BASE}/api/ocr`,
 ];
 
 const STREAM_URL = `${BACKEND_BASE}/stream`;
 
-/**
- * OCR.Space reference limits (docs): Free≈1MB, PRO≈5MB, PRO PDF≈100MB+.
- * Set this to your plan to guard uploads and compress large images client-side.
- */
-const PROVIDER_MAX_MB = 1; // change to 5 or 100 if your plan allows more
+/** OCR.Space rough limits; adjust to your plan */
+const PROVIDER_MAX_MB = 1;
 
 const ACCEPTED = [
   "application/pdf",
@@ -59,7 +54,7 @@ async function readJsonSafe(res) {
   }
 }
 
-/** Downscale an image (best effort) to fit target MB, keeping quality reasonable. */
+/** Downscale (best-effort) large images to fit provider MB */
 async function downscaleImageIfNeeded(file, targetMB = 1) {
   const maxBytes = targetMB * 1024 * 1024;
   if (!file.type.startsWith("image/")) return file;
@@ -70,7 +65,6 @@ async function downscaleImageIfNeeded(file, targetMB = 1) {
   const ctx = canvas.getContext("2d");
   let { width, height } = bitmap;
 
-  // Iteratively shrink until ≤ target or we hit bounds
   let quality = 0.85;
   let blob = file;
 
@@ -98,18 +92,17 @@ async function downscaleImageIfNeeded(file, targetMB = 1) {
 const LabResultsUploader = forwardRef(function LabResultsUploader(
   {
     autoSend = true,
-    ocrLanguage = "eng", // set "ara" for Arabic
+    ocrLanguage = "eng", // use "ara" for Arabic reports
     engine = "2",
     overlay = false,
-    maxSizeMB = PROVIDER_MAX_MB, // UI hint
+    maxSizeMB = PROVIDER_MAX_MB,
     onBeforeSendToAI, // (text, meta) => string
     onAIResponse,     // (payload, { text, meta })
     onExtracted,      // (text, meta)
     onAIStreamToken,  // (chunk)
-    /** embed controls */
     className = "",
     style = {},
-    dense = false, // compact spacing for mobile drawer
+    dense = false,
   },
   ref
 ) {
@@ -130,55 +123,74 @@ const LabResultsUploader = forwardRef(function LabResultsUploader(
     if (!ACCEPTED.includes(file.type) && !file.name.toLowerCase().endsWith(".pdf")) {
       return "Only PDF or image files are supported (PNG, JPG, WEBP, TIFF).";
     }
-    // PDFs/others: provider-aware early guard (images can be compressed)
     if (!file.type.startsWith("image/") && file.size > PROVIDER_MAX_MB * 1024 * 1024) {
       return `This file is larger than your OCR plan limit (${PROVIDER_MAX_MB}MB). Compress or upgrade plan.`;
     }
     return "";
   };
 
+  /** 🔧 FIX: send exactly what /stream expects: { message, session_id } */
   async function postToStream(text, meta) {
     setStatus("streaming");
+
+    // Reuse same sessionId as chat
+    let sessionId = null;
+    try {
+      sessionId = localStorage.getItem("sessionId");
+    } catch (_) {}
+    // Fallback if absent
+    if (!sessionId) {
+      sessionId = crypto?.randomUUID?.() || String(Date.now());
+      try { localStorage.setItem("sessionId", sessionId); } catch (_) {}
+    }
+
     const payload = {
-      input: text,
-      mode: "lab_results",
-      source: meta?.filename || "unknown",
+      message: text,            // <— align with chat payload
+      session_id: sessionId,    // <— align with chat payload
+      // If your backend ignores extras, you can keep these:
+      // meta: { source: meta?.filename, mode: "lab_results" },
     };
 
     try {
       const res = await fetch(STREAM_URL, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          "Accept": "text/event-stream, application/json;q=0.9, */*;q=0.8",
+        },
         body: JSON.stringify(payload),
       });
 
-      const ct = res.headers.get("content-type") || "";
+      if (!res.ok) {
+        // read body text for 400 error details
+        const bodyTxt = await res.text().catch(() => "");
+        throw new Error(`Stream ${res.status} ${res.statusText} — ${bodyTxt.slice(0, 300)}`);
+      }
 
-      // Non-stream: JSON or text
-      if (
-        !res.body ||
-        (!ct.includes("text/event-stream") && !ct.includes("application/octet-stream"))
-      ) {
-        let data;
-        if (ct.includes("application/json")) data = await res.json();
-        else data = { text: await res.text() };
-        onAIResponse?.(data, { text: extractedText, meta: fileMeta });
+      const ct = (res.headers.get("content-type") || "").toLowerCase();
+
+      // Streaming
+      if (res.body && (ct.includes("text/event-stream") || ct.includes("application/octet-stream"))) {
+        const reader = res.body.getReader();
+        const decoder = new TextDecoder("utf-8");
+        let full = "";
+        while (true) {
+          const { value, done } = await reader.read();
+          if (done) break;
+          const chunk = decoder.decode(value, { stream: true });
+          full += chunk;
+          onAIStreamToken?.(chunk);
+        }
+        onAIResponse?.({ text: full }, { text: extractedText, meta: fileMeta });
         setStatus("done");
         return;
       }
 
-      // Streaming reader
-      const reader = res.body.getReader();
-      const decoder = new TextDecoder("utf-8");
-      let full = "";
-      while (true) {
-        const { value, done } = await reader.read();
-        if (done) break;
-        const chunk = decoder.decode(value, { stream: true });
-        full += chunk;
-        onAIStreamToken?.(chunk);
-      }
-      onAIResponse?.({ text: full }, { text: extractedText, meta: fileMeta });
+      // Non-stream
+      const data = ct.includes("application/json")
+        ? await res.json()
+        : { text: await res.text() };
+      onAIResponse?.(data, { text: extractedText, meta: fileMeta });
       setStatus("done");
     } catch (err) {
       setError(err.message || String(err));
@@ -187,7 +199,6 @@ const LabResultsUploader = forwardRef(function LabResultsUploader(
   }
 
   async function postToOcr(form) {
-    // Try /ocr then /api/ocr (in case of path differences)
     let lastErr;
     for (const url of OCR_URLS) {
       try {
@@ -196,7 +207,7 @@ const LabResultsUploader = forwardRef(function LabResultsUploader(
           lastErr = new Error(`404 at ${url}`);
           continue;
         }
-        const data = await readJsonSafe(res); // throws on HTML error pages
+        const data = await readJsonSafe(res);
         return { res, data, urlTried: url };
       } catch (e) {
         lastErr = e;
@@ -214,7 +225,6 @@ const LabResultsUploader = forwardRef(function LabResultsUploader(
       return;
     }
 
-    // If image and above plan → try compressing
     let sendFile = file;
     if (file.type.startsWith("image/") && file.size > PROVIDER_MAX_MB * 1024 * 1024) {
       try {
@@ -236,7 +246,7 @@ const LabResultsUploader = forwardRef(function LabResultsUploader(
     setStatus("extracting");
 
     const form = new FormData();
-    form.append("image", sendFile); // MUST be 'image'
+    form.append("image", sendFile);
     form.append("language", ocrLanguage);
     form.append("engine", engine);
     form.append("overlay", overlay ? "true" : "false");
@@ -375,6 +385,7 @@ const LabResultsUploader = forwardRef(function LabResultsUploader(
 });
 
 export default LabResultsUploader;
+
 
 
 

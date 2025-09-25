@@ -1742,19 +1742,51 @@ def _json_error(message, status=400, **extra):
     return jsonify(payload), status
 
 
+# ===== OCR: helpers (replace your current _post_ocr_space / _aggregate_parsed_text) =====
+import mimetypes
+
+# Expand mimetypes so we don't default to image/png for everything
+mimetypes.add_type("application/pdf", ".pdf")
+mimetypes.add_type("image/jpeg", ".jpg")
+mimetypes.add_type("image/jpeg", ".jpeg")
+mimetypes.add_type("image/png", ".png")
+mimetypes.add_type("image/webp", ".webp")
+mimetypes.add_type("image/tiff", ".tif")
+mimetypes.add_type("image/tiff", ".tiff")
+mimetypes.add_type("image/bmp", ".bmp")
+mimetypes.add_type("image/gif", ".gif")
+mimetypes.add_type("image/heic", ".heic")
+mimetypes.add_type("image/heif", ".heif")
+
+# Accept **all common images + PDF** (no “png-only” behavior)
+ALLOWED_EXTS = {
+    "pdf", "png", "jpg", "jpeg", "webp", "tif", "tiff", "bmp", "gif", "heic", "heif"
+}
+REJECTED_PREFIXES = ("video/", "audio/")
+
+def _guess_mimetype(filename: str, fallback: str = None) -> str:
+    ext = (osp.splitext(filename)[1] or "").lower()
+    if not ext:
+        return fallback or "application/octet-stream"
+    mime, _ = mimetypes.guess_type(filename)
+    return mime or fallback or "application/octet-stream"
+
 def _post_ocr_space(file_storage, filename, ext, language, overlay, engine,
                     is_table=None, scale=None, detect_orientation=None):
     """
-    Sends the uploaded file stream to OCR.Space and returns the parsed JSON or raises.
+    Sends the uploaded file stream to OCR.Space and returns parsed JSON.
+    Works for PDF and common image types. No PNG forcing anymore.
     """
-    forced_name = f"upload.{ext}"
-    forced_mime = file_storage.mimetype or ("application/pdf" if ext == "pdf" else "image/png")
+    # Keep the original extension for the upstream provider
+    forced_name = secure_filename(filename or f"upload.{ext or 'bin'}")
+    # Prefer the browser/werkzeug-detected mimetype; otherwise guess by extension
+    forced_mime = file_storage.mimetype or _guess_mimetype(forced_name, "application/octet-stream")
 
     data = {
         "apikey": OCR_SPACE_API_KEY,
         "language": language,
         "isOverlayRequired": overlay,
-        "OCREngine": engine,   # "1" or "2" per OCR.Space
+        "OCREngine": engine,  # "1" or "2"
     }
     if is_table is not None:
         data["isTable"] = is_table
@@ -1771,7 +1803,6 @@ def _post_ocr_space(file_storage, filename, ext, language, overlay, engine,
         headers={"Accept": "application/json"},
     )
     content_type = resp.headers.get("Content-Type", "")
-    # Try to parse JSON regardless of status code
     try:
         result = resp.json()
     except ValueError:
@@ -1782,11 +1813,8 @@ def _post_ocr_space(file_storage, filename, ext, language, overlay, engine,
         )
     return result, forced_mime
 
-
 def _aggregate_parsed_text(result_json):
-    """
-    Combines text across OCR.Space ParsedResults pages.
-    """
+    """Combine text across OCR.Space pages; return (text, page_count)."""
     if result_json.get("IsErroredOnProcessing") or "ParsedResults" not in result_json:
         return None, 0
     pages = result_json.get("ParsedResults") or []
@@ -1797,171 +1825,177 @@ def _aggregate_parsed_text(result_json):
             texts.append(t)
     return ("\n\n".join(texts).strip(), len(pages))
 
-
-# ------------ UPDATED OCR endpoints (now session-aware) ------------
+# ===== OCR: session-aware endpoints (replace your current /ocr + /api/ocr routes) =====
 @app.route("/ocr", methods=["POST"])
 @app.route("/api/ocr", methods=["POST"])
 def ocr_from_image():
     """
-    Multipart form fields supported (all optional except 'image'/'file'):
-      - image | file          : the PDF/image to OCR
-      - language              : default 'eng'
-      - overlay               : 'true' | 'false'  (default 'false')
-      - engine                : '1' | '2'         (default '2')
-      - session_id            : your chat session id (fallback to X-Session-Id header or auto-generate)
-      - attach                : 'true' | 'false'  (default 'true') attach OCR text into chat_sessions[session_id]
-      - role                  : 'user' | 'assistant' (default 'user') role for the attached message
-      - label                 : short label to prefix the message (default 'OCR Document')
-      - max_chars             : int cap of characters to store in history (default from env OCR_HISTORY_MAX_CHARS or 8000)
+    Multipart form (all optional except 'image'|'file'):
+      - image | file        : PDF or image to OCR
+      - language            : default 'eng'
+      - overlay             : 'true' | 'false' (default 'false')
+      - engine              : '1' | '2' (default '2')
+      - session_id          : chat session id (fallbacks to X-Session-Id or auto-generates)
+      - attach              : 'true' | 'false' (default 'true') -> push OCR text into chat_sessions[session_id]
+      - role                : 'user' | 'assistant' (default 'user') for attached message
+      - label               : short label prefix (default 'OCR Document')
+      - max_chars           : int cap stored in history (default env OCR_HISTORY_MAX_CHARS or 8000)
 
-    Response keeps your original shape plus:
+    Response:
       { text, meta, session_id, attached, chars_saved, truncated }
     """
-    # Basic config sanity
-    if not OCR_SPACE_API_KEY:
-        return _json_error("OCR_SPACE_API_KEY is not configured", 500)
-
-    # Accept 'image' (preferred) or 'file'
-    f = request.files.get("image") or request.files.get("file")
-    if not f:
-        return _json_error("No image file uploaded. Use form field 'image'", 400)
-
-    filename = secure_filename(f.filename or "upload")
-    ext = (osp.splitext(filename)[1].lstrip(".") or "png").lower()
-
-    # Extension guard
-    if ext not in ALLOWED_EXTS:
-        return _json_error(
-            "Unsupported file type. Only PDF or images are supported.",
-            400,
-            allowed=sorted(ALLOWED_EXTS)
-        )
-
-    # Block video/audio upfront (OCR.Space does not support them)
-    if f.mimetype and (f.mimetype.startswith("video/") or f.mimetype.startswith("audio/")):
-        return _json_error("Video/audio files are not supported by OCR.Space.", 400)
-
-    # Server-side request size guard (proxy may still need config)
-    if request.content_length and request.content_length > MAX_BYTES:
-        return _json_error(
-            f"File too large for server cap (> {MAX_BYTES // (1024 * 1024)}MB).",
-            413, limit_mb=MAX_BYTES // (1024 * 1024)
-        )
-
-    # Provider plan guard (best-effort; provider still enforces its own limit)
-    provider_limit = PROVIDER_LIMIT_MB * 1024 * 1024
-    if request.content_length and request.content_length > provider_limit:
-        return _json_error(
-            f"File exceeds your OCR plan limit ({PROVIDER_LIMIT_MB}MB). "
-            f"Please compress the file or upgrade your OCR.Space plan.",
-            413, provider_limit_mb=PROVIDER_LIMIT_MB
-        )
-
-    # --- New: session awareness controls ---
-    # session_id can come from form, header, or be generated
-    session_id = (
-        (request.form.get("session_id") or "").strip()
-        or (request.headers.get("X-Session-Id") or "").strip()
-        or str(uuid4())
-    )
-    # attach to chat history by default
-    attach_flag = (request.form.get("attach", "true").strip().lower() != "false")
-    attach_role = (request.form.get("role") or "user").strip().lower()  # 'user' or 'assistant'
-    if attach_role not in ("user", "assistant"):
-        attach_role = "user"
-    label = (request.form.get("label") or "OCR Document").strip()[:48]
-
     try:
-        max_chars_env = int(os.environ.get("OCR_HISTORY_MAX_CHARS", "8000"))
+        if not OCR_SPACE_API_KEY:
+            app.logger.error("OCR_SPACE_API_KEY is not set")
+            return _json_error("OCR_SPACE_API_KEY is not configured", 500)
+
+        # ---- session awareness ----
+        session_id = (
+            (request.form.get("session_id") or "").strip()
+            or (request.headers.get("X-Session-Id") or "").strip()
+            or str(uuid4())
+        )
+        attach_flag = (request.form.get("attach", "true").strip().lower() != "false")
+        attach_role = (request.form.get("role") or "user").strip().lower()
+        if attach_role not in ("user", "assistant"):
+            attach_role = "user"
+        label = (request.form.get("label") or "OCR Document").strip()[:48]
+
+        try:
+            max_chars_env = int(os.environ.get("OCR_HISTORY_MAX_CHARS", "8000"))
+        except Exception:
+            max_chars_env = 8000
+        try:
+            max_chars_req = int(request.form.get("max_chars", "") or max_chars_env)
+        except Exception:
+            max_chars_req = max_chars_env
+        max_chars_req = max(1000, min(200_000, max_chars_req))
+
+        # ---- input file (PDF or any image/*) ----
+        f = request.files.get("image") or request.files.get("file")
+        if not f:
+            return _json_error("No file uploaded. Use form field 'image' or 'file'.", 400)
+
+        filename = secure_filename(f.filename or "upload")
+        ext = (osp.splitext(filename)[1].lstrip(".") or "").lower()
+
+        app.logger.info(
+            "OCR request: path=%s session_id=%s filename=%s mimetype=%s content_length=%s",
+            request.path, session_id, filename, getattr(f, "mimetype", None), request.content_length
+        )
+
+        # ---- guards: allow PDF and images; reject audio/video; soft-check extension ----
+        if f.mimetype and f.mimetype.startswith(REJECTED_PREFIXES):
+            return _json_error("Video/audio files are not supported by OCR.", 400)
+
+        if ext and ext not in ALLOWED_EXTS:
+            # If extension is unknown but mimetype looks like image/pdf, allow it
+            looks_image_or_pdf = (
+                (f.mimetype or "").startswith("image/") or (f.mimetype == "application/pdf")
+            )
+            if not looks_image_or_pdf:
+                return _json_error(
+                    "Unsupported file type. Only PDF or images are supported.",
+                    400, allowed=sorted(ALLOWED_EXTS)
+                )
+
+        # ---- size caps (server + provider plan) ----
+        if request.content_length and request.content_length > MAX_BYTES:
+            return _json_error(
+                f"File too large for server cap (> {MAX_BYTES // (1024 * 1024)}MB).",
+                413, limit_mb=MAX_BYTES // (1024 * 1024)
+            )
+
+        provider_limit = PROVIDER_LIMIT_MB * 1024 * 1024
+        if request.content_length and request.content_length > provider_limit:
+            # Provider free plans are small; let clients see a helpful message
+            return _json_error(
+                f"File exceeds your OCR plan limit ({PROVIDER_LIMIT_MB}MB). "
+                f"Please compress the file or upgrade your OCR plan.",
+                413, provider_limit_mb=PROVIDER_LIMIT_MB
+            )
+
+        # ---- tunables ----
+        language = request.form.get("language", "eng")
+        overlay = request.form.get("overlay", "false")
+        engine = request.form.get("engine", "2")
+        is_table = request.form.get("isTable")
+        scale = request.form.get("scale")
+        detect_orientation = request.form.get("detectOrientation")
+
+        # ---- provider call (works for PDF + image types) ----
+        try:
+            result, forced_mime = _post_ocr_space(
+                f, filename, ext, language, overlay, engine,
+                is_table=is_table, scale=scale, detect_orientation=detect_orientation
+            )
+        except requests.exceptions.RequestException as e:
+            app.logger.exception("OCR provider network error")
+            return _json_error("OCR request failed", 502, detail=str(e))
+        except RuntimeError as e:
+            app.logger.error("OCR provider returned non-JSON/HTML error: %s", e)
+            return _json_error(str(e), 502)
+
+        # ---- parse / validate provider response ----
+        text, pages = _aggregate_parsed_text(result)
+        if text is None:
+            app.logger.error("OCR provider error payload: %s", result)
+            return _json_error(
+                "OCR failed",
+                400,
+                message=result.get("ErrorMessage", "No detailed message"),
+                details=result
+            )
+        if not text:
+            app.logger.warning("OCR succeeded but empty text")
+            return _json_error("OCR succeeded but returned no text", 502, provider=result)
+
+        # ---- optionally attach OCR text into chat history for context ----
+        attached = False
+        chars_saved = 0
+        truncated = False
+
+        if attach_flag:
+            chat_sessions.setdefault(session_id, [])
+            header = (
+                f"[{label} Uploaded]\n"
+                f"- File: {filename}\n"
+                f"- Pages: {pages}\n"
+                f"- Language: {language}\n"
+                f"- Engine: {engine}\n"
+                f"- Mimetype: {forced_mime}\n"
+                f"---\n"
+            )
+            content = text
+            if len(content) > max_chars_req:
+                content = content[:max_chars_req]
+                truncated = True
+
+            message_text = header + content + ("\n[...truncated...]" if truncated else "")
+            chat_sessions[session_id].append({"role": attach_role, "content": message_text})
+            attached = True
+            chars_saved = len(content)
+
+        # ---- success ----
+        return jsonify({
+            "text": text,
+            "meta": {
+                "filename": filename,
+                "mimetype": forced_mime,
+                "pages": pages,
+                "language": language,
+                "engine": engine,
+            },
+            "session_id": session_id,
+            "attached": attached,
+            "chars_saved": chars_saved,
+            "truncated": truncated
+        })
+
     except Exception:
-        max_chars_env = 8000
-    try:
-        max_chars_req = int(request.form.get("max_chars", "") or max_chars_env)
-    except Exception:
-        max_chars_req = max_chars_env
-    max_chars_req = max(1000, min(200_000, max_chars_req))  # sane bounds
+        app.logger.exception("Unhandled error in /api/ocr")
+        return jsonify({"error": "Internal server error"}), 500
 
-    # Tunables
-    language = request.form.get("language", "eng")   # e.g., "eng", "ara"
-    overlay = request.form.get("overlay", "false")   # "true"/"false"
-    engine = request.form.get("engine", "2")         # "1"|"2" (per OCR.Space docs)
-    is_table = request.form.get("isTable")           # optional
-    scale = request.form.get("scale")                # optional
-    detect_orientation = request.form.get("detectOrientation")  # optional
-
-    # Call provider
-    try:
-        result, forced_mime = _post_ocr_space(
-            f, filename, ext, language, overlay, engine,
-            is_table=is_table, scale=scale, detect_orientation=detect_orientation
-        )
-    except requests.exceptions.RequestException as e:
-        return _json_error("OCR request failed", 502, detail=str(e))
-    except RuntimeError as e:
-        # Non-JSON or upstream HTML page, etc.
-        return _json_error(str(e), 502)
-
-    # Aggregate text
-    text, pages = _aggregate_parsed_text(result)
-    if text is None:
-        # Provider signaled error
-        return _json_error(
-            "OCR failed",
-            400,
-            message=result.get("ErrorMessage", "No detailed message"),
-            details=result
-        )
-
-    if not text:
-        return _json_error("OCR succeeded but returned no text", 502, provider=result)
-
-    # --- New: attach OCR content to chat history so the AI has context later ---
-    attached = False
-    chars_saved = 0
-    truncated = False
-
-    if attach_flag:
-        chat_sessions.setdefault(session_id, [])
-
-        # Make a compact header, then clamp the OCR text to max_chars_req
-        header = (
-            f"[{label} Uploaded]\n"
-            f"- File: {filename}\n"
-            f"- Pages: {pages}\n"
-            f"- Language: {language}\n"
-            f"- Engine: {engine}\n"
-            f"- Mimetype: {forced_mime}\n"
-            f"---\n"
-        )
-
-        content = text
-        if len(content) > max_chars_req:
-            content = content[:max_chars_req]
-            truncated = True
-
-        # Store as a single message (role selected by caller; default user)
-        message_text = header + content + ("\n[...truncated...]" if truncated else "")
-        chat_sessions[session_id].append({"role": attach_role, "content": message_text})
-
-        attached = True
-        chars_saved = len(content)
-
-    # Success response (keeps original shape; adds session info & attach metadata)
-    return jsonify({
-        "text": text,
-        "meta": {
-            "filename": filename,
-            "mimetype": forced_mime,
-            "pages": pages,
-            "language": language,
-            "engine": engine,
-        },
-        # new fields
-        "session_id": session_id,
-        "attached": attached,
-        "chars_saved": chars_saved,
-        "truncated": truncated
-    })
 
 if __name__ == "__main__":
     app.run(host="127.0.0.1", port=5050, debug=True)

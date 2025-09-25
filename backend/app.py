@@ -1798,10 +1798,25 @@ def _aggregate_parsed_text(result_json):
     return ("\n\n".join(texts).strip(), len(pages))
 
 
-# Expose BOTH paths to avoid “Cannot POST /ocr” mismatches:
+# ------------ UPDATED OCR endpoints (now session-aware) ------------
 @app.route("/ocr", methods=["POST"])
 @app.route("/api/ocr", methods=["POST"])
 def ocr_from_image():
+    """
+    Multipart form fields supported (all optional except 'image'/'file'):
+      - image | file          : the PDF/image to OCR
+      - language              : default 'eng'
+      - overlay               : 'true' | 'false'  (default 'false')
+      - engine                : '1' | '2'         (default '2')
+      - session_id            : your chat session id (fallback to X-Session-Id header or auto-generate)
+      - attach                : 'true' | 'false'  (default 'true') attach OCR text into chat_sessions[session_id]
+      - role                  : 'user' | 'assistant' (default 'user') role for the attached message
+      - label                 : short label to prefix the message (default 'OCR Document')
+      - max_chars             : int cap of characters to store in history (default from env OCR_HISTORY_MAX_CHARS or 8000)
+
+    Response keeps your original shape plus:
+      { text, meta, session_id, attached, chars_saved, truncated }
+    """
     # Basic config sanity
     if not OCR_SPACE_API_KEY:
         return _json_error("OCR_SPACE_API_KEY is not configured", 500)
@@ -1842,6 +1857,30 @@ def ocr_from_image():
             413, provider_limit_mb=PROVIDER_LIMIT_MB
         )
 
+    # --- New: session awareness controls ---
+    # session_id can come from form, header, or be generated
+    session_id = (
+        (request.form.get("session_id") or "").strip()
+        or (request.headers.get("X-Session-Id") or "").strip()
+        or str(uuid4())
+    )
+    # attach to chat history by default
+    attach_flag = (request.form.get("attach", "true").strip().lower() != "false")
+    attach_role = (request.form.get("role") or "user").strip().lower()  # 'user' or 'assistant'
+    if attach_role not in ("user", "assistant"):
+        attach_role = "user"
+    label = (request.form.get("label") or "OCR Document").strip()[:48]
+
+    try:
+        max_chars_env = int(os.environ.get("OCR_HISTORY_MAX_CHARS", "8000"))
+    except Exception:
+        max_chars_env = 8000
+    try:
+        max_chars_req = int(request.form.get("max_chars", "") or max_chars_env)
+    except Exception:
+        max_chars_req = max_chars_env
+    max_chars_req = max(1000, min(200_000, max_chars_req))  # sane bounds
+
     # Tunables
     language = request.form.get("language", "eng")   # e.g., "eng", "ara"
     overlay = request.form.get("overlay", "false")   # "true"/"false"
@@ -1876,7 +1915,38 @@ def ocr_from_image():
     if not text:
         return _json_error("OCR succeeded but returned no text", 502, provider=result)
 
-    # Success response (what your frontend expects)
+    # --- New: attach OCR content to chat history so the AI has context later ---
+    attached = False
+    chars_saved = 0
+    truncated = False
+
+    if attach_flag:
+        chat_sessions.setdefault(session_id, [])
+
+        # Make a compact header, then clamp the OCR text to max_chars_req
+        header = (
+            f"[{label} Uploaded]\n"
+            f"- File: {filename}\n"
+            f"- Pages: {pages}\n"
+            f"- Language: {language}\n"
+            f"- Engine: {engine}\n"
+            f"- Mimetype: {forced_mime}\n"
+            f"---\n"
+        )
+
+        content = text
+        if len(content) > max_chars_req:
+            content = content[:max_chars_req]
+            truncated = True
+
+        # Store as a single message (role selected by caller; default user)
+        message_text = header + content + ("\n[...truncated...]" if truncated else "")
+        chat_sessions[session_id].append({"role": attach_role, "content": message_text})
+
+        attached = True
+        chars_saved = len(content)
+
+    # Success response (keeps original shape; adds session info & attach metadata)
     return jsonify({
         "text": text,
         "meta": {
@@ -1885,9 +1955,13 @@ def ocr_from_image():
             "pages": pages,
             "language": language,
             "engine": engine,
-        }
+        },
+        # new fields
+        "session_id": session_id,
+        "attached": attached,
+        "chars_saved": chars_saved,
+        "truncated": truncated
     })
-
 
 if __name__ == "__main__":
     app.run(host="127.0.0.1", port=5050, debug=True)

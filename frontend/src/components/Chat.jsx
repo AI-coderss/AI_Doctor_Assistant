@@ -600,10 +600,10 @@ const Chat = () => {
 
   /* ===================== ADDED: Labs uploader integration ===================== */
 
-  // Uploader ref to programmatically open the file chooser
+  // Uploader ref to programmatically open the file chooser (fixed widget)
   const uploaderRef = useRef(null);
 
-  // Stream buffer for OCR->AI analysis coming from the uploader
+  // Stream buffer for OCR->AI analysis coming from either uploader (fixed or inline)
   const labsStreamingRef = useRef(false);
   const labsBufferRef = useRef("");
 
@@ -663,6 +663,69 @@ const Chat = () => {
     );
   }
 
+  // ---- NEW: render with inline uploader injection when backend sends [request_labs]
+  const LABS_TOKEN_RE = /\[request_labs\]/i;
+  const renderMessageRich = (message) => {
+    if (!LABS_TOKEN_RE.test(message || "")) {
+      return renderMessage(message);
+    }
+    const pieces = String(message).split(LABS_TOKEN_RE);
+
+    const nodes = [];
+    pieces.forEach((seg, idx) => {
+      if (seg) {
+        nodes.push(
+          <div key={`seg-${idx}`}>{renderMessage(seg)}</div>
+        );
+      }
+      // After each piece except the last, inject an inline uploader
+      if (idx < pieces.length - 1) {
+        nodes.push(
+          <InlineLabsCard
+            key={`labs-${idx}`}
+            onStreamToken={(chunk) => {
+              // stream into a fresh bot message
+              if (!labsStreamingRef.current) {
+                labsStreamingRef.current = true;
+                labsBufferRef.current = "";
+                setChats((prev) => [
+                  ...prev,
+                  { msg: "", who: "bot", streaming: true },
+                ]);
+              }
+              labsBufferRef.current += String(chunk || "");
+              setChats((prev) => {
+                const updated = [...prev];
+                const last = updated[updated.length - 1];
+                if (last && last.streaming) last.msg = labsBufferRef.current;
+                return updated;
+              });
+            }}
+            onComplete={(fullText) => {
+              setChats((prev) => {
+                const updated = [...prev];
+                if (labsStreamingRef.current) {
+                  labsStreamingRef.current = false;
+                  const last = updated[updated.length - 1];
+                  if (last && last.streaming) {
+                    last.streaming = false;
+                    last.msg = normalizeMarkdown(fullText || "");
+                    return updated;
+                  }
+                }
+                return [
+                  ...updated,
+                  { msg: normalizeMarkdown(fullText || ""), who: "bot" },
+                ];
+              });
+            }}
+          />
+        );
+      }
+    });
+    return nodes;
+  };
+
   return (
     <div className="chat-layout">
       <audio ref={audioPlayerRef} playsInline style={{ display: "none" }} />
@@ -680,7 +743,8 @@ const Chat = () => {
               </figure>
             )}
             <div className="message-text">
-              {renderMessage(chat.msg)}
+              {/* ⬇️ swapped to inject inline uploader when token present */}
+              {renderMessageRich(chat.msg)}
               {chat.streaming && <span className="typing-caret" />}
             </div>
           </div>
@@ -706,7 +770,7 @@ const Chat = () => {
         onTranscriptReady={handleAssistantContextTranscript}
       />
 
-      {/* =================== ADDED: Fixed bottom-left uploader & prompt =================== */}
+      {/* =================== Existing fixed bottom-left uploader & prompt =================== */}
       <div
         className="labs-uploader-fixed"
         style={{
@@ -818,7 +882,7 @@ const Chat = () => {
           }}
         />
       </div>
-      {/* ================= END ADDED: Fixed bottom-left uploader & prompt ================= */}
+      {/* ================= END fixed uploader ================= */}
     </div>
   );
 };
@@ -853,4 +917,52 @@ const CollapsibleDiagram = ({ chart }) => {
     </div>
   );
 };
+
+/* ===== NEW: compact inline card with uploader for bot bubble ===== */
+function InlineLabsCard({ onStreamToken, onComplete }) {
+  const localRef = useRef(null);
+
+  return (
+    <div
+      style={{
+        margin: "10px 0",
+        padding: "10px 12px",
+        borderRadius: 12,
+        background: "rgba(10,102,194,0.08)",
+        border: "1px solid rgba(10,102,194,0.25)",
+      }}
+    >
+      <div style={{ fontWeight: 700, fontSize: 13, marginBottom: 6 }}>
+        Please upload the lab results (PDF/Image)
+      </div>
+      <LabResultsUploader
+        ref={localRef}
+        autoSend={true}
+        ocrLanguage="eng"   // set "ara" for Arabic
+        engine="2"
+        // Make the inline widget dense/compact if your component supports it
+        dense={true}
+        onBeforeSendToAI={(text, meta) =>
+          [
+            "You are a clinical AI assistant.",
+            "You are given OCR-extracted lab results below.",
+            "Summarize abnormal values (with units), compare to provided normal ranges, flag critical values,",
+            "and give a concise, guideline-aligned interpretation.",
+            `SOURCE FILE: ${meta?.filename || "Unknown"}`,
+            "",
+            "=== LAB RESULTS (OCR) ===",
+            text,
+          ].join("\n")
+        }
+        onAIStreamToken={onStreamToken}
+        onAIResponse={(payload) => {
+          const full =
+            payload?.text ??
+            (typeof payload === "string" ? payload : JSON.stringify(payload));
+          onComplete(full);
+        }}
+      />
+    </div>
+  );
+}
 

@@ -626,6 +626,26 @@ const Chat = () => {
     );
   }
 
+  // === NEW: token constants for inline uploader
+  const LABS_TOKEN_RE = /\[request_labs\]/i;
+  const LABS_TOKEN_RE_GLOBAL = /\[request_labs\]/gi;
+
+  // Strip the inline uploader token(s) out of a specific bubble so it vanishes
+  const stripLabsTokenFromBubble = (bubbleIdx) => {
+    setChats((prev) => {
+      const arr = [...prev];
+      const target = arr[bubbleIdx];
+      if (
+        target &&
+        typeof target.msg === "string" &&
+        LABS_TOKEN_RE.test(target.msg)
+      ) {
+        target.msg = target.msg.replace(LABS_TOKEN_RE_GLOBAL, "");
+      }
+      return arr;
+    });
+  };
+
   /* =================== END ADDED: Labs uploader integration =================== */
 
   if (isVoiceMode) {
@@ -663,9 +683,8 @@ const Chat = () => {
     );
   }
 
-  // ---- NEW: render with inline uploader injection when backend sends [request_labs]
-  const LABS_TOKEN_RE = /\[request_labs\]/i;
-  const renderMessageRich = (message) => {
+  // ---- UPDATED: render with inline uploader injection when backend sends [request_labs]
+  const renderMessageRich = (message, bubbleIdx) => {
     if (!LABS_TOKEN_RE.test(message || "")) {
       return renderMessage(message);
     }
@@ -675,15 +694,18 @@ const Chat = () => {
     pieces.forEach((seg, idx) => {
       if (seg) {
         nodes.push(
-          <div key={`seg-${idx}`}>{renderMessage(seg)}</div>
+          <div key={`seg-${bubbleIdx}-${idx}`}>{renderMessage(seg)}</div>
         );
       }
       // After each piece except the last, inject an inline uploader
       if (idx < pieces.length - 1) {
         nodes.push(
           <InlineLabsCard
-            key={`labs-${idx}`}
+            key={`labs-${bubbleIdx}-${idx}`}
             onStreamToken={(chunk) => {
+              // Immediately remove the uploader from THIS bubble on first token
+              stripLabsTokenFromBubble(bubbleIdx);
+
               // stream into a fresh bot message
               if (!labsStreamingRef.current) {
                 labsStreamingRef.current = true;
@@ -702,6 +724,9 @@ const Chat = () => {
               });
             }}
             onComplete={(fullText) => {
+              // Ensure the uploader is gone from THIS bubble when complete
+              stripLabsTokenFromBubble(bubbleIdx);
+
               setChats((prev) => {
                 const updated = [...prev];
                 if (labsStreamingRef.current) {
@@ -743,8 +768,8 @@ const Chat = () => {
               </figure>
             )}
             <div className="message-text">
-              {/* ⬇️ swapped to inject inline uploader when token present */}
-              {renderMessageRich(chat.msg)}
+              {/* ⬇️ inject inline uploader when token present; it vanishes after use */}
+              {renderMessageRich(chat.msg, index)}
               {chat.streaming && <span className="typing-caret" />}
             </div>
           </div>
@@ -822,7 +847,7 @@ const Chat = () => {
         <LabResultsUploader
           ref={uploaderRef}
           autoSend={true}
-          ocrLanguage="eng"   // switch to "ara" for Arabic reports
+          ocrLanguage="eng" // switch to "ara" for Arabic reports
           engine="2"
           onBeforeSendToAI={(text, meta) =>
             [
@@ -914,7 +939,7 @@ const CollapsibleDiagram = ({ chart }) => {
   );
 };
 
-/* ===== NEW: compact inline card with uploader for bot bubble ===== */
+/* ===== Compact inline card with uploader for bot bubble (auto-vanishes after use) ===== */
 function InlineLabsCard({ onStreamToken, onComplete }) {
   const localRef = useRef(null);
 
@@ -934,9 +959,8 @@ function InlineLabsCard({ onStreamToken, onComplete }) {
       <LabResultsUploader
         ref={localRef}
         autoSend={true}
-        ocrLanguage="eng"   // set "ara" for Arabic
+        ocrLanguage="eng" // set "ara" for Arabic
         engine="2"
-        // Make the inline widget dense/compact if your component supports it
         dense={true}
         onBeforeSendToAI={(text, meta) =>
           [
@@ -961,4 +985,3 @@ function InlineLabsCard({ onStreamToken, onComplete }) {
     </div>
   );
 }
-

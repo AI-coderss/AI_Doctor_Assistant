@@ -1,147 +1,89 @@
-/* src/styles/labs-viz.css */
-
-/* ---- Theme tokens ---- */
-:root{
-  --lab-green: #11a36a;
-  --lab-yellow:#f6c445;
-  --lab-red:   #e5484d;
-  --lab-muted: rgba(0,0,0,.6);
-  --lab-bg:    rgba(255,255,255,.6);
+/* Panel container */
+.labs-panel {
+  background: #fff;
+  border: 1px solid rgba(0,0,0,.08);
+  box-shadow: 0 8px 24px rgba(0,0,0,.08);
+  border-radius: 16px;
+  padding: 16px;
+  max-width: 720px;
 }
 
-/* One lab line container */
-.lab-row{
-  display:grid;
-  grid-template-columns: 1fr auto;
-  gap:.75rem .75rem;
-  align-items:center;
-  padding:.6rem .75rem;
-  border-radius:12px;
-  backdrop-filter: blur(10px);
-  background: var(--lab-bg);
-  border:1px solid rgba(0,0,0,.06);
+.labs-panel__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 12px;
 }
 
-/* Left column = label + bar; right column = value */
-.lab-main{
-  display:grid;
-  gap:.35rem;
+.labs-panel__title { font-weight: 700; font-size: 16px; }
+.labs-panel__meta  { font-size: 12px; opacity: .8; }
+
+.labs-panel__legend {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 12px;
+  color: #334;
+}
+.chip { width: 14px; height: 6px; border-radius: 999px; display: inline-block; margin-right: 4px; }
+.chip--green  { background: #2ecc71; }
+.chip--yellow { background: #f1c40f; }
+.chip--red    { background: #e74c3c; }
+.chip--dot    { width: 8px; height: 8px; background: #000; }
+
+.labs-panel__body { display: grid; gap: 10px; }
+
+/* Row */
+.lab-row {
+  display: grid;
+  grid-template-columns: minmax(220px, 1fr) minmax(280px, 2fr) auto;
+  gap: 12px;
+  align-items: center;
+  padding: 10px 12px;
+  border: 1px dashed rgba(0,0,0,.06);
+  border-radius: 12px;
+  background: #fafcff;
 }
 
-/* Name + unit + range badges */
-.lab-head{
-  display:flex;
-  flex-wrap:wrap;
-  align-items:baseline;
-  gap:.4rem .6rem;
-  font-size:.92rem;
-}
-.lab-name{ font-weight:700; }
-.lab-unit{ color:var(--lab-muted); font-weight:500; }
-.lab-range{
-  margin-left:auto;
-  color:var(--lab-muted);
-  font-size:.84rem;
-}
+.lab-row__left .lab-row__name { font-weight: 600; color: #1b2a4a; }
+.lab-row__left .lab-row__range { font-size: 12px; color: #6b7a90; margin-top: 2px; }
 
-/* Status chip (green / yellow / red) */
-.lab-chip{
-  display:inline-flex;
-  align-items:center;
-  gap:.4rem;
-  padding:.2rem .55rem;
-  border-radius:999px;
-  font-size:.8rem;
-  font-weight:700;
-  letter-spacing:.02em;
-  color:#111;
-  background:#eee;
+/* Bar */
+.lab-row__bar { position: relative; }
+.bar {
+  position: relative;
+  display: flex;
+  height: 10px;
+  width: 100%;
+  border-radius: 999px;
+  overflow: hidden;
+  background: #e5eaf4;
 }
-.lab-chip.green{ background:color-mix(in oklab, var(--lab-green) 25%, white); }
-.lab-chip.yellow{ background:color-mix(in oklab, var(--lab-yellow) 25%, white); }
-.lab-chip.red{ background:color-mix(in oklab, var(--lab-red) 25%, white); }
+.seg { height: 100%; }
+.seg--green  { background: #2ecc71; }
+.seg--yellow { background: #f1c40f; }
+.seg--red    { background: #e74c3c; }
 
-/* Right column value */
-.lab-value{
-  text-align:right;
-  font-weight:800;
-  font-size:1.05rem;
-}
-
-/* ---- Range bar with dot indicator ----
-   Usage:
-   <div class="range-wrap">
-     <div class="range-bar status-green" style="--pos:0.42"></div>
-     <div class="range-dot"></div>
-   </div>
-   - Set --pos to a number in [0,1] (we clamp in CSS).
-   - Add one of: status-green | status-yellow | status-red to tint the halo.
-*/
-.range-wrap{
-  position:relative;
-  height:14px;
-}
-.range-bar{
-  position:relative;
-  width:100%;
-  height:10px;
-  margin-block:2px;
-  border-radius:999px;
-  overflow:hidden;
-  /* Red | Yellow | Green | Yellow | Red */
-  background:
-    linear-gradient(
-      to right,
-      var(--lab-red) 0%,
-      var(--lab-red) 15%,
-      var(--lab-yellow) 15%,
-      var(--lab-yellow) 35%,
-      var(--lab-green) 35%,
-      var(--lab-green) 65%,
-      var(--lab-yellow) 65%,
-      var(--lab-yellow) 85%,
-      var(--lab-red) 85%,
-      var(--lab-red) 100%
-    );
-  box-shadow: inset 0 0 0 1px rgba(0,0,0,.08);
-}
-
-/* Black dot */
-.range-dot{
-  --pos: .5; /* fallback */
-  position:absolute;
-  top:50%;
-  left: calc( clamp(0%, var(--pos)*100%, 100%) );
+.indicator {
+  position: absolute;
+  top: 50%;
+  width: 10px;
+  height: 10px;
   transform: translate(-50%, -50%);
-  width:12px;
-  height:12px;
-  border-radius:50%;
-  background:#111;
-  box-shadow:
-    0 0 0 2px rgba(255,255,255,.9),
-    0 6px 16px rgba(0,0,0,.18);
+  background: #000;
+  border-radius: 50%;
+  box-shadow: 0 0 0 2px rgba(0,0,0,.08);
 }
 
-/* Subtle colored glow by status */
-.status-green + .range-dot{ box-shadow:
-  0 0 0 2px rgba(255,255,255,.9),
-  0 0 0 6px color-mix(in oklab, var(--lab-green) 25%, transparent),
-  0 8px 18px rgba(0,0,0,.2);
-}
-.status-yellow + .range-dot{ box-shadow:
-  0 0 0 2px rgba(255,255,255,.9),
-  0 0 0 6px color-mix(in oklab, var(--lab-yellow) 25%, transparent),
-  0 8px 18px rgba(0,0,0,.2);
-}
-.status-red + .range-dot{ box-shadow:
-  0 0 0 2px rgba(255,255,255,.9),
-  0 0 0 6px color-mix(in oklab, var(--lab-red) 25%, transparent),
-  0 8px 18px rgba(0,0,0,.2);
-}
+/* Value chip */
+.lab-row__value { font-weight: 700; padding: 6px 10px; border-radius: 10px; font-size: 13px; }
+.lab-row__value--normal     { background: rgba(46,204,113,.12); color: #1e7a4a; }
+.lab-row__value--borderline { background: rgba(241,196,15,.14); color: #8a6d00; }
+.lab-row__value--abnormal   { background: rgba(231,76,60,.14); color: #9b2f24; }
+.lab-row__value--neutral    { background: rgba(107,122,144,.12); color: #31405a; }
 
-/* Compact variant (if you use dense mode) */
-.lab-row.dense{
-  padding:.45rem .6rem;
+/* small 'Normal range' label above the bar (optional) */
+.lab-row__bar .range-label {
+  position: absolute; left: 0; top: -18px; font-size: 11px; color: #6b7a90;
 }
-.lab-row.dense .lab-head{ font-size:.88rem; }
-.lab-row.dense .lab-value{ font-size:.98rem; }

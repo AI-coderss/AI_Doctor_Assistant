@@ -1995,121 +1995,205 @@ def ocr_from_image():
     except Exception:
         app.logger.exception("Unhandled error in /api/ocr")
         return jsonify({"error": "Internal server error"}), 500
+# ---------- Labs: AI parse + classification ----------
+# Put near the top-level with other imports if missing
+import math
+
+# Common adult reference ranges (generic; used only when none are found in the text)
+# Units are important; we do not auto-convert units here.
+DEFAULT_LAB_RANGES = [
+    {"name": "hemoglobin",  "aliases": ["hb","hgb","hemoglobin"],         "unit": "g/dL",  "low": 13.0, "high": 17.0},
+    {"name": "hematocrit",  "aliases": ["hct","hematocrit"],              "unit": "%",     "low": 40.0, "high": 50.0},
+    {"name": "wbc",         "aliases": ["wbc","wbc count","white blood"], "unit": "10^3/uL","low": 4.0, "high": 10.0},
+    {"name": "rbc",         "aliases": ["rbc","red blood cells"],         "unit": "10^6/uL","low": 4.5, "high": 5.9},
+    {"name": "platelets",   "aliases": ["plt","platelet","platelets"],    "unit": "10^3/uL","low": 150, "high": 450},
+    {"name": "mcv",         "aliases": ["mcv"],                           "unit": "fL",    "low": 80,   "high": 100},
+    {"name": "mch",         "aliases": ["mch"],                           "unit": "pg",    "low": 27,   "high": 33},
+    {"name": "mchc",        "aliases": ["mchc"],                          "unit": "g/dL",  "low": 32,   "high": 36},
+    {"name": "rdw",         "aliases": ["rdw"],                           "unit": "%",     "low": 11.5, "high": 14.5},
+    {"name": "neutrophils", "aliases": ["neutrophil","neut%"],            "unit": "%",     "low": 40,   "high": 70},
+    {"name": "lymphocytes", "aliases": ["lymphocyte","lymph%"],           "unit": "%",     "low": 20,   "high": 45},
+    {"name": "monocytes",   "aliases": ["monocyte","mono%"],              "unit": "%",     "low": 2,    "high": 8},
+    {"name": "eosinophils", "aliases": ["eosinophil","eos%"],             "unit": "%",     "low": 1,    "high": 4},
+    {"name": "basophils",   "aliases": ["basophil","baso%"],              "unit": "%",     "low": 0,    "high": 1},
+]
+
+def _canon_name(name: str) -> str:
+    t = (name or "").strip().lower()
+    t = re.sub(r"[^a-z0-9 %/\^\-\+\.\(\)]", " ", t)
+    t = re.sub(r"\s+", " ", t).strip()
+    # try alias matching
+    for item in DEFAULT_LAB_RANGES:
+        if t == item["name"]:
+            return item["name"]
+        for a in item["aliases"]:
+            if t == a:
+                return item["name"]
+    # light heuristic: remove trailing units in name
+    t2 = re.sub(r"\(.*?\)$", "", t).strip()
+    for item in DEFAULT_LAB_RANGES:
+        if t2 == item["name"] or t2 in item["aliases"]:
+            return item["name"]
+    return t  # fallback
+
+def _default_range_for(name: str):
+    n = _canon_name(name)
+    for item in DEFAULT_LAB_RANGES:
+        if item["name"] == n:
+            return {"low": item["low"], "high": item["high"], "unit": item["unit"], "canonical": n}
+    return None
+
+def _to_num(x):
+    if isinstance(x, (int, float)):
+        return float(x)
+    if isinstance(x, str):
+        t = x.strip().replace(",", ".")
+        m = re.match(r"^[-+]?\d+(?:\.\d+)?$", t)
+        if m:
+            try:
+                return float(m.group(0))
+            except Exception:
+                return None
+    return None
+
+def _classify(value, low, high, band_frac=0.075):
+    """
+    Returns status in {"normal","borderline","abnormal"} and direction {"low","high",None}
+    """
+    v = _to_num(value); lo = _to_num(low); hi = _to_num(high)
+    if v is None or lo is None or hi is None or hi <= lo:
+        return {"status": None, "direction": None}
+    if v < lo or v > hi:
+        return {"status": "abnormal", "direction": "low" if v < lo else "high"}
+    band = max( (hi - lo) * band_frac, 1e-9 )
+    if abs(v - lo) <= band or abs(v - hi) <= band:
+        return {"status": "borderline", "direction": None}
+    return {"status": "normal", "direction": None}
+
 @app.post("/labs/parse")
 def labs_parse():
     """
-    Body: { "text": "OCR'd lab blob" }
-    Returns:
-      {
-        "labs": [
-          {
-            "name": "Hemoglobin",
-            "value": 11.2,
-            "unit": "g/dL",
-            "low": 12.0,
-            "high": 16.0,
-            "flag": "L",                 # optional "H"/"L"
-            "status": "red|green|yellow",# green=in-range, red=out-of-range, yellow=neutral/unknown-range
-            "position": 0.42,            # 0..1 dot position across an extended track
-            "track_min": 10.0,           # visualization track (low - pad)
-            "track_max": 18.0            # visualization track (high + pad)
-          },
-          ...
-        ]
-      }
-    Notes:
-      - "yellow" is returned when we can't determine a ref range.
-      - "position" is normalized on an extended track (padding 25% of span on each side)
-        so the dot can still be shown when slightly out of range.
+    Body: { "text": "OCR raw text" }
+    Returns: { "labs": [ {name,value,unit,low,high,status,direction} ... ] }
     """
+    payload = request.get_json(silent=True) or {}
+    raw_text = (payload.get("text") or "").strip()
+    if not raw_text:
+        return jsonify({"labs": []}), 200
+
+    # 1) Ask the model to extract structured labs (JSON ONLY)
+    system = (
+        "Extract laboratory results from text and return STRICT JSON with key 'labs' as an array. "
+        "Each item: {name, value, unit, low, high}. "
+        "Prefer numeric 'low' and 'high' if a reference range is present. "
+        "If a line is not a lab (IDs, dates, headings), ignore it."
+    )
+    user = f"Text:\n{raw_text[:12000]}"
+
+    llm_labs = []
     try:
-      payload = request.get_json(force=True, silent=False) or {}
-      raw = (payload.get("text") or "").strip()
-      if not raw:
-          return jsonify({"labs": []}), 200
+        resp = client.chat.completions.create(
+            model=os.environ.get("STRUCTURE_MODEL","gpt-4o-mini"),
+            temperature=0.2,
+            messages=[{"role":"system","content":system},
+                      {"role":"user","content":user}],
+        )
+        content = (resp.choices[0].message.content or "").strip()
+        content = re.sub(r"```json|```", "", content, flags=re.I).strip()
+        doc = json.loads(content) if content.startswith("{") else {}
+        if isinstance(doc, dict) and isinstance(doc.get("labs"), list):
+            llm_labs = doc["labs"]
+    except Exception:
+        llm_labs = []
 
-      lines = [ln.strip() for ln in raw.splitlines() if ln.strip()]
-      labs = []
+    # 2) Normalize + fill defaults + classify
+    out = []
+    seen = set()
+    for item in llm_labs:
+        name = str(item.get("name") or "").strip()
+        value = _to_num(item.get("value"))
+        unit  = (item.get("unit") or "").strip()
+        low   = _to_num(item.get("low"))
+        high  = _to_num(item.get("high"))
 
-      # number parser (accepts "12,3", "-2.5")
-      def num(s):
-          if s is None:
-              return None
-          m = re.search(r"-?\d+(?:[.,]\d+)?", str(s))
-          if not m:
-              return None
-          try:
-              return float(m.group(0).replace(",", "."))
-          except Exception:
-              return None
+        if not name or value is None:
+            continue
 
-      # name: value unit  (low-high) [H/L]
-      rx = re.compile(
-          r"""^
-          ([A-Za-z][A-Za-z0-9\s\(\)\/\+\-%\.]+?)\s*[:\-]?\s*   # name
-          (-?\d+(?:[.,]\d+)?)\s*                               # value
-          ([A-Za-zµ%\/\^\d\.\-]*)\s*                           # unit
-          (?:
-              \(\s*(-?\d+(?:[.,]\d+)?)\s*[\-–]\s*(-?\d+(?:[.,]\d+)?)\s*\) # (low-high)
-            |
-              (?:(?:ref(?:erence)?|range|normal)\s*:?\s*)?     # "ref range:"
-              (-?\d+(?:[.,]\d+)?)\s*[\-–]\s*(-?\d+(?:[.,]\d+)?)
-          )?
-          \s*(?:([HL])\b)?                                     # flag H/L
-          """,
-          re.IGNORECASE | re.VERBOSE,
-      )
+        # Add defaults when missing
+        if low is None or high is None or (high is not None and low is not None and high <= low):
+            d = _default_range_for(name)
+            if d:
+                if not unit: unit = d["unit"]
+                if low is None: low = d["low"]
+                if high is None: high = d["high"]
 
-      for ln in lines:
-          m = rx.match(ln)
-          if not m:
-              continue
-          name = re.sub(r"\s+", " ", m.group(1) or "").strip()
-          value = num(m.group(2))
-          unit  = (m.group(3) or "").strip()
-          low   = num(m.group(4) or m.group(6))
-          high  = num(m.group(5) or m.group(7))
-          flag  = (m.group(8) or "").upper() or None
+        # final guard: ignore obvious non-labs
+        canon = _canon_name(name)
+        key = (canon, value, unit, low, high)
+        if key in seen:
+            continue
+        seen.add(key)
 
-          # Determine status & dot position
-          status = "yellow"  # neutral/unknown by default
-          position = None
-          track_min = None
-          track_max = None
+        cls = _classify(value, low, high)
+        out.append({
+            "name": name,
+            "value": value,
+            "unit": unit,
+            "low": low,
+            "high": high,
+            "status": cls["status"],       # "normal" | "borderline" | "abnormal" | None
+            "direction": cls["direction"], # "low" | "high" | None
+        })
 
-          if value is not None and low is not None and high is not None and high > low:
-              # in/out determination
-              status = "green" if (low <= value <= high) else "red"
+    # 3) Fallback: try a tiny regex parser if LLM returned nothing useful
+    if not out:
+        lines = [ln.strip() for ln in raw_text.splitlines() if ln.strip()]
+        rx = re.compile(
+            r"^([A-Za-z][A-Za-z0-9\s\(\)\/\+\-%\.]+?)\s*[:\-]?\s*"
+            r"(-?\d+(?:[.,]\d+)?)\s*"
+            r"([A-Za-zµ%\/\^\d\.\-]*)\s*"
+            r"(?:\(\s*(-?\d+(?:[.,]\d+)?)\s*[\-–]\s*(-?\d+(?:[.,]\d+)?)\s*\)|"
+            r"(?:ref(?:erence)?|range|normal)\s*:?[^0-9\-]*(-?\d+(?:[.,]\d+)?)\s*[\-–]\s*(-?\d+(?:[.,]\d+)?)"
+            r")?",
+            re.I
+        )
+        for ln in lines:
+            m = rx.match(ln)
+            if not m: 
+                continue
+            name = m.group(1).strip()
+            v    = _to_num(m.group(2))
+            unit = (m.group(3) or "").strip()
+            lo   = _to_num(m.group(4) or m.group(6))
+            hi   = _to_num(m.group(5) or m.group(7))
+            if v is None: 
+                continue
 
-              span = (high - low)
-              pad  = span * 0.25
-              track_min = low - pad
-              track_max = high + pad
-              # clamp pos into 0..1 so UI can render
-              position = (value - track_min) / (track_max - track_min)
-              if position < 0: position = 0.0
-              if position > 1: position = 1.0
-          elif flag in ("H", "L"):
-              status = "red"
+            if lo is None or hi is None or (hi is not None and lo is not None and hi <= lo):
+                d = _default_range_for(name)
+                if d:
+                    if not unit: unit = d["unit"]
+                    if lo is None: lo = d["low"]
+                    if hi is None: hi = d["high"]
 
-          labs.append({
-              "name": name,
-              "value": value,
-              "unit": unit,
-              "low": low,
-              "high": high,
-              "flag": flag,
-              "status": status,
-              "position": position,
-              "track_min": track_min,
-              "track_max": track_max,
-          })
+            cls = _classify(v, lo, hi)
+            out.append({
+                "name": name, "value": v, "unit": unit,
+                "low": lo, "high": hi, "status": cls["status"], "direction": cls["direction"]
+            })
 
-      return jsonify({"labs": labs}), 200
+    # keep only sensible rows
+    filtered = []
+    for r in out:
+        # require a numeric value and either a range OR a status decided by AI/fallback
+        if r.get("value") is None:
+            continue
+        if (r.get("low") is None or r.get("high") is None) and r.get("status") is None:
+            continue
+        filtered.append(r)
 
-    except Exception as e:
-      app.logger.exception("labs_parse error")
-      return jsonify({"labs": [], "error": str(e)}), 200
+    return jsonify({"labs": filtered}), 200
+
 
 if __name__ == "__main__":
     app.run(host="127.0.0.1", port=5050, debug=True)

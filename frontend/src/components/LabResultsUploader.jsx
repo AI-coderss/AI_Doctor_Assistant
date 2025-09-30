@@ -8,15 +8,11 @@ import React, {
 } from "react";
 import "../styles/LabResultsUploader.css";
 
-/** Your backend base */
 const BACKEND_BASE = "https://ai-doctor-assistant-backend-server.onrender.com";
 
-const OCR_URLS = [
-  `${BACKEND_BASE}/ocr`,
-  `${BACKEND_BASE}/api/ocr`,
-];
-
+const OCR_URLS = [`${BACKEND_BASE}/ocr`, `${BACKEND_BASE}/api/ocr`];
 const STREAM_URL = `${BACKEND_BASE}/stream`;
+const PARSE_URL = `${BACKEND_BASE}/labs/parse`; // ⬅️ NEW
 
 /** OCR.Space rough limits; adjust to your plan */
 const PROVIDER_MAX_MB = 1;
@@ -92,7 +88,7 @@ async function downscaleImageIfNeeded(file, targetMB = 1) {
 const LabResultsUploader = forwardRef(function LabResultsUploader(
   {
     autoSend = true,
-    ocrLanguage = "eng", // use "ara" for Arabic reports
+    ocrLanguage = "eng",
     engine = "2",
     overlay = false,
     maxSizeMB = PROVIDER_MAX_MB,
@@ -100,6 +96,7 @@ const LabResultsUploader = forwardRef(function LabResultsUploader(
     onAIResponse,     // (payload, { text, meta })
     onExtracted,      // (text, meta)
     onAIStreamToken,  // (chunk)
+    onParsedLabs,     // ⬅️ NEW: (labsArray, meta)
     className = "",
     dense = false,
   },
@@ -112,7 +109,6 @@ const LabResultsUploader = forwardRef(function LabResultsUploader(
   const [fileMeta, setFileMeta] = useState(null);
   const [extractedText, setExtractedText] = useState("");
 
-  // purely visual state to mirror the sample (“+ / ✓ / ⭯”)
   const [hasFile, setHasFile] = useState(false);
   const [hover, setHover] = useState(false);
 
@@ -132,44 +128,42 @@ const LabResultsUploader = forwardRef(function LabResultsUploader(
     return "";
   };
 
-  /** 🔧 Send exactly what /stream expects: { message, session_id } */
+  /** Send to chat stream */
   async function postToStream(text, meta) {
     setStatus("streaming");
 
-    // Reuse same sessionId as chat
     let sessionId = null;
     try {
       sessionId = localStorage.getItem("sessionId");
     } catch (_) {}
-    // Fallback if absent
     if (!sessionId) {
       sessionId = crypto?.randomUUID?.() || String(Date.now());
-      try { localStorage.setItem("sessionId", sessionId); } catch (_) {}
+      try {
+        localStorage.setItem("sessionId", sessionId);
+      } catch (_) {}
     }
 
-    const payload = {
-      message: text,
-      session_id: sessionId,
-    };
+    const payload = { message: text, session_id: sessionId };
 
     try {
       const res = await fetch(STREAM_URL, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          "Accept": "text/event-stream, application/json;q=0.9, */*;q=0.8",
+          Accept: "text/event-stream, application/json;q=0.9, */*;q=0.8",
         },
         body: JSON.stringify(payload),
       });
 
       if (!res.ok) {
         const bodyTxt = await res.text().catch(() => "");
-        throw new Error(`Stream ${res.status} ${res.statusText} — ${bodyTxt.slice(0, 300)}`);
+        throw new Error(
+          `Stream ${res.status} ${res.statusText} — ${bodyTxt.slice(0, 300)}`
+        );
       }
 
       const ct = (res.headers.get("content-type") || "").toLowerCase();
 
-      // Streaming
       if (res.body && (ct.includes("text/event-stream") || ct.includes("application/octet-stream"))) {
         const reader = res.body.getReader();
         const decoder = new TextDecoder("utf-8");
@@ -186,7 +180,6 @@ const LabResultsUploader = forwardRef(function LabResultsUploader(
         return;
       }
 
-      // Non-stream
       const data = ct.includes("application/json")
         ? await res.json()
         : { text: await res.text() };
@@ -216,10 +209,66 @@ const LabResultsUploader = forwardRef(function LabResultsUploader(
     throw lastErr || new Error("No OCR endpoint reachable.");
   }
 
-  async function handleFile(file) {
-    // purely visual, like original sample
-    setHasFile(!!file);
+  async function parseWithBackend(text) {
+    try {
+      const res = await fetch(PARSE_URL, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ text }),
+      });
+      if (!res.ok) throw new Error(`Parse ${res.status}`);
+      const data = await res.json();
+      if (Array.isArray(data?.labs)) return data.labs;
+    } catch (e) {
+      // fallback locally
+      return parseLabsHeuristics(text);
+    }
+    return parseLabsHeuristics(text);
+  }
 
+  /** Basic local regex fallback */
+  function parseLabsHeuristics(text = "") {
+    const lines = String(text).split(/\r?\n/).map((s) => s.trim()).filter(Boolean);
+    const labs = [];
+    const num = (s) => {
+      if (s == null) return NaN;
+      const t = String(s).replace(",", ".").match(/-?\d+(?:\.\d+)?/);
+      return t ? parseFloat(t[0]) : NaN;
+    };
+
+    const rx = new RegExp(
+      String.raw`^([A-Za-z][A-Za-z0-9\s\(\)\/\+\-%\.]+?)\s*[:\-]?\s*` + // name
+      String.raw`(-?\d+(?:[.,]\d+)?)\s*` +                              // value
+      String.raw`([A-Za-zµ%\/\^\d\.\-]*)\s*` +                          // unit
+      String.raw`(?:\(\s*(-?\d+(?:[.,]\d+)?)\s*[\-–]\s*(-?\d+(?:[.,]\d+)?)\s*\)` + // (low-high)
+      String.raw`|(?:ref(?:erence)?|range|normal)\s*:?[^0-9\-]*` +
+      String.raw`(-?\d+(?:[.,]\d+)?)\s*[\-–]\s*(-?\d+(?:[.,]\d+)?))?` +
+      String.raw`\s*(?:([HL])\b)?`, 'i'
+    );
+
+    for (const ln of lines) {
+      const m = ln.match(rx);
+      if (!m) continue;
+      const name = m[1].replace(/\s+/g, " ").trim();
+      const value = num(m[2]);
+      const unit = (m[3] || "").trim();
+      const low = num(m[4] || m[6]);
+      const high = num(m[5] || m[7]);
+      const flag = (m[8] || "").toUpperCase();
+      labs.push({
+        name,
+        value: isFinite(value) ? value : null,
+        unit,
+        low: isFinite(low) ? low : null,
+        high: isFinite(high) ? high : null,
+        flag: flag || null,
+      });
+    }
+    return labs;
+  }
+
+  async function handleFile(file) {
+    setHasFile(!!file);
     setError("");
     const err = validate(file);
     if (err) {
@@ -280,6 +329,14 @@ const LabResultsUploader = forwardRef(function LabResultsUploader(
       setFileMeta(meta);
       onExtracted?.(text, meta);
 
+      // ⬅️ NEW: parse labs and notify chat to render visual bar
+      try {
+        const parsed = await parseWithBackend(text);
+        if (Array.isArray(parsed) && parsed.length) {
+          onParsedLabs?.(parsed, meta);
+        }
+      } catch {}
+
       if (!autoSend) {
         setStatus("done");
         return;
@@ -291,8 +348,6 @@ const LabResultsUploader = forwardRef(function LabResultsUploader(
       setStatus("error");
     }
   }
-
-  // Compute icon (visual only): +, ✓, ⭯
   const glyph = (() => {
     if (status === "extracting" || status === "streaming") return ""; // spinner instead
     if (!hasFile) return "+";
@@ -329,7 +384,7 @@ const LabResultsUploader = forwardRef(function LabResultsUploader(
           <label>Please upload lab result</label>
         </p>
 
-        {/* The square dashed zone */}
+        {/* Square dashed dropzone */}
         <div
           className={containerClass}
           onDragOver={(e) => {
@@ -353,7 +408,6 @@ const LabResultsUploader = forwardRef(function LabResultsUploader(
           }
           aria-label="Upload lab result file"
         >
-          {/* progress ring while extracting/streaming */}
           {(status === "extracting" || status === "streaming") ? (
             <div className="ring" aria-hidden="true" />
           ) : (
@@ -361,7 +415,7 @@ const LabResultsUploader = forwardRef(function LabResultsUploader(
           )}
         </div>
 
-        {/* The visible file input (matches sample; no native button) */}
+        {/* Actual input (no visible native button) */}
         <input
           ref={inputRef}
           type="file"
@@ -370,12 +424,12 @@ const LabResultsUploader = forwardRef(function LabResultsUploader(
           onChange={(e) => {
             const f = e.target.files?.[0];
             if (f) handleFile(f);
-            // Reset so the same file can be picked again
+            // allow re-selecting same file
             e.target.value = "";
           }}
         />
 
-        {/* Animated status line under input */}
+        {/* Animated status line */}
         <div
           className={[
             "status-line",
@@ -398,10 +452,14 @@ const LabResultsUploader = forwardRef(function LabResultsUploader(
           )}
         </div>
 
-        {status === "error" && error && <div className="error">{error}</div>}
+        {status === "error" && error && (
+          <div className="error" role="alert">
+            {error}
+          </div>
+        )}
       </div>
 
-      {/* Optional manual send (kept intact) */}
+      {/* Optional manual-send mode */}
       {!autoSend && extractedText && (
         <div className="extracted">
           <div className="extracted-head">
@@ -433,6 +491,7 @@ const LabResultsUploader = forwardRef(function LabResultsUploader(
 });
 
 export default LabResultsUploader;
+
 
 
 

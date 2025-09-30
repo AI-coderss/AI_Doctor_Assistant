@@ -13,6 +13,7 @@ import { FaMicrophoneAlt } from "react-icons/fa";
 import { motion, AnimatePresence } from "framer-motion";
 import useAudioForVisualizerStore from "../store/useAudioForVisualizerStore.js";
 import "../styles/chat.css";
+import "../styles/labs-viz.css"; // ⬅️ NEW
 import { encodeWAV } from "./pcmToWav.js";
 import useAudioStore from "../store/audioStore.js";
 import { startVolumeMonitoring } from "./audioLevelAnalyzer";
@@ -53,18 +54,14 @@ function normalizeMarkdown(input = "") {
   let prev = "";
   for (let raw of lines) {
     let line = raw.replace(/\s+$/g, "");
-    // rtrim
-    // Normalize bullets: 1) -> 1. , * -> - , • -> -
     line = line
       .replace(/^(\s*)\d+\)\s+/g, "$11. ")
       .replace(/^(\s*)[\*\u2022]\s+/g, "$1- ");
-    // Drop consecutive duplicate lines (case/space-insensitive)
     if (line.trim().toLowerCase() === prev.trim().toLowerCase()) continue;
     out.push(line);
     prev = line;
   }
 
-  // Collapse multiple blank lines → single blank
   const collapsed = [];
   let blank = false;
   for (const l of out) {
@@ -76,8 +73,6 @@ function normalizeMarkdown(input = "") {
       blank = false;
     }
   }
-
-  // If the model forgot headings, we leave as-is; we already asked backend to enforce them.
   return collapsed.join("\n").trim();
 }
 
@@ -104,33 +99,36 @@ const Chat = () => {
   const scrollAnchorRef = useRef(null);
   const audioPlayerRef = useRef(null);
   const toggleSfxRef = useRef(null);
+
   const [sessionId] = useState(() => {
     const id = localStorage.getItem("sessionId") || crypto.randomUUID();
     localStorage.setItem("sessionId", id);
     return id;
   });
+
   const liveText = useLiveTranscriptStore((s) => s.text);
   const isStreaming = useLiveTranscriptStore((s) => s.isStreaming);
 
   const liveIdxRef = useRef(null);
   const finalizeTimerRef = useRef(null);
+
   useEffect(() => {
     toggleSfxRef.current = new Howl({
-      src: ["/assistant.mp3"], // from /public
-      volume: 0.2, // reasonable volume
-      preload: true, // prefetch for instant play
+      src: ["/assistant.mp3"],
+      volume: 0.2,
+      preload: true,
     });
-
     return () => {
-      // cleanup when component unmounts
       try {
         toggleSfxRef.current?.unload();
       } catch {}
     };
   }, []);
+
   useEffect(() => {
     scrollAnchorRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [chats, liveText, isStreaming]);
+
   useEffect(() => {
     return () => {
       micStream?.getTracks().forEach((track) => track.stop());
@@ -139,6 +137,7 @@ const Chat = () => {
       setIsMicActive(false);
     };
   }, [dataChannel, micStream, peerConnection]);
+
   // live transcript bubbles (unchanged)
   useEffect(() => {
     if (isStreaming && finalizeTimerRef.current) {
@@ -187,6 +186,7 @@ const Chat = () => {
       }
     };
   }, [isStreaming, liveText]);
+
   // Voice assistant (unchanged)
   const startWebRTC = async () => {
     if (peerConnection || connectionStatus === "connecting") return;
@@ -201,6 +201,7 @@ const Chat = () => {
       const pc = new RTCPeerConnection({
         iceServers: [{ urls: "stun:stun.l.google.com:19302" }],
       });
+
       pc.ontrack = (event) => {
         const [stream] = event.streams;
         if (!audioPlayerRef.current) return;
@@ -234,6 +235,7 @@ const Chat = () => {
       stream
         .getAudioTracks()
         .forEach((track) => pc.addTrack(track, localStream));
+
       const channel = pc.createDataChannel("response");
       channel.onopen = () => {
         setConnectionStatus("connected");
@@ -263,6 +265,7 @@ const Chat = () => {
         setConnectionStatus("error");
         setIsMicActive(false);
       };
+
       let pcmBuffer = new ArrayBuffer(0);
       channel.onmessage = async (event) => {
         const msg = JSON.parse(event.data);
@@ -378,6 +381,7 @@ const Chat = () => {
       setIsMicActive(false);
     }
   };
+
   const toggleMic = () => {
     if (connectionStatus === "idle" || connectionStatus === "error") {
       startWebRTC();
@@ -439,11 +443,9 @@ const Chat = () => {
       audioPlayerRef.current.muted = true;
       audioPlayerRef.current.play().catch(() => {});
     }
-    // subtle click/toggle sound on mic start
     try {
       if (toggleSfxRef.current) {
         toggleSfxRef.current.stop();
-        // ensure fresh playback
         toggleSfxRef.current.play();
       }
     } catch {}
@@ -452,12 +454,15 @@ const Chat = () => {
   // === Classic text chat → backend /stream (unchanged except normalize at end) ===
   const handleNewMessage = async ({ text, skipEcho = false }) => {
     if (!text || !text.trim()) return;
+
     if (!skipEcho) setChats((prev) => [...prev, { msg: text, who: "me" }]);
+
     const res = await fetch(`${BACKEND_BASE}/stream`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ message: text, session_id: sessionId }),
     });
+
     if (!res.ok || !res.body) {
       setChats((prev) => [
         ...prev,
@@ -475,6 +480,7 @@ const Chat = () => {
       const { value, done } = await reader.read();
       if (done) break;
       const chunk = decoder.decode(value, { stream: true });
+
       if (isFirstChunk) {
         setChats((prev) => [...prev, { msg: "", who: "bot", streaming: true }]);
         isFirstChunk = false;
@@ -514,6 +520,7 @@ const Chat = () => {
     }
     const after = message.slice(lastIndex);
     if (after) parts.push({ type: "text", content: after });
+
     return parts.map((part, idx) =>
       part.type === "mermaid" ? (
         <CollapsibleDiagram chart={part.content.trim()} key={idx} />
@@ -583,7 +590,6 @@ const Chat = () => {
         }
         updated[updated.length - 1].msg =
           (updated[updated.length - 1].msg || "") + chunk;
-
         return updated;
       });
       return;
@@ -596,20 +602,17 @@ const Chat = () => {
           if (last.streaming) last.streaming = false;
           last.msg = normalizeMarkdown(last.msg);
         }
-
         return updated;
       });
     }
   };
+
   /* ===================== ADDED: Labs uploader integration ===================== */
 
-  // Uploader ref to programmatically open the file chooser (fixed widget)
   const uploaderRef = useRef(null);
-  // Stream buffer for OCR->AI analysis coming from either uploader (fixed or inline)
   const labsStreamingRef = useRef(false);
   const labsBufferRef = useRef("");
 
-  // Heuristic: show a prompt card if the last completed bot message asks for labs
   const lastBotText = (() => {
     for (let i = chats.length - 1; i >= 0; i--) {
       const m = chats[i];
@@ -617,6 +620,7 @@ const Chat = () => {
     }
     return "";
   })();
+
   function wantsLabs(text) {
     const t = (text || "").toLowerCase();
     return (
@@ -627,10 +631,9 @@ const Chat = () => {
     );
   }
 
-  // === NEW: token constants for inline uploader
   const LABS_TOKEN_RE = /\[request_labs\]/i;
   const LABS_TOKEN_RE_GLOBAL = /\[request_labs\]/gi;
-  // Strip the inline uploader token(s) out of a specific bubble so it vanishes
+
   const stripLabsTokenFromBubble = (bubbleIdx) => {
     setChats((prev) => {
       const arr = [...prev];
@@ -645,6 +648,16 @@ const Chat = () => {
       return arr;
     });
   };
+
+  // === NEW: when we get parsed labs from the uploader, show a visual card in the chat ===
+  const handleParsedLabs = (labs, meta) => {
+    if (!Array.isArray(labs) || labs.length === 0) return;
+    setChats((prev) => [
+      ...prev,
+      { who: "bot", type: "labs", labs, meta: meta || null },
+    ]);
+  };
+
   /* =================== END ADDED: Labs uploader integration =================== */
 
   if (isVoiceMode) {
@@ -673,7 +686,6 @@ const Chat = () => {
             >
               <FaMicrophoneAlt />
             </button>
-
             <button className="closed-btn" onClick={closeVoiceSession}>
               ✖
             </button>
@@ -697,16 +709,13 @@ const Chat = () => {
           <div key={`seg-${bubbleIdx}-${idx}`}>{renderMessage(seg)}</div>
         );
       }
-      // After each piece except the last, inject an inline uploader
       if (idx < pieces.length - 1) {
         nodes.push(
           <InlineLabsCard
             key={`labs-${bubbleIdx}-${idx}`}
+            onParsedLabs={handleParsedLabs} // ⬅️ NEW
             onStreamToken={(chunk) => {
-              // Immediately remove the uploader from THIS bubble on first token
               stripLabsTokenFromBubble(bubbleIdx);
-
-              // stream into a fresh bot message
               if (!labsStreamingRef.current) {
                 labsStreamingRef.current = true;
                 labsBufferRef.current = "";
@@ -724,14 +733,12 @@ const Chat = () => {
               });
             }}
             onComplete={(fullText) => {
-              // Ensure the uploader is gone from THIS bubble when complete
               stripLabsTokenFromBubble(bubbleIdx);
               setChats((prev) => {
                 const updated = [...prev];
                 if (labsStreamingRef.current) {
                   labsStreamingRef.current = false;
                   const last = updated[updated.length - 1];
-
                   if (last && last.streaming) {
                     last.streaming = false;
                     last.msg = normalizeMarkdown(fullText || "");
@@ -756,25 +763,33 @@ const Chat = () => {
       <style>{drawerComponentOverrides}</style>
       <audio ref={audioPlayerRef} playsInline style={{ display: "none" }} />
       <div className="chat-content">
-        {chats.map((chat, index) => (
-          <div
-            key={index}
-            className={`chat-message ${chat.who} ${chat.live ? "live" : ""} ${
-              chat.streaming ? "streaming" : ""
-            }`}
-          >
-            {chat.who === "bot" && (
-              <figure className="avatar">
-                <img src="/av.gif" alt="avatar" />
-              </figure>
-            )}
-            <div className="message-text">
-              {/* ⬇️ inject inline uploader when token present; it vanishes after use */}
-              {renderMessageRich(chat.msg, index)}
-              {chat.streaming && <span className="typing-caret" />}
+        {chats.map((chat, index) => {
+          const isLabCard = chat?.type === "labs" && Array.isArray(chat.labs);
+          return (
+            <div
+              key={index}
+              className={`chat-message ${chat.who} ${chat.live ? "live" : ""} ${
+                chat.streaming ? "streaming" : ""
+              }`}
+            >
+              {chat.who === "bot" && (
+                <figure className="avatar">
+                  <img src="/av.gif" alt="avatar" />
+                </figure>
+              )}
+              <div className="message-text">
+                {isLabCard ? (
+                  <LabsPanel labs={chat.labs} meta={chat.meta} />
+                ) : (
+                  <>
+                    {renderMessageRich(chat.msg, index)}
+                    {chat.streaming && <span className="typing-caret" />}
+                  </>
+                )}
+              </div>
             </div>
-          </div>
-        ))}
+          );
+        })}
         <div ref={scrollAnchorRef} />
       </div>
 
@@ -788,7 +803,6 @@ const Chat = () => {
 
       {/* =================== NEW: Drawer containing tools =================== */}
       <DrawComponent>
-        {/* Tool 1: Voice Recorder Panel */}
         <div className="tool-wrapper">
           <VoiceRecorderPanel
             transcribeUrl={`${BACKEND_BASE}/transcribe`}
@@ -799,11 +813,8 @@ const Chat = () => {
           />
         </div>
 
-        {/* Tool 2: Lab Results Uploader */}
         <div className="tool-wrapper">
-          <div
-            className="labs-uploader-fixed"
-          >
+          <div className="labs-uploader-fixed">
             {wantsLabs(lastBotText) && (
               <div
                 className="labs-prompt"
@@ -847,8 +858,9 @@ const Chat = () => {
             <LabResultsUploader
               ref={uploaderRef}
               autoSend={true}
-              ocrLanguage="eng" // switch to "ara" for Arabic reports
+              ocrLanguage="eng"
               engine="2"
+              onParsedLabs={handleParsedLabs} // ⬅️ NEW
               onBeforeSendToAI={(text, meta) =>
                 [
                   "You are a clinical AI assistant.",
@@ -862,7 +874,6 @@ const Chat = () => {
                 ].join("\n")
               }
               onAIStreamToken={(chunk) => {
-                // Start streaming a new bot message on first token
                 if (!labsStreamingRef.current) {
                   labsStreamingRef.current = true;
                   labsBufferRef.current = "";
@@ -875,8 +886,7 @@ const Chat = () => {
                 setChats((prev) => {
                   const updated = [...prev];
                   const last = updated[updated.length - 1];
-                  if (last && last.streaming)
-                    last.msg = labsBufferRef.current;
+                  if (last && last.streaming) last.msg = labsBufferRef.current;
                   return updated;
                 });
               }}
@@ -897,7 +907,6 @@ const Chat = () => {
                       return updated;
                     }
                   }
-                  // If no streaming occurred, just append a bot message
                   return [
                     ...updated,
                     { msg: normalizeMarkdown(full || ""), who: "bot" },
@@ -923,7 +932,6 @@ const DrawComponent = ({ children }) => {
     <div
       style={{ position: "fixed", bottom: "25px", left: "25px", zIndex: 100 }}
     >
-      {/* Animated content panel */}
       <AnimatePresence>
         {isOpen && (
           <motion.div
@@ -932,7 +940,7 @@ const DrawComponent = ({ children }) => {
             exit={{ opacity: 0, y: 50, scale: 0.9 }}
             transition={{ duration: 0.3, ease: "easeInOut" }}
             style={{
-              minWidth: "550px", // Increased width
+              minWidth: "550px",
               padding: "24px",
               background: "rgba(255, 255, 255, 0.9)",
               backdropFilter: "blur(10px)",
@@ -950,7 +958,6 @@ const DrawComponent = ({ children }) => {
         )}
       </AnimatePresence>
 
-      {/* Toggle Handle */}
       <button
         onClick={() => setIsOpen((prev) => !prev)}
         style={{
@@ -967,7 +974,10 @@ const DrawComponent = ({ children }) => {
           cursor: "pointer",
           boxShadow: "0 4px 15px rgba(0,0,0,0.2)",
           transition: "transform 0.2s, background-color 0.2s",
-          float: "left", // Position handle on the left
+          float: "left",
+          position: "relative",
+          bottom: "12px",
+          marginBottom: "8px",
         }}
         title="Toggle Tools"
       >
@@ -1007,8 +1017,9 @@ const CollapsibleDiagram = ({ chart }) => {
 };
 
 /* ===== Compact inline card with uploader for bot bubble (auto-vanishes after use) ===== */
-function InlineLabsCard({ onStreamToken, onComplete }) {
+function InlineLabsCard({ onStreamToken, onComplete, onParsedLabs }) {
   const localRef = useRef(null);
+
   return (
     <div
       style={{
@@ -1025,9 +1036,10 @@ function InlineLabsCard({ onStreamToken, onComplete }) {
       <LabResultsUploader
         ref={localRef}
         autoSend={true}
-        ocrLanguage="eng" // set "ara" for Arabic
+        ocrLanguage="eng"
         engine="2"
         dense={true}
+        onParsedLabs={onParsedLabs} // ⬅️ NEW
         onBeforeSendToAI={(text, meta) =>
           [
             "You are a clinical AI assistant.",
@@ -1050,4 +1062,150 @@ function InlineLabsCard({ onStreamToken, onComplete }) {
       />
     </div>
   );
+}
+
+/* ===== NEW: Visual Labs Panel with Green/Yellow/Red bar & black dot indicator ===== */
+function LabsPanel({ labs = [], meta }) {
+  return (
+    <div className="labs-panel">
+      <div className="labs-panel__header">
+        <div>
+          <div className="labs-panel__title">Lab Summary</div>
+          {meta?.filename && (
+            <div className="labs-panel__meta">Source: {meta.filename}</div>
+          )}
+        </div>
+        <div className="labs-panel__legend">
+          <span className="chip chip--green" /> Normal
+          <span className="chip chip--yellow" /> Borderline
+          <span className="chip chip--red" /> Abnormal
+          <span className="chip chip--dot" /> Value
+        </div>
+      </div>
+
+      <div className="labs-panel__body">
+        {labs.map((lab, idx) => (
+          <LabRow lab={lab} key={idx} />
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function LabRow({ lab }) {
+  const name = lab?.name || "Unknown";
+  const unit = lab?.unit || "";
+  const value = toNum(lab?.value);
+  const low = toNum(lab?.low);
+  const high = toNum(lab?.high);
+
+  // Define bar scale
+  let min = null,
+    max = null,
+    band = null;
+  if (isFiniteNum(low) && isFiniteNum(high) && high > low) {
+    const span = high - low;
+    min = low - Math.max(0.25 * span, 0.01 * high);
+    max = high + Math.max(0.25 * span, 0.01 * high);
+    band = Math.max(0.05 * span, 0.01 * span); // yellow border width on each side
+  } else {
+    // no range
+    min = 0;
+    max = 1;
+    band = 0.2;
+  }
+
+  const clamp = (x) => Math.min(Math.max(x, min), max);
+  const posPct = isFiniteNum(value)
+    ? ((clamp(value) - min) / (max - min)) * 100
+    : 50;
+
+  // segments % widths
+  let redL = 0,
+    yellowL = 0,
+    green = 0,
+    yellowR = 0,
+    redR = 0;
+
+  if (isFiniteNum(low) && isFiniteNum(high) && high > low) {
+    const leftRedEnd = Math.max(min, low - band);
+    const leftYellowEnd = low + band;
+    const rightYellowStart = high - band;
+    const rightRedStart = high + band;
+
+    redL = ((leftRedEnd - min) / (max - min)) * 100;
+    yellowL = ((Math.min(leftYellowEnd, high) - leftRedEnd) / (max - min)) * 100;
+    green =
+      ((Math.max(rightYellowStart, low) - Math.min(leftYellowEnd, high)) /
+        (max - min)) *
+      100;
+    yellowR = ((Math.min(rightRedStart, max) - rightYellowStart) / (max - min)) * 100;
+    redR = ((max - Math.max(rightRedStart, high)) / (max - min)) * 100;
+
+    // guard against negatives
+    redL = Math.max(0, redL);
+    yellowL = Math.max(0, yellowL);
+    green = Math.max(0, green);
+    yellowR = Math.max(0, yellowR);
+    redR = Math.max(0, redR);
+  } else {
+    // unknown range => all yellow
+    yellowL = 100;
+  }
+
+  // textual status
+  let status = "neutral";
+  if (isFiniteNum(value) && isFiniteNum(low) && isFiniteNum(high) && high > low) {
+    if (value < low - 1e-9 || value > high + 1e-9) status = "abnormal";
+    else if (Math.abs(value - low) <= band || Math.abs(value - high) <= band)
+      status = "borderline";
+    else status = "normal";
+  }
+
+  return (
+    <div className="lab-row">
+      <div className="lab-row__left">
+        <div className="lab-row__name">{name}</div>
+        <div className="lab-row__range">
+          {isFiniteNum(low) && isFiniteNum(high) ? (
+            <>
+              Ref: {low} – {high} {unit}
+            </>
+          ) : (
+            <em>Ref range: unknown</em>
+          )}
+        </div>
+      </div>
+
+      <div className="lab-row__bar">
+        <div className="bar">
+          {redL > 0 && <div className="seg seg--red" style={{ flexBasis: `${redL}%` }} />}
+          {yellowL > 0 && <div className="seg seg--yellow" style={{ flexBasis: `${yellowL}%` }} />}
+          {green > 0 && <div className="seg seg--green" style={{ flexBasis: `${green}%` }} />}
+          {yellowR > 0 && <div className="seg seg--yellow" style={{ flexBasis: `${yellowR}%` }} />}
+          {redR > 0 && <div className="seg seg--red" style={{ flexBasis: `${redR}%` }} />}
+
+          <div className="indicator" style={{ left: `${posPct}%` }} />
+        </div>
+      </div>
+
+      <div className={`lab-row__value lab-row__value--${status}`}>
+        {isFiniteNum(value) ? `${value} ${unit}` : "—"}
+      </div>
+    </div>
+  );
+}
+
+function toNum(x) {
+  if (typeof x === "number") return x;
+  if (typeof x === "string") {
+    const t = x.trim().replace(",", ".");
+    const m = t.match(/^[-+]?\d+(?:\.\d+)?$/);
+    if (m) return parseFloat(m[0]);
+  }
+  return NaN;
+}
+
+function isFiniteNum(n) {
+  return typeof n === "number" && Number.isFinite(n);
 }

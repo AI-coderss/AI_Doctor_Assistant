@@ -1995,7 +1995,121 @@ def ocr_from_image():
     except Exception:
         app.logger.exception("Unhandled error in /api/ocr")
         return jsonify({"error": "Internal server error"}), 500
+@app.post("/labs/parse")
+def labs_parse():
+    """
+    Body: { "text": "OCR'd lab blob" }
+    Returns:
+      {
+        "labs": [
+          {
+            "name": "Hemoglobin",
+            "value": 11.2,
+            "unit": "g/dL",
+            "low": 12.0,
+            "high": 16.0,
+            "flag": "L",                 # optional "H"/"L"
+            "status": "red|green|yellow",# green=in-range, red=out-of-range, yellow=neutral/unknown-range
+            "position": 0.42,            # 0..1 dot position across an extended track
+            "track_min": 10.0,           # visualization track (low - pad)
+            "track_max": 18.0            # visualization track (high + pad)
+          },
+          ...
+        ]
+      }
+    Notes:
+      - "yellow" is returned when we can't determine a ref range.
+      - "position" is normalized on an extended track (padding 25% of span on each side)
+        so the dot can still be shown when slightly out of range.
+    """
+    try:
+      payload = request.get_json(force=True, silent=False) or {}
+      raw = (payload.get("text") or "").strip()
+      if not raw:
+          return jsonify({"labs": []}), 200
 
+      lines = [ln.strip() for ln in raw.splitlines() if ln.strip()]
+      labs = []
+
+      # number parser (accepts "12,3", "-2.5")
+      def num(s):
+          if s is None:
+              return None
+          m = re.search(r"-?\d+(?:[.,]\d+)?", str(s))
+          if not m:
+              return None
+          try:
+              return float(m.group(0).replace(",", "."))
+          except Exception:
+              return None
+
+      # name: value unit  (low-high) [H/L]
+      rx = re.compile(
+          r"""^
+          ([A-Za-z][A-Za-z0-9\s\(\)\/\+\-%\.]+?)\s*[:\-]?\s*   # name
+          (-?\d+(?:[.,]\d+)?)\s*                               # value
+          ([A-Za-zµ%\/\^\d\.\-]*)\s*                           # unit
+          (?:
+              \(\s*(-?\d+(?:[.,]\d+)?)\s*[\-–]\s*(-?\d+(?:[.,]\d+)?)\s*\) # (low-high)
+            |
+              (?:(?:ref(?:erence)?|range|normal)\s*:?\s*)?     # "ref range:"
+              (-?\d+(?:[.,]\d+)?)\s*[\-–]\s*(-?\d+(?:[.,]\d+)?)
+          )?
+          \s*(?:([HL])\b)?                                     # flag H/L
+          """,
+          re.IGNORECASE | re.VERBOSE,
+      )
+
+      for ln in lines:
+          m = rx.match(ln)
+          if not m:
+              continue
+          name = re.sub(r"\s+", " ", m.group(1) or "").strip()
+          value = num(m.group(2))
+          unit  = (m.group(3) or "").strip()
+          low   = num(m.group(4) or m.group(6))
+          high  = num(m.group(5) or m.group(7))
+          flag  = (m.group(8) or "").upper() or None
+
+          # Determine status & dot position
+          status = "yellow"  # neutral/unknown by default
+          position = None
+          track_min = None
+          track_max = None
+
+          if value is not None and low is not None and high is not None and high > low:
+              # in/out determination
+              status = "green" if (low <= value <= high) else "red"
+
+              span = (high - low)
+              pad  = span * 0.25
+              track_min = low - pad
+              track_max = high + pad
+              # clamp pos into 0..1 so UI can render
+              position = (value - track_min) / (track_max - track_min)
+              if position < 0: position = 0.0
+              if position > 1: position = 1.0
+          elif flag in ("H", "L"):
+              status = "red"
+
+          labs.append({
+              "name": name,
+              "value": value,
+              "unit": unit,
+              "low": low,
+              "high": high,
+              "flag": flag,
+              "status": status,
+              "position": position,
+              "track_min": track_min,
+              "track_max": track_max,
+          })
+
+      return jsonify({"labs": labs}), 200
+
+    except Exception as e:
+      app.logger.exception("labs_parse error")
+      return jsonify({"labs": [], "error": str(e)}), 200
 
 if __name__ == "__main__":
     app.run(host="127.0.0.1", port=5050, debug=True)

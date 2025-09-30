@@ -1,5 +1,5 @@
-/* eslint-disable no-unused-vars */
 /* eslint-disable no-loop-func */
+// src/components/LabResultsUploader.jsx
 import React, {
   useRef,
   useState,
@@ -12,9 +12,9 @@ const BACKEND_BASE = "https://ai-doctor-assistant-backend-server.onrender.com";
 
 const OCR_URLS = [`${BACKEND_BASE}/ocr`, `${BACKEND_BASE}/api/ocr`];
 const STREAM_URL = `${BACKEND_BASE}/stream`;
-const PARSE_URL = `${BACKEND_BASE}/labs/parse`; // ✅ AI-backed parse + classify
+const PARSE_URL = `${BACKEND_BASE}/labs/parse`; // AI parser/classifier endpoint
 
-/** OCR.Space rough limits; adjust to your plan */
+/** OCR provider rough limits; adjust to your plan */
 const PROVIDER_MAX_MB = 1;
 
 const ACCEPTED = [
@@ -93,10 +93,10 @@ const LabResultsUploader = forwardRef(function LabResultsUploader(
     overlay = false,
     maxSizeMB = PROVIDER_MAX_MB,
     onBeforeSendToAI, // (text, meta) => string
-    onAIResponse, // (payload, { text, meta })
-    onExtracted, // (text, meta)
-    onAIStreamToken, // (chunk)
-    onParsedLabs, // (labsArray, meta)
+    onAIResponse,     // (payload, { text, meta })
+    onExtracted,      // (text, meta)
+    onAIStreamToken,  // (chunk)
+    onParsedLabs,     // (labsArray, meta)
     className = "",
     dense = false,
   },
@@ -164,21 +164,15 @@ const LabResultsUploader = forwardRef(function LabResultsUploader(
 
       const ct = (res.headers.get("content-type") || "").toLowerCase();
 
-      if (
-        res.body &&
-        (ct.includes("text/event-stream") || ct.includes("application/octet-stream"))
-      ) {
+      if (res.body && (ct.includes("text/event-stream") || ct.includes("application/octet-stream"))) {
         const reader = res.body.getReader();
-        const decoder = new TextDecoder("utf-8");
-        let full = "";
-        while (true) {
+      while (true) {
           const { value, done } = await reader.read();
-          if (done) break;
-          const chunk = decoder.decode(value, { stream: true });
-          full += chunk;
+          if (done) break ;
+          const chunk = new TextDecoder("utf-8").decode(value, { stream: true });
           onAIStreamToken?.(chunk);
         }
-        onAIResponse?.({ text: full }, { text: extractedText, meta: fileMeta });
+        onAIResponse?.({ text }, { text: extractedText, meta: fileMeta });
         setStatus("done");
         return;
       }
@@ -221,7 +215,7 @@ const LabResultsUploader = forwardRef(function LabResultsUploader(
       });
       if (!res.ok) throw new Error(`Parse ${res.status}`);
       const data = await res.json();
-      if (Array.isArray(data?.labs)) return data.labs;
+      if (Array.isArray(data?.labs)) return data.labs; // [{name, value, unit, low, high, status}]
     } catch (e) {
       // fallback locally
       return parseLabsHeuristics(text);
@@ -229,12 +223,9 @@ const LabResultsUploader = forwardRef(function LabResultsUploader(
     return parseLabsHeuristics(text);
   }
 
-  /** Basic local regex fallback */
+  /** Basic local regex fallback (kept as safety net) */
   function parseLabsHeuristics(text = "") {
-    const lines = String(text)
-      .split(/\r?\n/)
-      .map((s) => s.trim())
-      .filter(Boolean);
+    const lines = String(text).split(/\r?\n/).map((s) => s.trim()).filter(Boolean);
     const labs = [];
     const num = (s) => {
       if (s == null) return NaN;
@@ -244,13 +235,12 @@ const LabResultsUploader = forwardRef(function LabResultsUploader(
 
     const rx = new RegExp(
       String.raw`^([A-Za-z][A-Za-z0-9\s\(\)\/\+\-%\.]+?)\s*[:\-]?\s*` + // name
-        String.raw`(-?\d+(?:[.,]\d+)?)\s*` + // value
-        String.raw`([A-Za-zµ%\/\^\d\.\-]*)\s*` + // unit
-        String.raw`(?:\(\s*(-?\d+(?:[.,]\d+)?)\s*[\-–]\s*(-?\d+(?:[.,]\d+)?)\s*\)` + // (low-high)
-        String.raw`|(?:ref(?:erence)?|range|normal)\s*:?[^0-9\-]*` +
-        String.raw`(-?\d+(?:[.,]\d+)?)\s*[\-–]\s*(-?\d+(?:[.,]\d+)?))?` +
-        String.raw`\s*(?:([HL])\b)?`,
-      "i"
+      String.raw`(-?\d+(?:[.,]\d+)?)\s*` +                              // value
+      String.raw`([A-Za-zµ%\/\^\d\.\-]*)\s*` +                          // unit
+      String.raw`(?:\(\s*(-?\d+(?:[.,]\d+)?)\s*[\-–]\s*(-?\d+(?:[.,]\d+)?)\s*\)` + // (low-high)
+      String.raw`|(?:ref(?:erence)?|range|normal)\s*:?[^0-9\-]*` +
+      String.raw`(-?\d+(?:[.,]\d+)?)\s*[\-–]\s*(-?\d+(?:[.,]\d+)?))?` +
+      String.raw`\s*(?:([HL])\b)?`, 'i'
     );
 
     for (const ln of lines) {
@@ -337,7 +327,7 @@ const LabResultsUploader = forwardRef(function LabResultsUploader(
       setFileMeta(meta);
       onExtracted?.(text, meta);
 
-      // Parse labs and notify for visual rendering
+      // Parse + classify then notify parent for visual card
       try {
         const parsed = await parseWithBackend(text);
         if (Array.isArray(parsed) && parsed.length) {
@@ -357,83 +347,142 @@ const LabResultsUploader = forwardRef(function LabResultsUploader(
     }
   }
 
-  const glyph = (st) => {
-    switch (st) {
-      case "extracting":
-        return "🔎";
-      case "streaming":
-        return "🤖";
-      case "done":
-        return "✅";
-      case "error":
-        return "⚠️";
-      default:
-        return "📄";
-    }
-  };
+  // ====== ORIGINAL CLASSNAMES PRESERVED BELOW ======
+  const glyph = (() => {
+    if (status === "extracting" || status === "streaming") return ""; // spinner instead
+    if (!hasFile) return "+";
+    return hover ? "⭯" : "✓";
+  })();
+
+  const statusText =
+    status === "idle"
+      ? "Drop PDF/Image or click"
+      : status === "extracting"
+      ? "Extracting text…"
+      : status === "streaming"
+      ? "Interpreting result…"
+      : status === "done"
+      ? "Done"
+      : status === "error"
+      ? (error || "Error")
+      : "";
+
+  const containerClass = [
+    "dropzone",
+    dragOver ? "dragOver" : "",
+    hasFile ? "uploaded" : "",
+    status === "extracting" ? "is-extracting" : "",
+    status === "streaming" ? "is-streaming" : "",
+  ]
+    .filter(Boolean)
+    .join(" ");
 
   return (
-    <div
-      className={[
-        "labs-uploader",
-        dense ? "dense" : "",
-        dragOver ? "drag" : "",
-        className,
-      ].join(" ")}
-      onDragOver={(e) => {
-        e.preventDefault();
-        setDragOver(true);
-      }}
-      onDragLeave={() => setDragOver(false)}
-      onDrop={(e) => {
-        e.preventDefault();
-        setDragOver(false);
-        const f = e.dataTransfer.files?.[0];
-        if (f) handleFile(f);
-      }}
-      title="Drop a PDF/image or click to upload"
-      onClick={(e) => {
-        if (e.target?.tagName?.toLowerCase() !== "input") {
-          inputRef.current?.click();
-        }
-      }}
-      onMouseEnter={() => setHover(true)}
-      onMouseLeave={() => setHover(false)}
-    >
-      <input
-        ref={inputRef}
-        type="file"
-        accept={[".pdf", "image/*"].join(",")}
-        style={{ display: "none" }}
-        onChange={(e) => {
-          const file = e.target.files?.[0];
-          if (file) handleFile(file);
-          e.target.value = "";
-        }}
-      />
+    <div className={`lab-uploader ${dense ? "dense" : ""} ${className || ""}`}>
+      <div className="file-upload">
+        <p className="upload-label">
+          <label>Please upload lab result</label>
+        </p>
 
-      <div className="labs-uploader__inner">
-        <div className="labs-uploader__glyph">{glyph(status)}</div>
-        <div className="labs-uploader__text">
-          <div className="labs-uploader__title">
-            {status === "extracting"
-              ? "Extracting text..."
-              : status === "streaming"
-              ? "Asking the doctor..."
-              : "Upload Lab Results"}
-          </div>
-          <div className="labs-uploader__sub">
-            PDF / PNG / JPG / WEBP / TIFF — up to {PROVIDER_MAX_MB} MB for images
-          </div>
+        {/* Square dashed dropzone */}
+        <div
+          className={containerClass}
+          onDragOver={(e) => {
+            e.preventDefault();
+            setDragOver(true);
+          }}
+          onDragLeave={() => setDragOver(false)}
+          onDrop={(e) => {
+            e.preventDefault();
+            setDragOver(false);
+            const f = e.dataTransfer?.files?.[0];
+            if (f) handleFile(f);
+          }}
+          onClick={() => inputRef.current?.click()}
+          onMouseEnter={() => setHover(true)}
+          onMouseLeave={() => setHover(false)}
+          role="button"
+          tabIndex={0}
+          onKeyDown={(e) =>
+            (e.key === "Enter" || e.key === " ") && inputRef.current?.click()
+          }
+          aria-label="Upload lab result file"
+        >
+          {(status === "extracting" || status === "streaming") ? (
+            <div className="ring" aria-hidden="true" />
+          ) : (
+            <span className="glyph">{glyph}</span>
+          )}
         </div>
-        <button className="labs-uploader__btn" type="button">
-          Choose file
-        </button>
+
+        {/* Hidden input (original class name) */}
+        <input
+          ref={inputRef}
+          type="file"
+          accept=".pdf,image/*"
+          className="file-input"
+          onChange={(e) => {
+            const f = e.target.files?.[0];
+            if (f) handleFile(f);
+            e.target.value = ""; // allow re-choosing same file
+          }}
+        />
+
+        {/* Animated status line */}
+        <div
+          className={[
+            "status-line",
+            status === "extracting" ? "s-extracting" : "",
+            status === "streaming" ? "s-streaming" : "",
+            status === "error" ? "s-error" : "",
+            status === "done" ? "s-done" : "",
+          ]
+            .filter(Boolean)
+            .join(" ")}
+          aria-live="polite"
+        >
+          <span className="status-text">{statusText}</span>
+          {(status === "extracting" || status === "streaming") && (
+            <span className="dots">
+              <i />
+              <i />
+              <i />
+            </span>
+          )}
+        </div>
+
+        {status === "error" && error && (
+          <div className="error" role="alert">
+            {error}
+          </div>
+        )}
       </div>
 
-      {!!error && (
-        <div className="labs-uploader__error" role="alert">
-          {error}
+      {/* Optional manual-send mode (kept with original class names) */}
+      {!autoSend && extractedText && (
+        <div className="extracted">
+          <div className="extracted-head">
+            <strong>Extracted text</strong>
+            <span className="badge">Ready to send</span>
+          </div>
+          <textarea
+            value={extractedText}
+            onChange={(e) => setExtractedText(e.target.value)}
+            spellCheck={false}
+          />
+          <button
+            className="send-btn"
+            onClick={() =>
+              postToStream(
+                onBeforeSendToAI
+                  ? onBeforeSendToAI(extractedText, fileMeta)
+                  : extractedText,
+                fileMeta
+              )
+            }
+          >
+            Send to AI
+          </button>
         </div>
       )}
     </div>
@@ -441,6 +490,7 @@ const LabResultsUploader = forwardRef(function LabResultsUploader(
 });
 
 export default LabResultsUploader;
+
 
 
 

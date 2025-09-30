@@ -25,6 +25,23 @@ import { Howl } from "howler";
 let localStream;
 const BACKEND_BASE = "https://ai-doctor-assistant-backend-server.onrender.com";
 
+// ADDED: CSS overrides to force fixed-position components into the drawer's flex layout.
+const drawerComponentOverrides = `
+  .tool-wrapper .record-case-btn-left,
+  .tool-wrapper .record-timer-fixed,
+  .tool-wrapper .labs-uploader-fixed {
+    position: relative !important;
+    left: auto !important;
+    bottom: auto !important;
+    transform: none !important;
+    margin: 0 !important;
+    z-index: 1 !important;
+  }
+  .tool-wrapper .labs-uploader-fixed {
+    width: 150px; /* Match original width */
+  }
+`;
+
 /** === Simple end-of-stream Markdown normalization ===
  * - Remove exact consecutive duplicate lines
  * - Collapse >1 blank line to a single blank line
@@ -32,11 +49,11 @@ const BACKEND_BASE = "https://ai-doctor-assistant-backend-server.onrender.com";
  */
 function normalizeMarkdown(input = "") {
   const lines = String(input).split(/\r?\n/);
-
   const out = [];
   let prev = "";
   for (let raw of lines) {
-    let line = raw.replace(/\s+$/g, ""); // rtrim
+    let line = raw.replace(/\s+$/g, "");
+    // rtrim
     // Normalize bullets: 1) -> 1. , * -> - , • -> -
     line = line
       .replace(/^(\s*)\d+\)\s+/g, "$11. ")
@@ -87,19 +104,16 @@ const Chat = () => {
   const scrollAnchorRef = useRef(null);
   const audioPlayerRef = useRef(null);
   const toggleSfxRef = useRef(null);
-
   const [sessionId] = useState(() => {
     const id = localStorage.getItem("sessionId") || crypto.randomUUID();
     localStorage.setItem("sessionId", id);
     return id;
   });
-
   const liveText = useLiveTranscriptStore((s) => s.text);
   const isStreaming = useLiveTranscriptStore((s) => s.isStreaming);
 
   const liveIdxRef = useRef(null);
   const finalizeTimerRef = useRef(null);
-
   useEffect(() => {
     toggleSfxRef.current = new Howl({
       src: ["/assistant.mp3"], // from /public
@@ -114,11 +128,9 @@ const Chat = () => {
       } catch {}
     };
   }, []);
-
   useEffect(() => {
     scrollAnchorRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [chats, liveText, isStreaming]);
-
   useEffect(() => {
     return () => {
       micStream?.getTracks().forEach((track) => track.stop());
@@ -127,7 +139,6 @@ const Chat = () => {
       setIsMicActive(false);
     };
   }, [dataChannel, micStream, peerConnection]);
-
   // live transcript bubbles (unchanged)
   useEffect(() => {
     if (isStreaming && finalizeTimerRef.current) {
@@ -176,7 +187,6 @@ const Chat = () => {
       }
     };
   }, [isStreaming, liveText]);
-
   // Voice assistant (unchanged)
   const startWebRTC = async () => {
     if (peerConnection || connectionStatus === "connecting") return;
@@ -191,7 +201,6 @@ const Chat = () => {
       const pc = new RTCPeerConnection({
         iceServers: [{ urls: "stun:stun.l.google.com:19302" }],
       });
-
       pc.ontrack = (event) => {
         const [stream] = event.streams;
         if (!audioPlayerRef.current) return;
@@ -225,7 +234,6 @@ const Chat = () => {
       stream
         .getAudioTracks()
         .forEach((track) => pc.addTrack(track, localStream));
-
       const channel = pc.createDataChannel("response");
       channel.onopen = () => {
         setConnectionStatus("connected");
@@ -255,7 +263,6 @@ const Chat = () => {
         setConnectionStatus("error");
         setIsMicActive(false);
       };
-
       let pcmBuffer = new ArrayBuffer(0);
       channel.onmessage = async (event) => {
         const msg = JSON.parse(event.data);
@@ -371,7 +378,6 @@ const Chat = () => {
       setIsMicActive(false);
     }
   };
-
   const toggleMic = () => {
     if (connectionStatus === "idle" || connectionStatus === "error") {
       startWebRTC();
@@ -436,7 +442,8 @@ const Chat = () => {
     // subtle click/toggle sound on mic start
     try {
       if (toggleSfxRef.current) {
-        toggleSfxRef.current.stop(); // ensure fresh playback
+        toggleSfxRef.current.stop();
+        // ensure fresh playback
         toggleSfxRef.current.play();
       }
     } catch {}
@@ -445,15 +452,12 @@ const Chat = () => {
   // === Classic text chat → backend /stream (unchanged except normalize at end) ===
   const handleNewMessage = async ({ text, skipEcho = false }) => {
     if (!text || !text.trim()) return;
-
     if (!skipEcho) setChats((prev) => [...prev, { msg: text, who: "me" }]);
-
     const res = await fetch(`${BACKEND_BASE}/stream`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ message: text, session_id: sessionId }),
     });
-
     if (!res.ok || !res.body) {
       setChats((prev) => [
         ...prev,
@@ -471,7 +475,6 @@ const Chat = () => {
       const { value, done } = await reader.read();
       if (done) break;
       const chunk = decoder.decode(value, { stream: true });
-
       if (isFirstChunk) {
         setChats((prev) => [...prev, { msg: "", who: "bot", streaming: true }]);
         isFirstChunk = false;
@@ -511,7 +514,6 @@ const Chat = () => {
     }
     const after = message.slice(lastIndex);
     if (after) parts.push({ type: "text", content: after });
-
     return parts.map((part, idx) =>
       part.type === "mermaid" ? (
         <CollapsibleDiagram chart={part.content.trim()} key={idx} />
@@ -581,6 +583,7 @@ const Chat = () => {
         }
         updated[updated.length - 1].msg =
           (updated[updated.length - 1].msg || "") + chunk;
+
         return updated;
       });
       return;
@@ -593,16 +596,15 @@ const Chat = () => {
           if (last.streaming) last.streaming = false;
           last.msg = normalizeMarkdown(last.msg);
         }
+
         return updated;
       });
     }
   };
-
   /* ===================== ADDED: Labs uploader integration ===================== */
 
   // Uploader ref to programmatically open the file chooser (fixed widget)
   const uploaderRef = useRef(null);
-
   // Stream buffer for OCR->AI analysis coming from either uploader (fixed or inline)
   const labsStreamingRef = useRef(false);
   const labsBufferRef = useRef("");
@@ -615,7 +617,6 @@ const Chat = () => {
     }
     return "";
   })();
-
   function wantsLabs(text) {
     const t = (text || "").toLowerCase();
     return (
@@ -629,7 +630,6 @@ const Chat = () => {
   // === NEW: token constants for inline uploader
   const LABS_TOKEN_RE = /\[request_labs\]/i;
   const LABS_TOKEN_RE_GLOBAL = /\[request_labs\]/gi;
-
   // Strip the inline uploader token(s) out of a specific bubble so it vanishes
   const stripLabsTokenFromBubble = (bubbleIdx) => {
     setChats((prev) => {
@@ -645,7 +645,6 @@ const Chat = () => {
       return arr;
     });
   };
-
   /* =================== END ADDED: Labs uploader integration =================== */
 
   if (isVoiceMode) {
@@ -674,6 +673,7 @@ const Chat = () => {
             >
               <FaMicrophoneAlt />
             </button>
+
             <button className="closed-btn" onClick={closeVoiceSession}>
               ✖
             </button>
@@ -726,12 +726,12 @@ const Chat = () => {
             onComplete={(fullText) => {
               // Ensure the uploader is gone from THIS bubble when complete
               stripLabsTokenFromBubble(bubbleIdx);
-
               setChats((prev) => {
                 const updated = [...prev];
                 if (labsStreamingRef.current) {
                   labsStreamingRef.current = false;
                   const last = updated[updated.length - 1];
+
                   if (last && last.streaming) {
                     last.streaming = false;
                     last.msg = normalizeMarkdown(fullText || "");
@@ -753,6 +753,7 @@ const Chat = () => {
 
   return (
     <div className="chat-layout">
+      <style>{drawerComponentOverrides}</style>
       <audio ref={audioPlayerRef} playsInline style={{ display: "none" }} />
       <div className="chat-content">
         {chats.map((chat, index) => (
@@ -785,130 +786,196 @@ const Chat = () => {
         🎙️
       </button>
 
-      <VoiceRecorderPanel
-        transcribeUrl={`${BACKEND_BASE}/transcribe`}
-        opinionUrl={`${BACKEND_BASE}/case-second-opinion-stream`}
-        fileFieldName="audio_data"
-        anchorLeft={72}
-        anchorBottom={96}
-        onOpinion={handleOpinionStream}
-        onTranscriptReady={handleAssistantContextTranscript}
-      />
+      {/* =================== NEW: Drawer containing tools =================== */}
+      <DrawComponent>
+        {/* Tool 1: Voice Recorder Panel */}
+        <div className="tool-wrapper">
+          <VoiceRecorderPanel
+            transcribeUrl={`${BACKEND_BASE}/transcribe`}
+            opinionUrl={`${BACKEND_BASE}/case-second-opinion-stream`}
+            fileFieldName="audio_data"
+            onOpinion={handleOpinionStream}
+            onTranscriptReady={handleAssistantContextTranscript}
+          />
+        </div>
 
-      {/* =================== Existing fixed bottom-left uploader & prompt =================== */}
-      <div
-        className="labs-uploader-fixed"
-        style={{
-          position: "fixed",
-          zIndex: 60,
-          display: "grid",
-        }}
-      >
-        {wantsLabs(lastBotText) && (
+        {/* Tool 2: Lab Results Uploader */}
+        <div className="tool-wrapper">
           <div
-            className="labs-prompt"
-            style={{
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "space-between",
-              gap: 10,
-              padding: "10px 12px",
-              borderRadius: 12,
-              background: "rgba(255, 235, 59, 0.12)",
-              border: "1px solid rgba(255, 193, 7, 0.35)",
-              boxShadow: "0 4px 16px rgba(0,0,0,.06)",
-            }}
+            className="labs-uploader-fixed"
           >
-            <div style={{ display: "grid", gap: 2 }}>
-              <div style={{ fontWeight: 700, fontSize: 13 }}>
-                Lab results requested
+            {wantsLabs(lastBotText) && (
+              <div
+                className="labs-prompt"
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "space-between",
+                  gap: 10,
+                  padding: "10px 12px",
+                  borderRadius: 12,
+                  background: "rgba(255, 235, 59, 0.12)",
+                  border: "1px solid rgba(255, 193, 7, 0.35)",
+                  boxShadow: "0 4px 16px rgba(0,0,0,.06)",
+                }}
+              >
+                <div style={{ display: "grid", gap: 2 }}>
+                  <div style={{ fontWeight: 700, fontSize: 13 }}>
+                    Lab results requested
+                  </div>
+                  <div style={{ fontSize: 12, opacity: 0.8 }}>
+                    Attach a PDF/image to interpret instantly.
+                  </div>
+                </div>
+                <button
+                  style={{
+                    padding: "8px 12px",
+                    borderRadius: 10,
+                    border: 0,
+                    cursor: "pointer",
+                    background: "#0a66c2",
+                    color: "#fff",
+                    fontWeight: 600,
+                  }}
+                  onClick={() => uploaderRef.current?.open()}
+                >
+                  Upload
+                </button>
               </div>
-              <div style={{ fontSize: 12, opacity: 0.8 }}>
-                Attach a PDF/image to interpret instantly.
-              </div>
-            </div>
-            <button
-              style={{
-                padding: "8px 12px",
-                borderRadius: 10,
-                border: 0,
-                cursor: "pointer",
-                background: "#0a66c2",
-                color: "#fff",
-                fontWeight: 600,
-              }}
-              onClick={() => uploaderRef.current?.open()}
-            >
-              Upload
-            </button>
-          </div>
-        )}
+            )}
 
-        <LabResultsUploader
-          ref={uploaderRef}
-          autoSend={true}
-          ocrLanguage="eng" // switch to "ara" for Arabic reports
-          engine="2"
-          onBeforeSendToAI={(text, meta) =>
-            [
-              "You are a clinical AI assistant.",
-              "You are given OCR-extracted lab results below.",
-              "Summarize abnormal values (with units), compare to provided normal ranges, flag critical values,",
-              "and give a concise, guideline-aligned interpretation.",
-              `SOURCE FILE: ${meta?.filename || "Unknown"}`,
-              "",
-              "=== LAB RESULTS (OCR) ===",
-              text,
-            ].join("\n")
-          }
-          onAIStreamToken={(chunk) => {
-            // Start streaming a new bot message on first token
-            if (!labsStreamingRef.current) {
-              labsStreamingRef.current = true;
-              labsBufferRef.current = "";
-              setChats((prev) => [
-                ...prev,
-                { msg: "", who: "bot", streaming: true },
-              ]);
-            }
-            labsBufferRef.current += String(chunk || "");
-            setChats((prev) => {
-              const updated = [...prev];
-              const last = updated[updated.length - 1];
-              if (last && last.streaming) last.msg = labsBufferRef.current;
-              return updated;
-            });
-          }}
-          onAIResponse={(payload) => {
-            const full =
-              payload?.text ??
-              (typeof payload === "string" ? payload : JSON.stringify(payload));
-            setChats((prev) => {
-              const updated = [...prev];
-              if (labsStreamingRef.current) {
-                labsStreamingRef.current = false;
-                const last = updated[updated.length - 1];
-                if (last && last.streaming) {
-                  last.streaming = false;
-                  last.msg = normalizeMarkdown(full || "");
-                  return updated;
-                }
+            <LabResultsUploader
+              ref={uploaderRef}
+              autoSend={true}
+              ocrLanguage="eng" // switch to "ara" for Arabic reports
+              engine="2"
+              onBeforeSendToAI={(text, meta) =>
+                [
+                  "You are a clinical AI assistant.",
+                  "You are given OCR-extracted lab results below.",
+                  "Summarize abnormal values (with units), compare to provided normal ranges, flag critical values,",
+                  "and give a concise, guideline-aligned interpretation.",
+                  `SOURCE FILE: ${meta?.filename || "Unknown"}`,
+                  "",
+                  "=== LAB RESULTS (OCR) ===",
+                  text,
+                ].join("\n")
               }
-              // If no streaming occurred, just append a bot message
-              return [
-                ...updated,
-                { msg: normalizeMarkdown(full || ""), who: "bot" },
-              ];
-            });
-          }}
-        />
-      </div>
-      {/* ================= END fixed uploader ================= */}
+              onAIStreamToken={(chunk) => {
+                // Start streaming a new bot message on first token
+                if (!labsStreamingRef.current) {
+                  labsStreamingRef.current = true;
+                  labsBufferRef.current = "";
+                  setChats((prev) => [
+                    ...prev,
+                    { msg: "", who: "bot", streaming: true },
+                  ]);
+                }
+                labsBufferRef.current += String(chunk || "");
+                setChats((prev) => {
+                  const updated = [...prev];
+                  const last = updated[updated.length - 1];
+                  if (last && last.streaming)
+                    last.msg = labsBufferRef.current;
+                  return updated;
+                });
+              }}
+              onAIResponse={(payload) => {
+                const full =
+                  payload?.text ??
+                  (typeof payload === "string"
+                    ? payload
+                    : JSON.stringify(payload));
+                setChats((prev) => {
+                  const updated = [...prev];
+                  if (labsStreamingRef.current) {
+                    labsStreamingRef.current = false;
+                    const last = updated[updated.length - 1];
+                    if (last && last.streaming) {
+                      last.streaming = false;
+                      last.msg = normalizeMarkdown(full || "");
+                      return updated;
+                    }
+                  }
+                  // If no streaming occurred, just append a bot message
+                  return [
+                    ...updated,
+                    { msg: normalizeMarkdown(full || ""), who: "bot" },
+                  ];
+                });
+              }}
+            />
+          </div>
+        </div>
+      </DrawComponent>
+      {/* ================= END Drawer ================= */}
     </div>
   );
 };
 
 export default Chat;
+
+// ===== NEW: Drawer Component for Tools =====
+const DrawComponent = ({ children }) => {
+  const [isOpen, setIsOpen] = useState(false);
+
+  return (
+    <div
+      style={{ position: "fixed", bottom: "25px", left: "25px", zIndex: 100 }}
+    >
+      {/* Animated content panel */}
+      <AnimatePresence>
+        {isOpen && (
+          <motion.div
+            initial={{ opacity: 0, y: 50, scale: 0.9 }}
+            animate={{ opacity: 1, y: 0, scale: 1 }}
+            exit={{ opacity: 0, y: 50, scale: 0.9 }}
+            transition={{ duration: 0.3, ease: "easeInOut" }}
+            style={{
+              minWidth: "550px", // Increased width
+              padding: "24px",
+              background: "rgba(255, 255, 255, 0.9)",
+              backdropFilter: "blur(10px)",
+              borderRadius: "16px",
+              boxShadow: "0 8px 30px rgba(0,0,0,0.12)",
+              border: "1px solid rgba(0,0,0,0.08)",
+              display: "flex",
+              gap: "24px",
+              alignItems: "center",
+              marginBottom: "12px",
+            }}
+          >
+            {children}
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* Toggle Handle */}
+      <button
+        onClick={() => setIsOpen((prev) => !prev)}
+        style={{
+          width: "56px",
+          height: "56px",
+          borderRadius: "50%",
+          border: "none",
+          background: "#3750D8",
+          color: "white",
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          fontSize: "24px",
+          cursor: "pointer",
+          boxShadow: "0 4px 15px rgba(0,0,0,0.2)",
+          transition: "transform 0.2s, background-color 0.2s",
+          float: "left", // Position handle on the left
+        }}
+        title="Toggle Tools"
+      >
+        {isOpen ? "✖" : "🛠️"}
+      </button>
+    </div>
+  );
+};
 
 /* ==== Helpers (unchanged) ==== */
 const CollapsibleDiagram = ({ chart }) => {
@@ -942,7 +1009,6 @@ const CollapsibleDiagram = ({ chart }) => {
 /* ===== Compact inline card with uploader for bot bubble (auto-vanishes after use) ===== */
 function InlineLabsCard({ onStreamToken, onComplete }) {
   const localRef = useRef(null);
-
   return (
     <div
       style={{

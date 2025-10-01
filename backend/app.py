@@ -80,58 +80,113 @@ def _safe_json_dict(text: str):
     return None
 
 app = Flask(__name__)
-CORS(app, resources={
-    r"/*": {
-        "origins": [
-            "https://ai-doctor-assistant-app-dev.onrender.com",
-            "http://localhost:3000"
-        ],
-    r"/api/rtc-transcribe-connect": {
-        "origins": [
-            "https://ai-doctor-assistant-app-dev.onrender.com",
-            "http://localhost:3000"
-                ],
-        "methods": ["GET", "POST", "OPTIONS"],
-        "allow_headers": ["Content-Type", "Authorization"],
-        "supports_credentials": True
-    },
-    r"/analyze-form-case-stream": {
-        "origins": [
-            "https://ai-doctor-assistant-app-dev.onrender.com",
-            "http://localhost:3000"
-        ],
-        "methods": ["POST"],
-        "allow_headers": ["Content-Type", "Authorization"],
-        "supports_credentials": True
-    },
-    r"api/rtc-transcribe-nodes-connect": {
-        "origins": [
-            "https://ai-doctor-assistant-app-dev.onrender.com",
-            "http://localhost:3000"
-        ],
-        "methods": ["POST"],
-        "allow_headers": ["Content-Type", "Authorization"],
-        "supports_credentials": True
-    },
-    r"ocr": {
-        "origins": [
-            "https://ai-doctor-assistant-app-dev.onrender.com",
-            "http://localhost:3000"
-        ],
-        "methods": ["POST"],
-        "allow_headers": ["Content-Type", "Authorization"],
-        "supports_credentials": True
-    }},
-    r"/api/ocr": {
-        "origins": [
-            "https://ai-doctor-assistant-app-dev.onrender.com",
-            "http://localhost:3000"
-        ],
-        "methods": ["POST"],
-        "allow_headers": ["Content-Type", "Authorization"],
-        "supports_credentials": True
+from flask_cors import CORS
+
+CORS(
+    app,
+    resources={
+        # Default policy (applies to everything unless a more specific rule below overrides it)
+        r"/*": {
+            "origins": [
+                "https://ai-doctor-assistant-app-dev.onrender.com",
+                "http://localhost:3000",
+            ],
+            "methods": ["GET", "POST", "OPTIONS"],
+            "allow_headers": ["Content-Type", "Authorization", "Accept"],
+            "supports_credentials": True,
+        },
+
+        # --- Existing endpoints (fixed the missing leading / where needed) ---
+
+        r"/api/rtc-transcribe-connect": {
+            "origins": [
+                "https://ai-doctor-assistant-app-dev.onrender.com",
+                "http://localhost:3000",
+            ],
+            "methods": ["GET", "POST", "OPTIONS"],
+            "allow_headers": ["Content-Type", "Authorization", "Accept"],
+            "supports_credentials": True,
+        },
+
+        r"/analyze-form-case-stream": {
+            "origins": [
+                "https://ai-doctor-assistant-app-dev.onrender.com",
+                "http://localhost:3000",
+            ],
+            "methods": ["POST", "OPTIONS"],
+            "allow_headers": ["Content-Type", "Authorization", "Accept"],
+            "supports_credentials": True,
+        },
+
+        r"/api/rtc-transcribe-nodes-connect": {
+            "origins": [
+                "https://ai-doctor-assistant-app-dev.onrender.com",
+                "http://localhost:3000",
+            ],
+            "methods": ["POST", "OPTIONS"],
+            "allow_headers": ["Content-Type", "Authorization", "Accept"],
+            "supports_credentials": True,
+        },
+
+        r"/ocr": {
+            "origins": [
+                "https://ai-doctor-assistant-app-dev.onrender.com",
+                "http://localhost:3000",
+            ],
+            "methods": ["POST", "OPTIONS"],
+            "allow_headers": ["Content-Type", "Authorization", "Accept"],
+            "supports_credentials": True,
+        },
+
+        r"/api/ocr": {
+            "origins": [
+                "https://ai-doctor-assistant-app-dev.onrender.com",
+                "http://localhost:3000",
+            ],
+            "methods": ["POST", "OPTIONS"],
+            "allow_headers": ["Content-Type", "Authorization", "Accept"],
+            "supports_credentials": True,
+        },
+
+        # --- NEW: Medication checker endpoints (cover all /meds/* routes) ---
+
+        # Regex that matches /meds/parse, /meds/map, /meds/check, /meds/analyze-stream (and any future /meds/*)
+        r"/meds/.*": {
+            "origins": [
+                "https://ai-doctor-assistant-app-dev.onrender.com",
+                "http://localhost:3000",
+            ],
+            "methods": ["POST", "OPTIONS"],
+            "allow_headers": ["Content-Type", "Authorization", "Accept"],
+            "supports_credentials": True,
+        },
+        r"/meds/analyze-stream": {
+            "origins": [
+                "https://ai-doctor-assistant-app-dev.onrender.com",
+                "http://localhost:3000",
+            ],
+            "methods": ["POST", "OPTIONS"],
+            "allow_headers": ["Content-Type", "Authorization", "Accept"],
+            "supports_credentials": True,
+        },
+        r"/meds/parse": {
+            "origins": [
+                "https://ai-doctor-assistant-app-dev.onrender.com",
+                "http://localhost:3000",
+            ],  "methods": ["POST", "OPTIONS"],       "allow_headers": ["Content-Type", "Authorization", "Accept"],
+            "supports_credentials": True,
+        },
+        r"/meds/map": {
+            "origins": [            "https://ai-doctor-assistant-app-dev.onrender.com",
+                "http://localhost:3000",
+            ],
+            "methods": ["POST", "OPTIONS"],
+            "allow_headers": ["Content-Type", "Authorization", "Accept"],
+            "supports_credentials": True,
+        },
     }
-})
+)
+
 # Optional: hard cap request size (mirrors OCR_MAX_BYTES)
 app.config["MAX_CONTENT_LENGTH"] = int(os.environ.get("OCR_MAX_BYTES", 20 * 1024 * 1024))
 
@@ -2194,38 +2249,32 @@ def labs_parse():
         filtered.append(r)
 
     return jsonify({"labs": filtered}), 200
-# ---------- Small utilities ----------
+# ---------- Utilities ----------
 
 def _json_only(s: str):
-    """Robust JSON extractor: handles ```json fences and stray text."""
     try:
         return json.loads(re.sub(r"```json|```", "", (s or "").strip(), flags=re.I))
     except Exception:
         m = re.search(r"\{[\s\S]*\}", s or "")
         if m:
-            try:
-                return json.loads(m.group(0))
-            except Exception:
-                pass
+            try: return json.loads(m.group(0))
+            except Exception: pass
     return None
 
 def _norm_token(s: str) -> str:
-    """Lowercase, collapse spaces/hyphens for simple matching."""
     t = re.sub(r"[^a-z0-9\s\-]", " ", (s or "").lower())
     t = re.sub(r"[\s\-]+", " ", t).strip()
     return t
 
 def _best_generic_for_line(line: str, normalized_list: list[str]) -> str | None:
-    """Heuristic: pick first generic whose token appears in the line/name."""
-    L = _norm_token(line)
+    L = _norm_token(line or "")
     for g in normalized_list or []:
         gt = _norm_token(g)
-        # exact word or substring token match
         if re.search(rf"\b{re.escape(gt)}\b", L) or gt in L:
             return g
     return None
 
-# ---------- Local parsing helpers (non-RxNav) ----------
+# ---------- Local parsing helpers (no external services) ----------
 
 STRENGTH_RX = r"(?P<strength>\d+(?:\.\d+)?)(?:\s*)(?P<unit>mg|mcg|g|iu|units|ml)\b"
 FREQ_WORDS   = r"(once daily|twice daily|three times daily|every\s*\d+\s*(?:h|hr|hrs|hours)|bid|tid|qid|q\d+h|qhs|qam|qpm|prn)"
@@ -2235,12 +2284,12 @@ ROUTE_WORDS  = r"(po|oral|by mouth|iv|im|sc|subcut|subcutaneous|topical|inhalati
 NAME_FIRST_RX = re.compile(
     rf"""
     ^\s*
-    (?P<name>[A-Za-z][A-Za-z0-9\-\s']+)      # name first
-    (?:[,;\s]+{STRENGTH_RX})?                # optional strength/unit
-    (?:[,;\s]+(?P<form>{FORM_WORDS}))?       # optional form
-    (?:[,;\s]+(?P<route>{ROUTE_WORDS}))?     # optional route
-    (?:[,;\s]+(?P<frequency>{FREQ_WORDS}))?  # optional frequency
-    (?:[,;\s]+(?P<prn>prn))?                 # optional prn
+    (?P<name>[A-Za-z][A-Za-z0-9\-\s']+)
+    (?:[,;\s]+{STRENGTH_RX})?
+    (?:[,;\s]+(?P<form>{FORM_WORDS}))?
+    (?:[,;\s]+(?P<route>{ROUTE_WORDS}))?
+    (?:[,;\s]+(?P<frequency>{FREQ_WORDS}))?
+    (?:[,;\s]+(?P<prn>prn))?
     """,
     re.IGNORECASE | re.VERBOSE,
 )
@@ -2254,8 +2303,8 @@ def _normalize_lines(text: str) -> list[str]:
     lines = [x.strip() for x in re.split(r"[\r\n]+", text or "") if x.strip()]
     out = []
     for ln in lines:
-        ln = re.sub(r"^\s*[\-\*\u2022]\s*", "", ln)  # bullets
-        ln = re.sub(r"^\s*\d+\.\s*", "", ln)         # numbering
+        ln = re.sub(r"^\s*[\-\*\u2022]\s*", "", ln)
+        ln = re.sub(r"^\s*\d+\.\s*", "", ln)
         out.append(ln)
     return out
 
@@ -2272,45 +2321,38 @@ def _parse_line(line: str) -> dict | None:
         "route": _clean_str(d.get("route")),
         "frequency": _clean_str(d.get("frequency")),
         "prn": True if (d.get("prn") or "").lower() == "prn" else False,
-        "raw": line.strip(),
+        "raw": (line or "").strip(),
     }
 
-# ---------- Build a dedicated Drug RAG chain (same Qdrant/vector_store) ----------
+# ---------- Dedicated Drug RAG chain (Qdrant-backed) ----------
 
 def get_drug_context_retriever_chain():
     llm = ChatOpenAI(model=os.environ.get("DRUG_QUERY_MODEL", "gpt-4o-mini"))
-    retriever = vector_store.as_retriever()  # uses your existing Qdrant collection
+    retriever = vector_store.as_retriever()
     query_prompt = ChatPromptTemplate.from_messages([
         MessagesPlaceholder("chat_history"),
         ("user", "{input}"),
         ("user",
-         "Generate one focused search query to retrieve authoritative medication/interaction content "
-         "(drug monographs, classes, mechanisms like CYP/UGT/P-gp, contraindications, dosing). "
-         "Prefer generic names, include class/mechanism terms when helpful.")
+         "Generate one focused query for authoritative medication/interaction sources "
+         "(generic names, classes, mechanisms like CYP/UGT/P-gp, contraindications, dosing).")
     ])
     return create_history_aware_retriever(llm, retriever, query_prompt)
 
 def get_drug_rag_chain():
     retriever_chain = get_drug_context_retriever_chain()
     llm = ChatOpenAI(model=os.environ.get("DRUG_REASONING_MODEL", "gpt-4o"))
-    # IMPORTANT: include {context} so the LLM sees retrieved passages
     prompt = ChatPromptTemplate.from_messages([
         ("system", DRUG_SYSTEM_PROMPT),
         MessagesPlaceholder("chat_history"),
         ("user", "{input}"),
-        ("system", "EVIDENCE EXCERPTS (verbatim snippets):\n{context}\n")
+        ("system", "EVIDENCE EXCERPTS:\n{context}\n")
     ])
     stuff = create_stuff_documents_chain(llm, prompt)
     return create_retrieval_chain(retriever_chain, stuff)
 
 drug_rag_chain = get_drug_rag_chain()
 
-# ---------- RAG helpers for this tool ----------
-
 def _rag_name_normalize(lines: list[str]) -> list[str]:
-    """
-    Ask Drug RAG to produce normalized generic names from arbitrary lines.
-    """
     inputs = "\n".join([f"- {ln}" for ln in lines if ln.strip()])
     user = (
         "MODE: NAME NORMALIZATION\n"
@@ -2322,21 +2364,14 @@ def _rag_name_normalize(lines: list[str]) -> list[str]:
     raw = (out.get("answer") or "").strip()
     doc = _json_only(raw) or {}
     arr = doc.get("normalized") or []
-    # keep lowercase generics only, unique but keep order
-    seen = set()
-    norm = []
+    seen, norm = set(), []
     for a in arr:
         g = (a or "").strip().lower()
         if g and g not in seen:
-            seen.add(g)
-            norm.append(g)
+            seen.add(g); norm.append(g)
     return norm
 
 def _rag_interaction_discovery(generics: list[str]) -> dict:
-    """
-    Ask Drug RAG to compute interactions purely from retrieved evidence.
-    Returns dict {"interactions":[...], "citations":[...]} per system schema.
-    """
     if not generics:
         return {"interactions": [], "citations": []}
     bullets = "\n".join([f"- {g}" for g in generics])
@@ -2349,20 +2384,14 @@ def _rag_interaction_discovery(generics: list[str]) -> dict:
     out = drug_rag_chain.invoke({"chat_history": [], "input": user})
     raw = (out.get("answer") or "").strip()
     doc = _json_only(raw) or {}
-    # Normalize shape
     inters = doc.get("interactions") or []
     cits   = doc.get("citations") or []
-    # ensure pair drugs are lowercase
     for it in inters:
         if isinstance(it.get("pair"), list):
-            it["pair"] = [ (p or "").lower() for p in it["pair"] ]
+            it["pair"] = [(p or "").lower() for p in it["pair"]]
     return {"interactions": inters, "citations": cits}
 
 def _rag_narrative_summary(mapped: list[dict], interactions: list[dict], ocr_text: str) -> str:
-    """
-    Ask Drug RAG for a short clinician-friendly narrative summary.
-    """
-    # Prepare a compact representation for the model
     lines = []
     for m in mapped or []:
         parts = [
@@ -2383,7 +2412,7 @@ def _rag_narrative_summary(mapped: list[dict], interactions: list[dict], ocr_tex
         "Produce a concise clinician-facing summary.\n\n"
         "EXTRACTED MEDICATIONS:\n"
         f"{meds_block}\n\n"
-        "INTERACTIONS (JSON excerpt may follow):\n"
+        "INTERACTIONS JSON (truncated):\n"
         f"{json.dumps(interactions, ensure_ascii=False)[:4000]}\n\n"
         "OCR CONTEXT (truncated):\n"
         f"{(ocr_text or '')[:2000]}\n"
@@ -2391,15 +2420,12 @@ def _rag_narrative_summary(mapped: list[dict], interactions: list[dict], ocr_tex
     out = drug_rag_chain.invoke({"chat_history": [], "input": user})
     return (out.get("answer") or "").strip()
 
-# ---------- ENDPOINTS (same routes as before; RAG-only, no external RxNav) ----------
+# ---------- ROUTES (POST + OPTIONS to satisfy preflight) ----------
 
-@app.post("/meds/parse")
+@app.route("/meds/parse", methods=["POST", "OPTIONS"])
 def meds_parse():
-    """
-    Parse free text (OCR'd Rx/CCD/note) into structured medication rows (no external calls).
-    Input: { "text": "..." }
-    Output: { "meds": [ {name,strength,unit,form,route,frequency,prn,raw}... ] }
-    """
+    if request.method == "OPTIONS":
+        return ("", 204)
     data = request.get_json(silent=True) or {}
     text = data.get("text") or ""
     meds = []
@@ -2409,21 +2435,11 @@ def meds_parse():
             meds.append(m)
     return jsonify({"meds": meds})
 
-@app.post("/meds/map")
+@app.route("/meds/map", methods=["POST", "OPTIONS"])
 def meds_map():
-    """
-    Map parsed meds to lowercase generic names using Drug RAG NAME NORMALIZATION.
-    Input:
-      - Either { "meds": [...] } where each item has a "raw" (preferred) or "name"
-      - Or    { "text": "..." } and we will parse first
-    Output:
-      {
-        "mapped": [
-          { ...original fields..., "generic": "amoxicillin", "dup": true|false }
-        ],
-        "normalized": ["amoxicillin","lisinopril", ...]   # convenience echo
-      }
-    """
+    if request.method == "OPTIONS":
+        return ("", 204)
+
     data = request.get_json(silent=True) or {}
     meds = data.get("meds")
     text = data.get("text")
@@ -2436,60 +2452,50 @@ def meds_map():
                 meds.append(m)
 
     meds = meds or []
-    # Prepare lines for normalization (prefer 'raw', fallback to 'name')
-    lines = [ (m.get("raw") or m.get("name") or "").strip() for m in meds ]
-    lines = [ ln for ln in lines if ln ]
-
+    lines = [(m.get("raw") or m.get("name") or "").strip() for m in meds]
+    lines = [ln for ln in lines if ln]
     normalized = _rag_name_normalize(lines)
 
-    # Attach best-guess generic to each entry
     mapped = []
     for m, ln in zip(meds, lines or [""]*len(meds)):
         g = _best_generic_for_line(ln or (m.get("name") or ""), normalized)
-        mapped.append({**m, "generic": g})
+        # Back-compat shim: populate rxnorm with the generic so FE code using rxcui still has a value
+        rxnorm_shim = {"rxcui": g or "", "name": g or (m.get("name") or "")}
+        mapped.append({**m, "generic": g, "rxnorm": rxnorm_shim})
 
-    # Duplicate marking by generic
     counts = {}
     for m in mapped:
-        g = m.get("generic") or ""
+        g = (m.get("generic") or "").strip().lower()
         if not g: continue
         counts[g] = counts.get(g, 0) + 1
     for m in mapped:
-        g = m.get("generic") or ""
+        g = (m.get("generic") or "").strip().lower()
         m["dup"] = bool(g and counts.get(g, 0) > 1)
 
     return jsonify({"mapped": mapped, "normalized": normalized})
 
-@app.post("/meds/check")
+@app.route("/meds/check", methods=["POST", "OPTIONS"])
 def meds_check():
-    """
-    Pure RAG interaction discovery.
-    Input:
-      {
-        "drugs": ["amoxicillin","lisinopril", ...]   # lowercase generics preferred
-        # OR
-        "mapped": [ { "generic":"...", ... }, ... ]  # we will extract generics
-      }
-    Output:
-      {
-        "interactions": [
-          {
-            "pair": ["drug_a","drug_b"],
-            "severity": "Major|Moderate|Minor|Unknown",
-            "description": "...",
-            "sources": [{"title":"..","url":"..."}]
-          }
-        ],
-        "citations": [...]
-      }
-    """
+    if request.method == "OPTIONS":
+        return ("", 204)
+
     data = request.get_json(silent=True) or {}
+    # Accept any of the following payload styles:
+    # 1) {"drugs": ["amoxicillin","lisinopril", ...]}
+    # 2) {"mapped": [ {...,"generic":"amoxicillin"}, ... ]}
+    # 3) {"rxcuis": ["amoxicillin","lisinopril"]}  # treated as generics (BWC)
     drugs = data.get("drugs") or []
     if not drugs:
         mapped = data.get("mapped") or []
-        drugs = [ (m.get("generic") or "").strip().lower() for m in mapped if (m.get("generic") or "").strip() ]
-    # unique in order
-    seen = set(); generics = []
+        if mapped:
+            drugs = [ (m.get("generic") or "").strip().lower()
+                      for m in mapped if (m.get("generic") or "").strip() ]
+    if not drugs:
+        # Back-compat with frontends sending rxcuis (we treat them as generics here)
+        drugs = [ (x or "").strip().lower() for x in (data.get("rxcuis") or []) ]
+
+    # unique, ordered
+    seen, generics = set(), []
     for d in drugs:
         d = (d or "").strip().lower()
         if d and d not in seen:
@@ -2498,41 +2504,30 @@ def meds_check():
     res = _rag_interaction_discovery(generics)
     return jsonify(res)
 
-@app.post("/meds/analyze-stream")
+@app.route("/meds/analyze-stream", methods=["POST", "OPTIONS"])
 def meds_analyze_stream():
-    """
-    Stream a clinician-friendly narrative using Drug RAG (NARRATIVE SUMMARY).
-    Input:
-      {
-        "text": "OCR'd raw text (optional)",
-        "mapped": [ { ... "generic": "amoxicillin", "dup": false }, ... ],
-        "interactions": { "interactions": [...], "citations":[...] }   # optional; if not provided, we can compute
-      }
-    Stream: text/plain (raw chunks)
-    """
+    if request.method == "OPTIONS":
+        return ("", 204)
+
     data = request.get_json(silent=True) or {}
     text = data.get("text") or ""
     mapped = data.get("mapped") or []
     interactions_obj = data.get("interactions")
 
-    # If interactions not provided, try to compute from mapped
     if not interactions_obj:
-        generics = []
-        seen = set()
+        generics, seen = [], set()
         for m in mapped:
             g = (m.get("generic") or "").strip().lower()
             if g and g not in seen:
                 seen.add(g); generics.append(g)
         interactions_obj = _rag_interaction_discovery(generics)
 
-    # Build one-shot narrative prompt (non-stream), but we will stream its final text via generator
     try:
         narrative_text = _rag_narrative_summary(mapped, interactions_obj.get("interactions") or [], text)
     except Exception as e:
         narrative_text = f"[Error generating narrative: {e}]"
 
     def generate():
-        # You can chunk the narrative for smoother UI if desired
         for chunk in re.findall(r".{1,600}", narrative_text, flags=re.S):
             yield chunk
 

@@ -8,8 +8,11 @@ import logging
 import requests
 import re
 import base64
+import hashlib
+import unicodedata
 from werkzeug.exceptions import HTTPException, RequestEntityTooLarge
 from werkzeug.utils import secure_filename
+from typing import List, Dict, Any
 import os.path as osp
 import random
 from dotenv import load_dotenv
@@ -2435,44 +2438,146 @@ def meds_parse():
             meds.append(m)
     return jsonify({"meds": meds})
 
-@app.route("/meds/map", methods=["POST", "OPTIONS"])
+# ====================== helpers for /meds/map (RAG-only) ======================
+
+def _slugify_generic(name: str) -> str:
+    """Deterministic, URL-safe id from a generic name (used as pseudo RxCUI)."""
+    if not name:
+        return ""
+    # normalize accents, collapse spaces, keep alnum+hyphen
+    x = unicodedata.normalize("NFKD", name).encode("ascii", "ignore").decode("ascii")
+    x = re.sub(r"[^a-z0-9]+", "-", x.lower()).strip("-")
+    if not x:
+        # as a last resort, stable short hash
+        x = hashlib.sha1(name.encode("utf-8")).hexdigest()[:12]
+    return x
+
+def _rag_map_meds(meds: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """
+    Use your existing RAG chain to canonicalize meds in one shot.
+    Input 'meds' is the array produced by /meds/parse (name/strength/unit/form/route/frequency/prn/raw).
+    Returns aligned list with canonical 'generic', 'form', 'route', 'strength', 'unit', 'frequency'.
+    """
+    # Build deterministic, index-aligned prompt
+    lines = []
+    for i, m in enumerate(meds):
+        parts = []
+        if m.get("name"): parts.append(f"name={m['name']}")
+        if m.get("strength"): parts.append(f"strength={m['strength']}")
+        if m.get("unit"): parts.append(f"unit={m['unit']}")
+        if m.get("form"): parts.append(f"form={m['form']}")
+        if m.get("route"): parts.append(f"route={m['route']}")
+        if m.get("frequency"): parts.append(f"frequency={m['frequency']}")
+        if m.get("prn"): parts.append("prn=true")
+        raw = m.get("raw") or " ".join(parts) or (m.get("name") or "")
+        lines.append(f"{i}. {raw}".strip())
+
+    # Strict, JSON-only instruction (no brands, lowercase generic)
+    instruction = (
+        "CANONICALIZE MEDICATION LINES.\n"
+        "Return STRICT JSON ONLY as:\n"
+        "{ \"mapped\": [ {\"index\": <int>, \"generic\": <string|null>, "
+        "\"strength\": <string|null>, \"unit\": <string|null>, "
+        "\"form\": <string|null>, \"route\": <string|null>, "
+        "\"frequency\": <string|null>, \"prn\": <bool|null> } ... ] }\n"
+        "Rules:\n"
+        "- generic = lowercase international nonproprietary name (INN), no brand names.\n"
+        "- Do NOT invent values. If unknown/unspecified, use null.\n"
+        "- Keep array aligned to the input by 'index'.\n"
+        "- No extra keys. No markdown. No text outside JSON.\n\n"
+        "Input lines:\n" + "\n".join(lines)
+    )
+
+    try:
+        resp = conversation_rag_chain.invoke({"chat_history": [], "input": instruction})
+        raw = (resp.get("answer") or "").strip()
+        doc = _extract_json_dict(raw) or {}
+        out = doc.get("mapped") or []
+        # sanity: coerce to list of dicts with required keys
+        norm = []
+        for it in out:
+            if not isinstance(it, dict): 
+                continue
+            idx = it.get("index")
+            if idx is None or not isinstance(idx, int) or idx < 0 or idx >= len(meds):
+                continue
+            norm.append({
+                "index": idx,
+                "generic": (it.get("generic") or None),
+                "strength": (it.get("strength") or None),
+                "unit": (it.get("unit") or None),
+                "form": (it.get("form") or None),
+                "route": (it.get("route") or None),
+                "frequency": (it.get("frequency") or None),
+                "prn": bool(it.get("prn")) if it.get("prn") is not None else None,
+            })
+        return norm
+    except Exception:
+        # If the model fails, we return an empty signal and let fallback logic handle it.
+        return []
+
+# ============================== /meds/map (RAG) ===============================
+
+@app.post("/meds/map")
 def meds_map():
-    if request.method == "OPTIONS":
-        return ("", 204)
-
+    """
+    RAG-only canonicalization & duplicate detection.
+    Request: { "meds": [ { name,strength,unit,form,route,frequency,prn,raw } ... ] }
+    Response: { "mapped": [ { name,strength,unit,form,route,frequency,prn, raw,
+                               rxnorm: { rxcui, name }, dup: bool } ... ] }
+    - rxnorm.rxcui is a deterministic slug from generic name (pseudo-RxCUI).
+    - 'dup' is true when multiple entries share the same generic slug.
+    """
     data = request.get_json(silent=True) or {}
-    meds = data.get("meds")
-    text = data.get("text")
+    meds = data.get("meds") or []
+    if not isinstance(meds, list):
+        return jsonify({"error": "meds must be a list"}), 400
 
-    if not meds and text:
-        meds = []
-        for ln in _normalize_lines(text):
-            m = _parse_line(ln)
-            if m and m.get("name"):
-                meds.append(m)
+    # 1) Ask RAG to canonicalize (best effort)
+    rag = _rag_map_meds(meds)
 
-    meds = meds or []
-    lines = [(m.get("raw") or m.get("name") or "").strip() for m in meds]
-    lines = [ln for ln in lines if ln]
-    normalized = _rag_name_normalize(lines)
+    # 2) Merge RAG output into original rows (preserving any parsed fields)
+    merged: List[Dict[str, Any]] = []
+    rag_by_idx = {it["index"]: it for it in rag}
 
-    mapped = []
-    for m, ln in zip(meds, lines or [""]*len(meds)):
-        g = _best_generic_for_line(ln or (m.get("name") or ""), normalized)
-        # Back-compat shim: populate rxnorm with the generic so FE code using rxcui still has a value
-        rxnorm_shim = {"rxcui": g or "", "name": g or (m.get("name") or "")}
-        mapped.append({**m, "generic": g, "rxnorm": rxnorm_shim})
+    for i, m in enumerate(meds):
+        r = rag_by_idx.get(i, {})
+        # pick canonical generic if available; else fall back to parsed name (lowercased)
+        generic = (r.get("generic") or (m.get("name") or "").strip().lower()) or None
+        rxcui = _slugify_generic(generic or (m.get("name") or ""))
 
-    counts = {}
-    for m in mapped:
-        g = (m.get("generic") or "").strip().lower()
-        if not g: continue
-        counts[g] = counts.get(g, 0) + 1
-    for m in mapped:
-        g = (m.get("generic") or "").strip().lower()
-        m["dup"] = bool(g and counts.get(g, 0) > 1)
+        merged.append({
+            # original parsed fields from /meds/parse
+            "name": m.get("name"),
+            "strength": r.get("strength") if r.get("strength") is not None else m.get("strength"),
+            "unit": r.get("unit") if r.get("unit") is not None else m.get("unit"),
+            "form": r.get("form") if r.get("form") is not None else m.get("form"),
+            "route": r.get("route") if r.get("route") is not None else m.get("route"),
+            "frequency": r.get("frequency") if r.get("frequency") is not None else m.get("frequency"),
+            "prn": r.get("prn") if r.get("prn") is not None else bool(m.get("prn")),
+            "raw": m.get("raw") or m.get("name"),
 
-    return jsonify({"mapped": mapped, "normalized": normalized})
+            # canonical handle used by the FE for de-dup & grouping
+            "rxnorm": {
+                "rxcui": rxcui or None,          # pseudo id (stable)
+                "name": generic or m.get("name") # canonical display
+            },
+        })
+
+    # 3) Duplicate marking by canonical id (slug)
+    bucket: Dict[str, List[int]] = {}
+    for idx, m in enumerate(merged):
+        key = (m.get("rxnorm") or {}).get("rxcui") or ""
+        if not key:
+            continue
+        bucket.setdefault(key, []).append(idx)
+
+    for idxs in bucket.values():
+        if len(idxs) > 1:
+            for i in idxs:
+                merged[i]["dup"] = True
+
+    return jsonify({"mapped": merged}), 200
 
 @app.route("/meds/check", methods=["POST", "OPTIONS"])
 def meds_check():

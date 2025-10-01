@@ -6,7 +6,6 @@ from datetime import datetime
 import json
 import logging
 import requests
-from typing import List, Dict, Any, Optional, Generator
 import re
 import base64
 from werkzeug.exceptions import HTTPException, RequestEntityTooLarge
@@ -19,6 +18,7 @@ from flask_cors import CORS
 import qdrant_client
 from openai import OpenAI
 from prompts.prompt import engineeredprompt
+from prompts.drug_system_prompt import DRUG_SYSTEM_PROMPT
 from langchain_openai import ChatOpenAI, OpenAIEmbeddings
 from langchain_qdrant import Qdrant
 from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
@@ -2194,17 +2194,43 @@ def labs_parse():
         filtered.append(r)
 
     return jsonify({"labs": filtered}), 200
-OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
-OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-4o-mini")
+# ---------- Small utilities ----------
 
-RXNAV_BASE = "https://rxnav.nlm.nih.gov/REST"
+def _json_only(s: str):
+    """Robust JSON extractor: handles ```json fences and stray text."""
+    try:
+        return json.loads(re.sub(r"```json|```", "", (s or "").strip(), flags=re.I))
+    except Exception:
+        m = re.search(r"\{[\s\S]*\}", s or "")
+        if m:
+            try:
+                return json.loads(m.group(0))
+            except Exception:
+                pass
+    return None
 
-# ----------------------------- Helpers -----------------------------
+def _norm_token(s: str) -> str:
+    """Lowercase, collapse spaces/hyphens for simple matching."""
+    t = re.sub(r"[^a-z0-9\s\-]", " ", (s or "").lower())
+    t = re.sub(r"[\s\-]+", " ", t).strip()
+    return t
+
+def _best_generic_for_line(line: str, normalized_list: list[str]) -> str | None:
+    """Heuristic: pick first generic whose token appears in the line/name."""
+    L = _norm_token(line)
+    for g in normalized_list or []:
+        gt = _norm_token(g)
+        # exact word or substring token match
+        if re.search(rf"\b{re.escape(gt)}\b", L) or gt in L:
+            return g
+    return None
+
+# ---------- Local parsing helpers (non-RxNav) ----------
 
 STRENGTH_RX = r"(?P<strength>\d+(?:\.\d+)?)(?:\s*)(?P<unit>mg|mcg|g|iu|units|ml)\b"
-FREQ_WORDS = r"(once daily|twice daily|three times daily|every\s*\d+\s*(?:h|hr|hrs|hours)|bid|tid|qid|q\d+h|qhs|qam|qpm|prn)"
-FORM_WORDS = r"(tablet|tab|capsule|cap|syrup|solution|suspension|patch|injection|cream|ointment|drops|spray)"
-ROUTE_WORDS = r"(po|oral|by mouth|iv|im|sc|subcut|subcutaneous|topical|inhalation|ophthalmic|otic|nasal|rectal|vaginal)"
+FREQ_WORDS   = r"(once daily|twice daily|three times daily|every\s*\d+\s*(?:h|hr|hrs|hours)|bid|tid|qid|q\d+h|qhs|qam|qpm|prn)"
+FORM_WORDS   = r"(tablet|tab|capsule|cap|syrup|solution|suspension|patch|injection|cream|ointment|drops|spray)"
+ROUTE_WORDS  = r"(po|oral|by mouth|iv|im|sc|subcut|subcutaneous|topical|inhalation|ophthalmic|otic|nasal|rectal|vaginal)"
 
 NAME_FIRST_RX = re.compile(
     rf"""
@@ -2219,234 +2245,298 @@ NAME_FIRST_RX = re.compile(
     re.IGNORECASE | re.VERBOSE,
 )
 
-def _clean(s: Optional[str]) -> Optional[str]:
-  if s is None: return None
-  t = re.sub(r"\s+", " ", s).strip()
-  return t or None
+def _clean_str(s: str | None) -> str | None:
+    if s is None: return None
+    t = re.sub(r"\s+", " ", s).strip()
+    return t or None
 
-def _normalize_lines(text: str) -> List[str]:
-  lines = [x.strip() for x in re.split(r"[\r\n]+", text or "") if x.strip()]
-  out = []
-  for ln in lines:
-    ln = re.sub(r"^\s*[\-\*\u2022]\s*", "", ln)  # bullets
-    ln = re.sub(r"^\s*\d+\.\s*", "", ln)         # numbering
-    out.append(ln)
-  return out
+def _normalize_lines(text: str) -> list[str]:
+    lines = [x.strip() for x in re.split(r"[\r\n]+", text or "") if x.strip()]
+    out = []
+    for ln in lines:
+        ln = re.sub(r"^\s*[\-\*\u2022]\s*", "", ln)  # bullets
+        ln = re.sub(r"^\s*\d+\.\s*", "", ln)         # numbering
+        out.append(ln)
+    return out
 
-def _parse_line(line: str) -> Optional[Dict[str, Any]]:
-  m = NAME_FIRST_RX.search(line)
-  if not m:
-    return None
-  d = m.groupdict()
-  return {
-    "name": _clean(d.get("name")),
-    "strength": _clean(d.get("strength")),
-    "unit": _clean(d.get("unit")),
-    "form": _clean(d.get("form")),
-    "route": _clean(d.get("route")),
-    "frequency": _clean(d.get("frequency")),
-    "prn": True if (d.get("prn") or "").lower() == "prn" else False,
-    "raw": line.strip(),
-  }
+def _parse_line(line: str) -> dict | None:
+    m = NAME_FIRST_RX.search(line or "")
+    if not m:
+        return None
+    d = m.groupdict()
+    return {
+        "name": _clean_str(d.get("name")),
+        "strength": _clean_str(d.get("strength")),
+        "unit": _clean_str(d.get("unit")),
+        "form": _clean_str(d.get("form")),
+        "route": _clean_str(d.get("route")),
+        "frequency": _clean_str(d.get("frequency")),
+        "prn": True if (d.get("prn") or "").lower() == "prn" else False,
+        "raw": line.strip(),
+    }
 
-def rxnav_approximate_term(term: str) -> Optional[Dict[str, Any]]:
-  try:
-    r = requests.get(f"{RXNAV_BASE}/approximateTerm.json", params={"term": term}, timeout=20)
-    r.raise_for_status()
-    data = r.json()
-    cand = (data.get("approximateGroup") or {}).get("candidate") or []
-    if not cand:
-      return None
-    cand = sorted(cand, key=lambda x: int(x.get("rank", 9999)))
-    rxcui = cand[0].get("rxcui")
-    if not rxcui:
-      return None
-    rxname = None
-    try:
-      rr = requests.get(f"{RXNAV_BASE}/rxcui/{rxcui}/properties.json", timeout=20)
-      rr.raise_for_status()
-      rxname = ((rr.json() or {}).get("properties") or {}).get("name")
-    except Exception:
-      pass
-    return {"rxcui": rxcui, "name": rxname}
-  except Exception:
-    return None
+# ---------- Build a dedicated Drug RAG chain (same Qdrant/vector_store) ----------
 
-def rxnav_interactions(rxcuis: List[str]) -> List[Dict[str, Any]]:
-  if len(rxcuis) < 2:
-    return []
-  # RxNav: selections=ID+ID+ID
-  selections = "+".join(rxcuis)
-  r = requests.get(f"{RXNAV_BASE}/interaction/list.json", params={"selections": selections}, timeout=30)
-  r.raise_for_status()
-  data = r.json()
+def get_drug_context_retriever_chain():
+    llm = ChatOpenAI(model=os.environ.get("DRUG_QUERY_MODEL", "gpt-4o-mini"))
+    retriever = vector_store.as_retriever()  # uses your existing Qdrant collection
+    query_prompt = ChatPromptTemplate.from_messages([
+        MessagesPlaceholder("chat_history"),
+        ("user", "{input}"),
+        ("user",
+         "Generate one focused search query to retrieve authoritative medication/interaction content "
+         "(drug monographs, classes, mechanisms like CYP/UGT/P-gp, contraindications, dosing). "
+         "Prefer generic names, include class/mechanism terms when helpful.")
+    ])
+    return create_history_aware_retriever(llm, retriever, query_prompt)
 
-  out = []
-  groups = (data or {}).get("fullInteractionTypeGroup") or []
-  for g in groups:
-    types = g.get("fullInteractionType") or []
-    for t in types:
-      pair = [c.get("minConceptItem", {}).get("rxcui") for c in (t.get("minConcept") or [])]
-      pair = [p for p in pair if p]
-      inters = t.get("interactionPair") or []
-      for ip in inters:
-        sev = ip.get("severity")
-        desc = ip.get("description")
-        sources = []
-        # collect a few source hints if present
-        for ic in ip.get("interactionConcept") or []:
-          src = ic.get("source")
-          if src: sources.append(src)
-        out.append({"pair": pair, "severity": sev, "description": desc, "sources": list(set(sources))})
-  return out
+def get_drug_rag_chain():
+    retriever_chain = get_drug_context_retriever_chain()
+    llm = ChatOpenAI(model=os.environ.get("DRUG_REASONING_MODEL", "gpt-4o"))
+    # IMPORTANT: include {context} so the LLM sees retrieved passages
+    prompt = ChatPromptTemplate.from_messages([
+        ("system", DRUG_SYSTEM_PROMPT),
+        MessagesPlaceholder("chat_history"),
+        ("user", "{input}"),
+        ("system", "EVIDENCE EXCERPTS (verbatim snippets):\n{context}\n")
+    ])
+    stuff = create_stuff_documents_chain(llm, prompt)
+    return create_retrieval_chain(retriever_chain, stuff)
 
-def build_med_prompt(text: Optional[str], mapped: List[Dict[str, Any]], interactions: List[Dict[str, Any]]) -> str:
-  lines = []
-  lines.append("You are a medication safety assistant for clinicians.")
-  lines.append("Task: reconcile meds, identify duplicates, dose range concerns, contraindications, and drug–drug interactions.")
-  lines.append("Return a short, structured summary with severity tags (Major/Moderate/Minor), actions, and citations (RxNav/DailyMed).")
-  lines.append("")
-  lines.append("=== EXTRACTED MEDICATIONS (structured) ===")
-  for m in mapped:
-    rx = m.get("rxnorm") or {}
-    nm = rx.get("name") or m.get("name")
-    parts = [
-      nm or "Unknown",
-      f'{m.get("strength","")}{m.get("unit","")}'.strip(),
-      m.get("form") or "",
-      m.get("route") or "",
-      m.get("frequency") or "",
-      "PRN" if m.get("prn") else "",
-      "(DUPLICATE)" if m.get("dup") else "",
-    ]
-    lines.append(" - " + " • ".join([p for p in parts if p]))
-  lines.append("")
-  lines.append("=== INTERACTIONS (RxNav) ===")
-  if interactions:
-    for it in interactions[:40]:
-      lines.append(f' - Pair {it.get("pair")} • Severity: {it.get("severity")} • {it.get("description")}')
-  else:
-    lines.append(" - None reported.")
-  lines.append("")
-  lines.append("=== OCR TEXT (for context) ===")
-  lines.append((text or "")[:4000])
-  lines.append("")
-  lines.append("Output: 1–2 line executive summary, then bullets: [Severity] Recommendation — Rationale (Source).")
-  return "\n".join(lines)
+drug_rag_chain = get_drug_rag_chain()
 
-# ----------------------------- Routes -----------------------------
+# ---------- RAG helpers for this tool ----------
+
+def _rag_name_normalize(lines: list[str]) -> list[str]:
+    """
+    Ask Drug RAG to produce normalized generic names from arbitrary lines.
+    """
+    inputs = "\n".join([f"- {ln}" for ln in lines if ln.strip()])
+    user = (
+        "MODE: NAME NORMALIZATION\n"
+        "Input medication strings (one per line):\n"
+        f"{inputs}\n\n"
+        "Return STRICT JSON ONLY per schema."
+    )
+    out = drug_rag_chain.invoke({"chat_history": [], "input": user})
+    raw = (out.get("answer") or "").strip()
+    doc = _json_only(raw) or {}
+    arr = doc.get("normalized") or []
+    # keep lowercase generics only, unique but keep order
+    seen = set()
+    norm = []
+    for a in arr:
+        g = (a or "").strip().lower()
+        if g and g not in seen:
+            seen.add(g)
+            norm.append(g)
+    return norm
+
+def _rag_interaction_discovery(generics: list[str]) -> dict:
+    """
+    Ask Drug RAG to compute interactions purely from retrieved evidence.
+    Returns dict {"interactions":[...], "citations":[...]} per system schema.
+    """
+    if not generics:
+        return {"interactions": [], "citations": []}
+    bullets = "\n".join([f"- {g}" for g in generics])
+    user = (
+        "MODE: INTERACTION DISCOVERY\n"
+        "Drugs (generic, lowercase):\n"
+        f"{bullets}\n\n"
+        "Return STRICT JSON ONLY per schema."
+    )
+    out = drug_rag_chain.invoke({"chat_history": [], "input": user})
+    raw = (out.get("answer") or "").strip()
+    doc = _json_only(raw) or {}
+    # Normalize shape
+    inters = doc.get("interactions") or []
+    cits   = doc.get("citations") or []
+    # ensure pair drugs are lowercase
+    for it in inters:
+        if isinstance(it.get("pair"), list):
+            it["pair"] = [ (p or "").lower() for p in it["pair"] ]
+    return {"interactions": inters, "citations": cits}
+
+def _rag_narrative_summary(mapped: list[dict], interactions: list[dict], ocr_text: str) -> str:
+    """
+    Ask Drug RAG for a short clinician-friendly narrative summary.
+    """
+    # Prepare a compact representation for the model
+    lines = []
+    for m in mapped or []:
+        parts = [
+            m.get("generic") or (m.get("name") or "unknown"),
+            f'{m.get("strength","")}{m.get("unit","")}'.strip(),
+            m.get("form") or "",
+            m.get("route") or "",
+            m.get("frequency") or "",
+            "PRN" if m.get("prn") else "",
+            "(dup)" if m.get("dup") else "",
+        ]
+        clean = " • ".join([p for p in parts if p]).strip(" •")
+        lines.append(f"- {clean}")
+    meds_block = "\n".join(lines) or "- (none parsed)"
+
+    user = (
+        "MODE: NARRATIVE SUMMARY\n"
+        "Produce a concise clinician-facing summary.\n\n"
+        "EXTRACTED MEDICATIONS:\n"
+        f"{meds_block}\n\n"
+        "INTERACTIONS (JSON excerpt may follow):\n"
+        f"{json.dumps(interactions, ensure_ascii=False)[:4000]}\n\n"
+        "OCR CONTEXT (truncated):\n"
+        f"{(ocr_text or '')[:2000]}\n"
+    )
+    out = drug_rag_chain.invoke({"chat_history": [], "input": user})
+    return (out.get("answer") or "").strip()
+
+# ---------- ENDPOINTS (same routes as before; RAG-only, no external RxNav) ----------
 
 @app.post("/meds/parse")
 def meds_parse():
-  """
-  Parse free text (OCR'd Rx/CCD/note) into structured medication rows.
-  """
-  data = request.get_json(silent=True) or {}
-  text = data.get("text") or ""
-  meds = []
-  for ln in _normalize_lines(text):
-    m = _parse_line(ln)
-    if m and m.get("name"):
-      meds.append(m)
-  # duplicate marking done after mapping (based on RxCUI/name)
-  return jsonify({"meds": meds})
+    """
+    Parse free text (OCR'd Rx/CCD/note) into structured medication rows (no external calls).
+    Input: { "text": "..." }
+    Output: { "meds": [ {name,strength,unit,form,route,frequency,prn,raw}... ] }
+    """
+    data = request.get_json(silent=True) or {}
+    text = data.get("text") or ""
+    meds = []
+    for ln in _normalize_lines(text):
+        m = _parse_line(ln)
+        if m and m.get("name"):
+            meds.append(m)
+    return jsonify({"meds": meds})
 
 @app.post("/meds/map")
 def meds_map():
-  """
-  Map meds -> RxNorm CUIs (and canonical names).
-  """
-  data = request.get_json(silent=True) or {}
-  meds = data.get("meds") or []
-  mapped = []
-  for m in meds:
-    rx = None
-    qparts = [m.get("name") or ""]
-    if m.get("strength") and m.get("unit"):
-      qparts.append(f'{m["strength"]}{m["unit"]}')
-    if m.get("form"):
-      qparts.append(m["form"])
-    q = " ".join([p for p in qparts if p]).strip()
-    if q:
-      info = rxnav_approximate_term(q)
-      if info:
-        rx = info
-    mapped.append({**m, "rxnorm": rx})
+    """
+    Map parsed meds to lowercase generic names using Drug RAG NAME NORMALIZATION.
+    Input:
+      - Either { "meds": [...] } where each item has a "raw" (preferred) or "name"
+      - Or    { "text": "..." } and we will parse first
+    Output:
+      {
+        "mapped": [
+          { ...original fields..., "generic": "amoxicillin", "dup": true|false }
+        ],
+        "normalized": ["amoxicillin","lisinopril", ...]   # convenience echo
+      }
+    """
+    data = request.get_json(silent=True) or {}
+    meds = data.get("meds")
+    text = data.get("text")
 
-  # mark duplicates: same rxcui (or same normalized name)
-  by_key = {}
-  for i, m in enumerate(mapped):
-    key = (m.get("rxnorm") or {}).get("rxcui") or (m.get("name") or "").lower()
-    if not key:
-      continue
-    by_key.setdefault(key, []).append(i)
-  for idxs in by_key.values():
-    if len(idxs) > 1:
-      for i in idxs:
-        mapped[i]["dup"] = True
+    if not meds and text:
+        meds = []
+        for ln in _normalize_lines(text):
+            m = _parse_line(ln)
+            if m and m.get("name"):
+                meds.append(m)
 
-  return jsonify({"mapped": mapped})
+    meds = meds or []
+    # Prepare lines for normalization (prefer 'raw', fallback to 'name')
+    lines = [ (m.get("raw") or m.get("name") or "").strip() for m in meds ]
+    lines = [ ln for ln in lines if ln ]
+
+    normalized = _rag_name_normalize(lines)
+
+    # Attach best-guess generic to each entry
+    mapped = []
+    for m, ln in zip(meds, lines or [""]*len(meds)):
+        g = _best_generic_for_line(ln or (m.get("name") or ""), normalized)
+        mapped.append({**m, "generic": g})
+
+    # Duplicate marking by generic
+    counts = {}
+    for m in mapped:
+        g = m.get("generic") or ""
+        if not g: continue
+        counts[g] = counts.get(g, 0) + 1
+    for m in mapped:
+        g = m.get("generic") or ""
+        m["dup"] = bool(g and counts.get(g, 0) > 1)
+
+    return jsonify({"mapped": mapped, "normalized": normalized})
 
 @app.post("/meds/check")
 def meds_check():
-  """
-  Call RxNav interaction APIs.
-  """
-  data = request.get_json(silent=True) or {}
-  rxcuis = list({str(x) for x in (data.get("rxcuis") or []) if x})
-  if len(rxcuis) < 2:
-    return jsonify({"interactions": []})
-  try:
-    items = rxnav_interactions(rxcuis)
-    return jsonify({"interactions": items})
-  except Exception as e:
-    return jsonify({"error": f"Interaction check failed: {e}"}), 500
+    """
+    Pure RAG interaction discovery.
+    Input:
+      {
+        "drugs": ["amoxicillin","lisinopril", ...]   # lowercase generics preferred
+        # OR
+        "mapped": [ { "generic":"...", ... }, ... ]  # we will extract generics
+      }
+    Output:
+      {
+        "interactions": [
+          {
+            "pair": ["drug_a","drug_b"],
+            "severity": "Major|Moderate|Minor|Unknown",
+            "description": "...",
+            "sources": [{"title":"..","url":"..."}]
+          }
+        ],
+        "citations": [...]
+      }
+    """
+    data = request.get_json(silent=True) or {}
+    drugs = data.get("drugs") or []
+    if not drugs:
+        mapped = data.get("mapped") or []
+        drugs = [ (m.get("generic") or "").strip().lower() for m in mapped if (m.get("generic") or "").strip() ]
+    # unique in order
+    seen = set(); generics = []
+    for d in drugs:
+        d = (d or "").strip().lower()
+        if d and d not in seen:
+            seen.add(d); generics.append(d)
+
+    res = _rag_interaction_discovery(generics)
+    return jsonify(res)
 
 @app.post("/meds/analyze-stream")
 def meds_analyze_stream():
-  """
-  Stream a clinician-friendly narrative using an LLM.
-  Expects: text (OCR), mapped meds, and interactions.
-  """
-  data = request.get_json(silent=True) or {}
-  text = data.get("text") or ""
-  mapped = data.get("mapped") or []
-  interactions = data.get("interactions") or []
+    """
+    Stream a clinician-friendly narrative using Drug RAG (NARRATIVE SUMMARY).
+    Input:
+      {
+        "text": "OCR'd raw text (optional)",
+        "mapped": [ { ... "generic": "amoxicillin", "dup": false }, ... ],
+        "interactions": { "interactions": [...], "citations":[...] }   # optional; if not provided, we can compute
+      }
+    Stream: text/plain (raw chunks)
+    """
+    data = request.get_json(silent=True) or {}
+    text = data.get("text") or ""
+    mapped = data.get("mapped") or []
+    interactions_obj = data.get("interactions")
 
-  prompt = build_med_prompt(text, mapped, interactions)
+    # If interactions not provided, try to compute from mapped
+    if not interactions_obj:
+        generics = []
+        seen = set()
+        for m in mapped:
+            g = (m.get("generic") or "").strip().lower()
+            if g and g not in seen:
+                seen.add(g); generics.append(g)
+        interactions_obj = _rag_interaction_discovery(generics)
 
-  # If no OpenAI key, return plain JSON (no stream) so UI still works.
-  if not OPENAI_API_KEY:
-    return jsonify({"text": prompt})
+    # Build one-shot narrative prompt (non-stream), but we will stream its final text via generator
+    try:
+        narrative_text = _rag_narrative_summary(mapped, interactions_obj.get("interactions") or [], text)
+    except Exception as e:
+        narrative_text = f"[Error generating narrative: {e}]"
 
-  # Streaming with OpenAI chat completions
-  try:
-    import openai
-    openai.api_key = OPENAI_API_KEY
+    def generate():
+        # You can chunk the narrative for smoother UI if desired
+        for chunk in re.findall(r".{1,600}", narrative_text, flags=re.S):
+            yield chunk
 
-    def generate() -> Generator[bytes, None, None]:
-      # text/event-stream without 'data:' framing (your FE concatenates raw chunks)
-      # If you prefer strict SSE, prepend "data: " to each chunk and add "\n\n".
-      yield b"retry: 500\n\n"
-      resp = openai.chat.completions.create(
-        model=OPENAI_MODEL,
-        messages=[
-          {"role": "system", "content": "You are a concise, safe clinical medication checker."},
-          {"role": "user", "content": prompt},
-        ],
-        temperature=0.2,
-        stream=True,
-      )
-      for event in resp:
-        delta = event.choices[0].delta.get("content") if event.choices and event.choices[0].delta else None
-        if delta:
-          yield delta.encode("utf-8")
-      yield b"\n"
-
-    return Response(generate(), mimetype="text/event-stream")
-  except Exception as e:
-    return jsonify({"error": f"Streaming failed: {e}"}), 500
-# ----------------------------- End of Labs -----------------------------
+    return Response(stream_with_context(generate()), content_type="text/plain")
 
 if __name__ == "__main__":
     app.run(host="127.0.0.1", port=5050, debug=True)

@@ -154,16 +154,7 @@ CORS(
         # --- NEW: Medication checker endpoints (cover all /meds/* routes) ---
 
         # Regex that matches /meds/parse, /meds/map, /meds/check, /meds/analyze-stream (and any future /meds/*)
-        r"/meds/.*": {
-            "origins": [
-                "https://ai-doctor-assistant-app-dev.onrender.com",
-                "http://localhost:3000",
-            ],
-            "methods": ["POST", "OPTIONS"],
-            "allow_headers": ["Content-Type", "Authorization", "Accept"],
-            "supports_credentials": True,
-        },
-        r"/meds/analyze-stream": {
+        r"/meds/(parse|map|check|analyze-stream)": {
             "origins": [
                 "https://ai-doctor-assistant-app-dev.onrender.com",
                 "http://localhost:3000",

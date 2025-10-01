@@ -6,6 +6,7 @@ from datetime import datetime
 import json
 import logging
 import requests
+from typing import List, Dict, Any, Optional, Generator
 import re
 import base64
 from werkzeug.exceptions import HTTPException, RequestEntityTooLarge
@@ -2193,7 +2194,259 @@ def labs_parse():
         filtered.append(r)
 
     return jsonify({"labs": filtered}), 200
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
+OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-4o-mini")
 
+RXNAV_BASE = "https://rxnav.nlm.nih.gov/REST"
+
+# ----------------------------- Helpers -----------------------------
+
+STRENGTH_RX = r"(?P<strength>\d+(?:\.\d+)?)(?:\s*)(?P<unit>mg|mcg|g|iu|units|ml)\b"
+FREQ_WORDS = r"(once daily|twice daily|three times daily|every\s*\d+\s*(?:h|hr|hrs|hours)|bid|tid|qid|q\d+h|qhs|qam|qpm|prn)"
+FORM_WORDS = r"(tablet|tab|capsule|cap|syrup|solution|suspension|patch|injection|cream|ointment|drops|spray)"
+ROUTE_WORDS = r"(po|oral|by mouth|iv|im|sc|subcut|subcutaneous|topical|inhalation|ophthalmic|otic|nasal|rectal|vaginal)"
+
+NAME_FIRST_RX = re.compile(
+    rf"""
+    ^\s*
+    (?P<name>[A-Za-z][A-Za-z0-9\-\s']+)      # name first
+    (?:[,;\s]+{STRENGTH_RX})?                # optional strength/unit
+    (?:[,;\s]+(?P<form>{FORM_WORDS}))?       # optional form
+    (?:[,;\s]+(?P<route>{ROUTE_WORDS}))?     # optional route
+    (?:[,;\s]+(?P<frequency>{FREQ_WORDS}))?  # optional frequency
+    (?:[,;\s]+(?P<prn>prn))?                 # optional prn
+    """,
+    re.IGNORECASE | re.VERBOSE,
+)
+
+def _clean(s: Optional[str]) -> Optional[str]:
+  if s is None: return None
+  t = re.sub(r"\s+", " ", s).strip()
+  return t or None
+
+def _normalize_lines(text: str) -> List[str]:
+  lines = [x.strip() for x in re.split(r"[\r\n]+", text or "") if x.strip()]
+  out = []
+  for ln in lines:
+    ln = re.sub(r"^\s*[\-\*\u2022]\s*", "", ln)  # bullets
+    ln = re.sub(r"^\s*\d+\.\s*", "", ln)         # numbering
+    out.append(ln)
+  return out
+
+def _parse_line(line: str) -> Optional[Dict[str, Any]]:
+  m = NAME_FIRST_RX.search(line)
+  if not m:
+    return None
+  d = m.groupdict()
+  return {
+    "name": _clean(d.get("name")),
+    "strength": _clean(d.get("strength")),
+    "unit": _clean(d.get("unit")),
+    "form": _clean(d.get("form")),
+    "route": _clean(d.get("route")),
+    "frequency": _clean(d.get("frequency")),
+    "prn": True if (d.get("prn") or "").lower() == "prn" else False,
+    "raw": line.strip(),
+  }
+
+def rxnav_approximate_term(term: str) -> Optional[Dict[str, Any]]:
+  try:
+    r = requests.get(f"{RXNAV_BASE}/approximateTerm.json", params={"term": term}, timeout=20)
+    r.raise_for_status()
+    data = r.json()
+    cand = (data.get("approximateGroup") or {}).get("candidate") or []
+    if not cand:
+      return None
+    cand = sorted(cand, key=lambda x: int(x.get("rank", 9999)))
+    rxcui = cand[0].get("rxcui")
+    if not rxcui:
+      return None
+    rxname = None
+    try:
+      rr = requests.get(f"{RXNAV_BASE}/rxcui/{rxcui}/properties.json", timeout=20)
+      rr.raise_for_status()
+      rxname = ((rr.json() or {}).get("properties") or {}).get("name")
+    except Exception:
+      pass
+    return {"rxcui": rxcui, "name": rxname}
+  except Exception:
+    return None
+
+def rxnav_interactions(rxcuis: List[str]) -> List[Dict[str, Any]]:
+  if len(rxcuis) < 2:
+    return []
+  # RxNav: selections=ID+ID+ID
+  selections = "+".join(rxcuis)
+  r = requests.get(f"{RXNAV_BASE}/interaction/list.json", params={"selections": selections}, timeout=30)
+  r.raise_for_status()
+  data = r.json()
+
+  out = []
+  groups = (data or {}).get("fullInteractionTypeGroup") or []
+  for g in groups:
+    types = g.get("fullInteractionType") or []
+    for t in types:
+      pair = [c.get("minConceptItem", {}).get("rxcui") for c in (t.get("minConcept") or [])]
+      pair = [p for p in pair if p]
+      inters = t.get("interactionPair") or []
+      for ip in inters:
+        sev = ip.get("severity")
+        desc = ip.get("description")
+        sources = []
+        # collect a few source hints if present
+        for ic in ip.get("interactionConcept") or []:
+          src = ic.get("source")
+          if src: sources.append(src)
+        out.append({"pair": pair, "severity": sev, "description": desc, "sources": list(set(sources))})
+  return out
+
+def build_med_prompt(text: Optional[str], mapped: List[Dict[str, Any]], interactions: List[Dict[str, Any]]) -> str:
+  lines = []
+  lines.append("You are a medication safety assistant for clinicians.")
+  lines.append("Task: reconcile meds, identify duplicates, dose range concerns, contraindications, and drug–drug interactions.")
+  lines.append("Return a short, structured summary with severity tags (Major/Moderate/Minor), actions, and citations (RxNav/DailyMed).")
+  lines.append("")
+  lines.append("=== EXTRACTED MEDICATIONS (structured) ===")
+  for m in mapped:
+    rx = m.get("rxnorm") or {}
+    nm = rx.get("name") or m.get("name")
+    parts = [
+      nm or "Unknown",
+      f'{m.get("strength","")}{m.get("unit","")}'.strip(),
+      m.get("form") or "",
+      m.get("route") or "",
+      m.get("frequency") or "",
+      "PRN" if m.get("prn") else "",
+      "(DUPLICATE)" if m.get("dup") else "",
+    ]
+    lines.append(" - " + " • ".join([p for p in parts if p]))
+  lines.append("")
+  lines.append("=== INTERACTIONS (RxNav) ===")
+  if interactions:
+    for it in interactions[:40]:
+      lines.append(f' - Pair {it.get("pair")} • Severity: {it.get("severity")} • {it.get("description")}')
+  else:
+    lines.append(" - None reported.")
+  lines.append("")
+  lines.append("=== OCR TEXT (for context) ===")
+  lines.append((text or "")[:4000])
+  lines.append("")
+  lines.append("Output: 1–2 line executive summary, then bullets: [Severity] Recommendation — Rationale (Source).")
+  return "\n".join(lines)
+
+# ----------------------------- Routes -----------------------------
+
+@app.post("/meds/parse")
+def meds_parse():
+  """
+  Parse free text (OCR'd Rx/CCD/note) into structured medication rows.
+  """
+  data = request.get_json(silent=True) or {}
+  text = data.get("text") or ""
+  meds = []
+  for ln in _normalize_lines(text):
+    m = _parse_line(ln)
+    if m and m.get("name"):
+      meds.append(m)
+  # duplicate marking done after mapping (based on RxCUI/name)
+  return jsonify({"meds": meds})
+
+@app.post("/meds/map")
+def meds_map():
+  """
+  Map meds -> RxNorm CUIs (and canonical names).
+  """
+  data = request.get_json(silent=True) or {}
+  meds = data.get("meds") or []
+  mapped = []
+  for m in meds:
+    rx = None
+    qparts = [m.get("name") or ""]
+    if m.get("strength") and m.get("unit"):
+      qparts.append(f'{m["strength"]}{m["unit"]}')
+    if m.get("form"):
+      qparts.append(m["form"])
+    q = " ".join([p for p in qparts if p]).strip()
+    if q:
+      info = rxnav_approximate_term(q)
+      if info:
+        rx = info
+    mapped.append({**m, "rxnorm": rx})
+
+  # mark duplicates: same rxcui (or same normalized name)
+  by_key = {}
+  for i, m in enumerate(mapped):
+    key = (m.get("rxnorm") or {}).get("rxcui") or (m.get("name") or "").lower()
+    if not key:
+      continue
+    by_key.setdefault(key, []).append(i)
+  for idxs in by_key.values():
+    if len(idxs) > 1:
+      for i in idxs:
+        mapped[i]["dup"] = True
+
+  return jsonify({"mapped": mapped})
+
+@app.post("/meds/check")
+def meds_check():
+  """
+  Call RxNav interaction APIs.
+  """
+  data = request.get_json(silent=True) or {}
+  rxcuis = list({str(x) for x in (data.get("rxcuis") or []) if x})
+  if len(rxcuis) < 2:
+    return jsonify({"interactions": []})
+  try:
+    items = rxnav_interactions(rxcuis)
+    return jsonify({"interactions": items})
+  except Exception as e:
+    return jsonify({"error": f"Interaction check failed: {e}"}), 500
+
+@app.post("/meds/analyze-stream")
+def meds_analyze_stream():
+  """
+  Stream a clinician-friendly narrative using an LLM.
+  Expects: text (OCR), mapped meds, and interactions.
+  """
+  data = request.get_json(silent=True) or {}
+  text = data.get("text") or ""
+  mapped = data.get("mapped") or []
+  interactions = data.get("interactions") or []
+
+  prompt = build_med_prompt(text, mapped, interactions)
+
+  # If no OpenAI key, return plain JSON (no stream) so UI still works.
+  if not OPENAI_API_KEY:
+    return jsonify({"text": prompt})
+
+  # Streaming with OpenAI chat completions
+  try:
+    import openai
+    openai.api_key = OPENAI_API_KEY
+
+    def generate() -> Generator[bytes, None, None]:
+      # text/event-stream without 'data:' framing (your FE concatenates raw chunks)
+      # If you prefer strict SSE, prepend "data: " to each chunk and add "\n\n".
+      yield b"retry: 500\n\n"
+      resp = openai.chat.completions.create(
+        model=OPENAI_MODEL,
+        messages=[
+          {"role": "system", "content": "You are a concise, safe clinical medication checker."},
+          {"role": "user", "content": prompt},
+        ],
+        temperature=0.2,
+        stream=True,
+      )
+      for event in resp:
+        delta = event.choices[0].delta.get("content") if event.choices and event.choices[0].delta else None
+        if delta:
+          yield delta.encode("utf-8")
+      yield b"\n"
+
+    return Response(generate(), mimetype="text/event-stream")
+  except Exception as e:
+    return jsonify({"error": f"Streaming failed: {e}"}), 500
+# ----------------------------- End of Labs -----------------------------
 
 if __name__ == "__main__":
     app.run(host="127.0.0.1", port=5050, debug=True)

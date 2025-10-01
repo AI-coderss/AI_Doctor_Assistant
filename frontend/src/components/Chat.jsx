@@ -13,13 +13,14 @@ import { FaMicrophoneAlt } from "react-icons/fa";
 import { motion, AnimatePresence } from "framer-motion";
 import useAudioForVisualizerStore from "../store/useAudioForVisualizerStore.js";
 import "../styles/chat.css";
-import "../styles/labs-viz.css"; // ✅ visual bars & dot indicator
+import "../styles/labs-viz.css"; // ✅ visual bars & indicators for labs
 import { encodeWAV } from "./pcmToWav.js";
 import useAudioStore from "../store/audioStore.js";
 import { startVolumeMonitoring } from "./audioLevelAnalyzer";
 import VoiceRecorderPanel from "./VoiceRecorderPanel";
 import useLiveTranscriptStore from "../store/useLiveTranscriptStore";
 import LabResultsUploader from "./LabResultsUploader";
+import MedicationChecker from "./MedicationChecker"; // ✅ NEW
 import { Howl } from "howler";
 
 let localStream;
@@ -29,7 +30,8 @@ const BACKEND_BASE = "https://ai-doctor-assistant-backend-server.onrender.com";
 const drawerComponentOverrides = `
   .tool-wrapper .record-case-btn-left,
   .tool-wrapper .record-timer-fixed,
-  .tool-wrapper .labs-uploader-fixed {
+  .tool-wrapper .labs-uploader-fixed,
+  .tool-wrapper .meds-uploader-fixed {
     position: relative !important;
     left: auto !important;
     bottom: auto !important;
@@ -38,6 +40,7 @@ const drawerComponentOverrides = `
     z-index: 1 !important;
   }
   .tool-wrapper .labs-uploader-fixed { width: 150px; }
+  .tool-wrapper .meds-uploader-fixed { width: 240px; } /* ✅ NEW distinct width */
 `;
 
 /** Normalize bot markdown a bit */
@@ -628,6 +631,11 @@ const Chat = () => {
     ]);
   };
 
+  /* ===================== Medication checker streaming ===================== */
+  const medUploaderRef = useRef(null);       // ✅ NEW
+  const medsStreamingRef = useRef(false);    // ✅ NEW
+  const medsBufferRef = useRef("");          // ✅ NEW
+
   if (isVoiceMode) {
     return (
       <div className="voice-assistant-wrapper">
@@ -771,6 +779,7 @@ const Chat = () => {
 
       {/* Drawer with tools */}
       <DrawComponent>
+        {/* 1) Record case / voice recorder */}
         <div className="tool-wrapper">
           <VoiceRecorderPanel
             transcribeUrl={`${BACKEND_BASE}/transcribe`}
@@ -781,6 +790,7 @@ const Chat = () => {
           />
         </div>
 
+        {/* 2) Lab results uploader */}
         <div className="tool-wrapper">
           <div className="labs-uploader-fixed">
             {wantsLabs(lastBotText) && (
@@ -876,6 +886,75 @@ const Chat = () => {
                     }
                   }
                   return [
+                    ...updated,
+                    { msg: normalizeMarkdown(full || ""), who: "bot" },
+                  ];
+                });
+              }}
+            />
+          </div>
+        </div>
+
+        {/* 3) Medication checker uploader — horizontally adjacent */}
+        <div className="tool-wrapper">
+          <div className="meds-uploader micro dense">
+            <MedicationChecker
+              ref={medUploaderRef}
+              autoSend={true}
+              ocrLanguage="eng"
+              engine="2"
+              onAIStreamToken={(chunk) => {
+                if (!medsStreamingRef.current) {
+                  medsStreamingRef.current = true;
+                  medsBufferRef.current = "";
+                  setChats((prev) => [
+                    ...prev,
+                    { msg: "", who: "bot", streaming: true },
+                  ]);
+                }
+                medsBufferRef.current += String(chunk || "");
+                setChats((prev) => {
+                  const updated = [...prev];
+                  const last = updated[updated.length - 1];
+                  if (last && last.streaming) last.msg = medsBufferRef.current;
+                  return updated;
+                });
+              }}
+              onBeforeSendToAI={(text, meta) =>
+                [
+                  "You are a clinical pharmacology assistant specializing in medication reconciliation and interaction checking.",
+                  "Input below contains OCR-extracted medication lists (may include free text, photos, or CCD text).",
+                  "Tasks:",
+                  "1) Normalize names to RxNorm ingredients/brands; include RxNorm CUIs where possible.",
+                  "2) Flag duplicates (same ingredient, class, or therapeutic overlap).",
+                  "3) Check adult dose ranges (typical) and highlight out-of-range doses.",
+                  "4) Interaction check (major/moderate/minor) with brief mechanisms and clinical actions.",
+                  "5) Black-box warnings and major contraindications (cross-check DailyMed).",
+                  "6) Output a concise, actionable summary with bullet points, and a table of findings.",
+                  `SOURCE FILE: ${meta?.filename || "Unknown"}`,
+                  "",
+                  "=== MED LIST (OCR) ===",
+                  text,
+                ].join("\n")
+              }
+              onAIResponse={(payload) => {
+                const full =
+                  payload?.text ??
+                  (typeof payload === "string"
+                    ? payload
+                    : JSON.stringify(payload));
+                setChats((prev) => {
+                  const updated = [...prev];
+                  if (medsStreamingRef.current) {
+                    medsStreamingRef.current = false;
+                    const last = updated[updated.length - 1];
+                    if (last && last.streaming) {
+                      last.streaming = false;
+                      last.msg = normalizeMarkdown(full || "");
+                      return updated;
+                    }
+                  }
+                return [
                     ...updated,
                     { msg: normalizeMarkdown(full || ""), who: "bot" },
                   ];
@@ -1214,3 +1293,4 @@ function toNum(x) {
   }
   return NaN;
 }
+

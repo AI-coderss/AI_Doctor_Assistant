@@ -30,7 +30,8 @@
 .chip--green  { background: #2ecc71; }
 .chip--yellow { background: #f1c40f; }
 .chip--red    { background: #e74c3c; }
-.chip--dot    { width: 8px; height: 8px; background: #000; }
+/* Keep the legend's value marker as a small dot */
+.chip--dot    { width: 8px; height: 8px; background: #000; border-radius: 50%; }
 
 .labs-panel__body { display: grid; gap: 10px; }
 
@@ -57,23 +58,61 @@
   height: 10px;
   width: 100%;
   border-radius: 999px;
-  overflow: hidden;
   background: #e5eaf4;
+  /* allow the arrow indicator to show outside the bar */
+  overflow: visible;
 }
 .seg { height: 100%; }
 .seg--green  { background: #2ecc71; }
 .seg--yellow { background: #f1c40f; }
 .seg--red    { background: #e74c3c; }
 
+/* === BLACK ARROW INDICATOR (below the line) with pulse animation === */
 .indicator {
   position: absolute;
-  top: 50%;
-  width: 10px;
-  height: 10px;
-  transform: translate(-50%, -50%);
-  background: #000;
-  border-radius: 50%;
-  box-shadow: 0 0 0 2px rgba(0,0,0,.08);
+  left: 0;                               /* horizontal position set inline via style={{ left: `${posPct}%` }} */
+  top: calc(100% + 6px);                 /* place BELOW the bar with a small gap */
+  width: 0;
+  height: 0;
+  transform: translateX(-50%) scale(1);  /* keep centered; baseline scale for animation */
+  border-left: 7px solid transparent;
+  border-right: 7px solid transparent;
+  border-bottom: 12px solid #111;        /* ▲ up-pointing arrow (since it sits below the bar) */
+  pointer-events: none;
+  will-change: transform, filter, opacity;
+  animation: labsIndicatorPulse 1.6s ease-in-out infinite;
+}
+
+/* slim stem from arrow tip up to the bar */
+.indicator::after {
+  content: "";
+  position: absolute;
+  left: -0.5px;          /* center stem */
+  bottom: 12px;          /* start at top of the arrow triangle */
+  width: 1px;
+  height: 12px;          /* length upward toward the bar */
+  background: #111;
+  pointer-events: none;
+  opacity: 0.9;
+}
+
+/* Pulse animation: subtle scale + soft glow */
+@keyframes labsIndicatorPulse {
+  0% {
+    transform: translateX(-50%) scale(1);
+    filter: drop-shadow(0 0 0 rgba(0,0,0,0.18));
+    opacity: 1;
+  }
+  50% {
+    transform: translateX(-50%) scale(1.12);
+    filter: drop-shadow(0 2px 4px rgba(0,0,0,0.28));
+    opacity: 0.95;
+  }
+  100% {
+    transform: translateX(-50%) scale(1);
+    filter: drop-shadow(0 0 0 rgba(0,0,0,0.18));
+    opacity: 1;
+  }
 }
 
 /* Value chip */
@@ -86,4 +125,13 @@
 /* small 'Normal range' label above the bar (optional) */
 .lab-row__bar .range-label {
   position: absolute; left: 0; top: -18px; font-size: 11px; color: #6b7a90;
+}
+
+/* Responsive tweaks */
+@media (max-width: 600px) {
+  .lab-row {
+    grid-template-columns: 1fr;
+    gap: 8px;
+  }
+  .lab-row__value { justify-self: flex-start; }
 }

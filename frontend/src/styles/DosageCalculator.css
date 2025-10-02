@@ -22,6 +22,7 @@
   --key-danger: rgba(255,120,120,.18);
   --key-danger-border: rgba(255,120,120,.38);
 }
+
 [data-theme="dark"] .dosage-calculator{
   --glass-bg: rgba(15,15,20,.40);
   --glass-border: rgba(255,255,255,.20);
@@ -33,12 +34,14 @@
   --lcd-text:#10251c;
 }
 
-/* NOT fixed; compact height overall (HEIGHT KEPT) */
+/* NOW fixed and outside the drawer; very high z-index; positioned away from the drawer */
 .dosage-calculator{
-  position: relative;
+  position: fixed;             /* ⬅ changed from relative */
+  right: 24px;                 /* spawn on the right side, away from the left drawer */
+  bottom: 140px;               /* ⬅ sits above the drawer so it doesn't overlap the lab button */
   width: min(460px, 100%);
-  height: 600px;                        /* ← fixed height preserved */
-  margin: 12px 0;
+  height: 600px;
+  margin: 0;                   /* no flow margin since fixed */
   padding: 14px 14px 10px;
   border-radius: 18px;
   background: var(--glass-bg);
@@ -47,11 +50,10 @@
   -webkit-backdrop-filter: blur(14px);
   box-shadow: var(--glass-shadow);
   color: var(--text);
-  z-index: 888888;
-  overflow: hidden;                     /* keeps interior tidy when compacting */
+  z-index: 1000000;            /* ⬅ higher than drawer z-index (100) */
+  overflow: hidden;
 }
 
-/* Subtle gradient rim */
 .dosage-calculator::before{
   content:"";
   position:absolute; inset:-1px; border-radius:20px; padding:1px;
@@ -170,15 +172,12 @@
 .dc-error{ border-color:rgba(255,80,80,.5); color:#ffb3b3; }
 .dc-success{ border-color:rgba(110,255,110,.3); }
 
-/* =========================
-   RESPONSIVE: REDUCE PROPORTIONS ONLY
-   (height: 600px is preserved)
-   ========================= */
-
 /* Tablets down */
 @media (max-width: 900px){
   .dosage-calculator{
-    width: 380px;              /* narrower while keeping height */
+    right: 16px;
+    bottom: 120px;           /* keep clear of drawer on tablets */
+    width: 380px;
     padding: 12px;
   }
   .dc-grid{ grid-template-columns: 1fr; }
@@ -195,16 +194,18 @@
 /* Phones */
 @media (max-width: 640px){
   .dosage-calculator{
-    width: 320px;              /* small footprint */
-    height: 600px;             /* ← still fixed */
-    margin: 10px auto;
+    right: 12px;
+    bottom: 110px;           /* more room above bottom bar */
+    width: 320px;
+    height: 600px;
+    margin: 0;
     padding: 10px;
   }
   .dc-title{ font-size:.95rem; }
   .dc-icon-btn{ padding:5px 8px; font-size:.8rem; }
 
   .dc-screen{
-    height: 44px;              /* smaller “LCD” */
+    height: 44px;
     font-size: .9rem;
     padding: 4px 8px;
   }
@@ -244,8 +245,10 @@
 /* Very small phones */
 @media (max-width: 360px){
   .dosage-calculator{
-    width: 290px;              /* extra compact */
-    height: 600px;             /* ← still fixed */
+    right: 8px;
+    bottom: 100px;
+    width: 290px;
+    height: 600px;
     padding: 8px;
   }
   .dc-screen{

@@ -20,7 +20,8 @@ import { startVolumeMonitoring } from "./audioLevelAnalyzer";
 import VoiceRecorderPanel from "./VoiceRecorderPanel";
 import useLiveTranscriptStore from "../store/useLiveTranscriptStore";
 import LabResultsUploader from "./LabResultsUploader";
-import MedicationChecker from "./MedicationChecker"; // ✅ NEW
+import MedicationChecker from "./MedicationChecker"; // ✅
+import CalculateDosageButton from "./CalculateDosageButton"; // ✅
 import { Howl } from "howler";
 
 let localStream;
@@ -28,6 +29,27 @@ const BACKEND_BASE = "https://ai-doctor-assistant-backend-server.onrender.com";
 
 // Force fixed-position pieces to play nicely in the drawer.
 const drawerComponentOverrides = `
+  /* Drawer grid + spacing */
+  .tools-grid {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    column-gap: 16px;         /* horizontal gap between the 3 tiles */
+    row-gap: 6px;            /* vertical gap for the second row */
+    align-items: start;
+    justify-items: center;     /* center each tile in its grid cell */
+    padding: 16px;             /* consistent inner padding for the drawer */
+  }
+
+  /* Each child the drawer renders */
+  .tool-wrapper {
+    display: flex;
+    justify-content: center;   /* center content horizontally */
+    align-items: stretch;
+    width: 100%;
+  }
+
+  /* Unify tile widths (so 3 look aligned in each row) */
+  .tool-wrapper > *:first-child,
   .tool-wrapper .record-case-btn-left,
   .tool-wrapper .record-timer-fixed,
   .tool-wrapper .labs-uploader-fixed,
@@ -36,12 +58,19 @@ const drawerComponentOverrides = `
     left: auto !important;
     bottom: auto !important;
     transform: none !important;
-    margin: 0 !important;
+    margin: 0 auto !important;   /* center inside column */
     z-index: 1 !important;
+    width: 100% !important;
+    max-width: 160px;            /* <- adjust to taste (150–180 works well) */
   }
-  .tool-wrapper .labs-uploader-fixed { width: 150px; }
-  .tool-wrapper .meds-uploader-fixed { width: 240px; } /* ✅ NEW distinct width */
+
+  /* Make the yellow "lab prompt" card breathe and align */
+  .labs-prompt {
+    width: 100%;
+    margin: 0 0 8px 0;          /* a little bottom space before the button/uploader */
+  }
 `;
+
 
 /** Normalize bot markdown a bit */
 function normalizeMarkdown(input = "") {
@@ -116,7 +145,7 @@ const Chat = () => {
     return () => {
       try {
         toggleSfxRef.current?.unload();
-      } catch {}
+      } catch { }
     };
   }, []);
 
@@ -153,7 +182,11 @@ const Chat = () => {
         return arr;
       });
     }
-    if (!isStreaming && liveIdxRef.current !== null && !finalizeTimerRef.current) {
+    if (
+      !isStreaming &&
+      liveIdxRef.current !== null &&
+      !finalizeTimerRef.current
+    ) {
       finalizeTimerRef.current = setTimeout(() => {
         setChats((prev) => {
           const arr = [...prev];
@@ -206,16 +239,22 @@ const Chat = () => {
         }
       };
       pc.onicecandidateerror = (e) => console.error("ICE candidate error:", e);
-      pc.onnegotiationneeded = () => {};
+      pc.onnegotiationneeded = () => { };
       pc.onconnectionstatechange = () => {
-        if (pc.connectionState === "closed" || pc.connectionState === "failed") {
+        if (
+          pc.connectionState === "closed" ||
+          pc.connectionState === "failed"
+        ) {
           setConnectionStatus("error");
           setIsMicActive(false);
         }
       };
 
-      if (!localStream) console.error("localStream undefined when adding track.");
-      stream.getAudioTracks().forEach((track) => pc.addTrack(track, localStream));
+      if (!localStream)
+        console.error("localStream undefined when adding track.");
+      stream
+        .getAudioTracks()
+        .forEach((track) => pc.addTrack(track, localStream));
 
       const channel = pc.createDataChannel("response");
       channel.onopen = () => {
@@ -252,7 +291,9 @@ const Chat = () => {
         const msg = JSON.parse(event.data);
         switch (msg.type) {
           case "response.audio.delta": {
-            const chunk = Uint8Array.from(atob(msg.delta), (c) => c.charCodeAt(0));
+            const chunk = Uint8Array.from(atob(msg.delta), (c) =>
+              c.charCodeAt(0)
+            );
             const tmp = new Uint8Array(pcmBuffer.byteLength + chunk.byteLength);
             tmp.set(new Uint8Array(pcmBuffer), 0);
             tmp.set(chunk, pcmBuffer.byteLength);
@@ -289,7 +330,8 @@ const Chat = () => {
                 dataArray.reduce((sum, val) => sum + val, 0) / dataArray.length;
               const normalized = Math.max(0.5, Math.min(2, avg / 50));
               setAudioScale(normalized);
-              if (!el.paused && !el.ended) requestAnimationFrame(monitorBotVolume);
+              if (!el.paused && !el.ended)
+                requestAnimationFrame(monitorBotVolume);
             };
             monitorBotVolume();
             setAudioWave(true);
@@ -321,7 +363,7 @@ const Chat = () => {
           sdp: offer.sdp.replace(
             /a=rtpmap:\d+ opus\/48000\/2/g,
             "a=rtpmap:111 opus/48000/2\r\n" +
-              "a=fmtp:111 minptime=10;useinbandfec=1"
+            "a=fmtp:111 minptime=10;useinbandfec=1"
           ),
         };
         await pc.setLocalDescription(modifiedOffer);
@@ -350,7 +392,8 @@ const Chat = () => {
           body: offer.sdp,
         }
       );
-      if (!res.ok) throw new Error(`Server responded with status ${res.status}`);
+      if (!res.ok)
+        throw new Error(`Server responded with status ${res.status}`);
       const answer = await res.text();
       await pc.setRemoteDescription({ type: "answer", sdp: answer });
     } catch (error) {
@@ -368,42 +411,44 @@ const Chat = () => {
     if (connectionStatus === "connected" && localStream) {
       const newMicState = !isMicActive;
       setIsMicActive(newMicState);
-      localStream.getAudioTracks().forEach((track) => (track.enabled = newMicState));
+      localStream
+        .getAudioTracks()
+        .forEach((track) => (track.enabled = newMicState));
     }
   };
 
   const closeVoiceSession = () => {
     try {
       stopAudio?.();
-    } catch {}
+    } catch { }
     try {
       const { setAudioScale } = useAudioForVisualizerStore.getState();
       setAudioScale(1);
-    } catch {}
+    } catch { }
     if (audioPlayerRef.current) {
       try {
         audioPlayerRef.current.pause();
-      } catch {}
+      } catch { }
       audioPlayerRef.current.srcObject = null;
       audioPlayerRef.current.src = "";
     }
     if (dataChannel && dataChannel.readyState !== "closed") {
       try {
         dataChannel.close();
-      } catch {}
+      } catch { }
     }
     if (peerConnection) {
       try {
         peerConnection.getSenders?.().forEach((s) => s.track?.stop());
-      } catch {}
+      } catch { }
       try {
         peerConnection.close();
-      } catch {}
+      } catch { }
     }
     if (localStream) {
       try {
         localStream.getTracks().forEach((t) => t.stop());
-      } catch {}
+      } catch { }
       localStream = null;
     }
     setDataChannel(null);
@@ -417,14 +462,14 @@ const Chat = () => {
     setIsVoiceMode(true);
     if (audioPlayerRef.current) {
       audioPlayerRef.current.muted = true;
-      audioPlayerRef.current.play().catch(() => {});
+      audioPlayerRef.current.play().catch(() => { });
     }
     try {
       if (toggleSfxRef.current) {
         toggleSfxRef.current.stop();
         toggleSfxRef.current.play();
       }
-    } catch {}
+    } catch { }
   };
 
   // Text chat → /stream
@@ -632,9 +677,9 @@ const Chat = () => {
   };
 
   /* ===================== Medication checker streaming ===================== */
-  const medUploaderRef = useRef(null);       // ✅ NEW
-  const medsStreamingRef = useRef(false);    // ✅ NEW
-  const medsBufferRef = useRef("");          // ✅ NEW
+  const medUploaderRef = useRef(null);
+  const medsStreamingRef = useRef(false);
+  const medsBufferRef = useRef("");
 
   if (isVoiceMode) {
     return (
@@ -744,9 +789,8 @@ const Chat = () => {
           return (
             <div
               key={index}
-              className={`chat-message ${chat.who} ${chat.live ? "live" : ""} ${
-                chat.streaming ? "streaming" : ""
-              }`}
+              className={`chat-message ${chat.who} ${chat.live ? "live" : ""} ${chat.streaming ? "streaming" : ""
+                }`}
             >
               {chat.who === "bot" && (
                 <figure className="avatar">
@@ -777,7 +821,7 @@ const Chat = () => {
         🎙️
       </button>
 
-      {/* Drawer with tools */}
+      {/* Drawer with tools (max 3 per row; 4th wraps) */}
       <DrawComponent>
         {/* 1) Record case / voice recorder */}
         <div className="tool-wrapper">
@@ -895,7 +939,7 @@ const Chat = () => {
           </div>
         </div>
 
-        {/* 3) Medication checker uploader — horizontally adjacent */}
+        {/* 3) Medication checker uploader */}
         <div className="tool-wrapper">
           <div className="meds-uploader micro dense">
             <MedicationChecker
@@ -954,7 +998,7 @@ const Chat = () => {
                       return updated;
                     }
                   }
-                return [
+                  return [
                     ...updated,
                     { msg: normalizeMarkdown(full || ""), who: "bot" },
                   ];
@@ -962,6 +1006,11 @@ const Chat = () => {
               }}
             />
           </div>
+        </div>
+
+        {/* 4) Dosage calculator button (new row, 3 per row grid) */}
+        <div className="tool-wrapper">
+          <CalculateDosageButton />
         </div>
       </DrawComponent>
     </div>
@@ -975,30 +1024,39 @@ const DrawComponent = ({ children }) => {
   const [isOpen, setIsOpen] = useState(false);
 
   return (
-    <div style={{ position: "fixed", bottom: "25px", left: "25px", zIndex: 100 }}>
+    <div
+      style={{ position: "fixed", bottom: "25px", left: "25px", zIndex: 100 }}
+    >
       <AnimatePresence>
         {isOpen && (
           <motion.div
+            className="tools-grid"                        // ← add this
             initial={{ opacity: 0, y: 50, scale: 0.9 }}
             animate={{ opacity: 1, y: 0, scale: 1 }}
             exit={{ opacity: 0, y: 50, scale: 0.9 }}
             transition={{ duration: 0.3, ease: "easeInOut" }}
             style={{
-              minWidth: "550px",
-              padding: "24px",
+              minWidth: "480px",                          // your chosen drawer width
               background: "rgba(255, 255, 255, 0.9)",
               backdropFilter: "blur(10px)",
               borderRadius: "16px",
               boxShadow: "0 8px 30px rgba(0,0,0,0.12)",
               border: "1px solid rgba(0,0,0,0.08)",
-              display: "flex",
-              gap: "24px",
-              alignItems: "center",
+
+              /* keep these consistent with the CSS class above (OK to leave duplicated) */
+              display: "grid",
+              gridTemplateColumns: "repeat(3, minmax(0, 1fr))",
+              columnGap: "16px",
+              rowGap: "16px",
+              alignItems: "start",
+              justifyItems: "center",
+              padding: "16px",
               marginBottom: "12px",
             }}
           >
             {children}
           </motion.div>
+
         )}
       </AnimatePresence>
 
@@ -1160,7 +1218,7 @@ function LabRow({ lab }) {
     const rightYellowBeg = Math.max(high - band, low);
     const rightRedStart = Math.min(high + band, max);
 
-    const total = (max - min) || 1;
+    const total = max - min || 1;
     redL = ((leftRedEnd - min) / total) * 100;
     yellowL = ((leftYellowEnd - leftRedEnd) / total) * 100;
     green = ((rightYellowBeg - leftYellowEnd) / total) * 100;
@@ -1200,7 +1258,9 @@ function LabRow({ lab }) {
         <div className="lab-row__name">{name}</div>
         <div className="lab-row__range">
           {Number.isFinite(low) && Number.isFinite(high) ? (
-            <>Normal range: {low} – {high} {unit}</>
+            <>
+              Normal range: {low} – {high} {unit}
+            </>
           ) : (
             <em>Normal range: unknown</em>
           )}
@@ -1214,17 +1274,30 @@ function LabRow({ lab }) {
             : ""}
         </div>
         <div className="bar">
-          {redL > 0 && <div className="seg seg--red" style={{ flexBasis: `${redL}%` }} />}
+          {redL > 0 && (
+            <div className="seg seg--red" style={{ flexBasis: `${redL}%` }} />
+          )}
           {yellowL > 0 && (
-            <div className="seg seg--yellow" style={{ flexBasis: `${yellowL}%` }} />
+            <div
+              className="seg seg--yellow"
+              style={{ flexBasis: `${yellowL}%` }}
+            />
           )}
           {green > 0 && (
-            <div className="seg seg--green" style={{ flexBasis: `${green}%` }} />
+            <div
+              className="seg seg--green"
+              style={{ flexBasis: `${green}%` }}
+            />
           )}
           {yellowR > 0 && (
-            <div className="seg seg--yellow" style={{ flexBasis: `${yellowR}%` }} />
+            <div
+              className="seg seg--yellow"
+              style={{ flexBasis: `${yellowR}%` }}
+            />
           )}
-          {redR > 0 && <div className="seg seg--red" style={{ flexBasis: `${redR}%` }} />}
+          {redR > 0 && (
+            <div className="seg seg--red" style={{ flexBasis: `${redR}%` }} />
+          )}
 
           <div className="indicator" style={{ left: `${posPct}%` }} />
         </div>
@@ -1293,4 +1366,3 @@ function toNum(x) {
   }
   return NaN;
 }
-

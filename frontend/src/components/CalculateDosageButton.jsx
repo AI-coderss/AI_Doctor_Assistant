@@ -1,11 +1,12 @@
 import React, { useState } from "react";
 import { motion } from "framer-motion";
+import { createPortal } from "react-dom";
 import DosageCalculator from "./DosageCalculator";
 import "../styles/DosageButton.css";
 
 /**
- * Small pill toggle that sits beside your "Record The Case" button.
- * The calculator renders inline (NOT fixed) below your toolbar/content.
+ * Small pill toggle that sits beside your other tools in the drawer grid.
+ * The calculator itself renders OUTSIDE the drawer via a portal.
  */
 export default function CalculateDosageButton() {
   const [open, setOpen] = useState(false);
@@ -13,15 +14,12 @@ export default function CalculateDosageButton() {
   return (
     <>
       <div className="left-rail-actions">
-        {/* Your existing Record button can live here too */}
-        {/* <button className="record-btn">Record The Case</button> */}
-
         <motion.button
           type="button"
           className="calc-dose-btn"
-          onClick={() => setOpen(v => !v)}
-          initial={{ opacity: 0, y: 0 }}
-          animate={{ opacity: 1, y: 0 }}
+          onClick={() => setOpen((v) => !v)}
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
           whileHover={{ scale: 1.02 }}
           whileTap={{ scale: 0.98 }}
           aria-label="Open dosage calculator"
@@ -33,10 +31,12 @@ export default function CalculateDosageButton() {
         </motion.button>
       </div>
 
-      {/* Place this exactly where you want the calculator to appear in-flow */}
-      {open && <DosageCalculator onClose={() => setOpen(false)} />}
+      {open &&
+        typeof document !== "undefined" &&
+        createPortal(
+          <DosageCalculator onClose={() => setOpen(false)} />,
+          document.body
+        )}
     </>
   );
 }
-
-

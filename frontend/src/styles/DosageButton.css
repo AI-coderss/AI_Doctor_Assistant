@@ -1,43 +1,44 @@
-/* Align beside your "Record The Case" button */
+/* Make the button behave like a normal block inside the tile */
 .left-rail-actions{
   display:flex;
-  align-items:center;         /* fixes vertical misalignment/raising */
-  gap:10px;
-}
-
-/* Ensure label is visible on any background */
-.calc-dose-btn{
-  position: absolute;
-  bottom: 5.5rem;
-  left: 12rem;
-  display:inline-flex;
   align-items:center;
   justify-content:center;
-  padding:12px 14px;
+  width:100%;
+  margin:0;
+}
+
+/* Inline, centered, full width inside the tile; no absolute offsets */
+.calc-dose-btn{
+  position: static;                 /* IMPORTANT: no absolute positioning */
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  max-width: 180px;                 /* matches other tiles */
+  padding: 12px 14px;
   border-radius: 10px;
-  font-weight:700;
-  font-size:.92rem;
-  line-height:1; 
-  border: none !important;             /* keeps height tight */
-  cursor:pointer;
-  white-space:nowrap;
-  color:#ffffff;              /* visible text */
-  background:linear-gradient(135deg,#6366f1,#7c3aed);
-  backdrop-filter:blur(6px);
-  -webkit-backdrop-filter:blur(6px);
+  font-weight: 700;
+  font-size: .92rem;
+  line-height: 1;
+  border: none;
+  cursor: pointer;
+  white-space: nowrap;
+  color: #fff;
+  background: linear-gradient(135deg,#6366f1,#7c3aed);
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
   box-shadow:
     0 6px 14px rgba(99,102,241,.35),
     inset 0 1px 0 rgba(255,255,255,.8);
-  transition:transform .12s ease, box-shadow .2s ease, filter .2s ease;
+  transition: transform .12s ease, box-shadow .2s ease, filter .2s ease;
 }
 .calc-dose-btn:hover{
-  transform:translateY(-1px);
-  box-shadow:0 10px 22px rgba(99,102,241,.4), inset 0 1px 0 rgba(255,255,255,.9);
+  transform: translateY(-1px);
+  box-shadow: 0 10px 22px rgba(99,102,241,.4), inset 0 1px 0 rgba(255,255,255,.9);
 }
-.calc-dose-btn:active{ transform:translateY(0); }
+.calc-dose-btn:active{ transform: translateY(0); }
 .calc-dose-btn__label{ pointer-events:none; }
 
-/* If your toolbar shrinks on mobile */
 @media (max-width:640px){
-  .calc-dose-btn{ padding:7px 12px; font-size:.9rem; }
+  .calc-dose-btn{ padding: 10px 12px; font-size: .9rem; }
 }

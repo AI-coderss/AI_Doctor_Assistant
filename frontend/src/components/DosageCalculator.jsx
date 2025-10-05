@@ -1,26 +1,21 @@
 /* eslint-disable no-unused-vars */
-import React, { useMemo, useRef, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import { motion } from "framer-motion";
 import "../styles/DosageCalculator.css";
 import useDosageStore from "../store/dosageStore";
 
 /**
- * Classic calculator UI (NOT fixed). Glassmorphic, compact height,
- * LCD-like screen where streamed text appears.
- * Condition is extracted by the backend (no manual entry).
- * Drug suggestions come from backend based on extracted condition.
- *
- * Trigger model:
- *  - Pressing "Calculate" will:
- *      1) send transcript to backend + strict extract context (store)
- *      2) prefill condition/age/weight/drug suggestions from store
- *      3) call /calculate-dosage-(stream)-with-context
+ * LCD screen now shows FULL results: Dosage, Regimen, Notes (multi-line).
+ * Suggestions can be refreshed via a button (store.prepareForCalculation or fallback to endpoints).
  */
 
 const API_BASE = "https://ai-doctor-assistant-backend-server.onrender.com";
 const URLS = {
   calcStream: `${API_BASE}/calculate-dosage-stream-with-context`,
   calc: `${API_BASE}/calculate-dosage-with-context`,
+  // fallbacks if store isn't providing suggestions
+  contextEnsure: `${API_BASE}/context-ensure`,
+  suggestDrugs: `${API_BASE}/suggest-drugs`,
 };
 
 const KEYPAD = [
@@ -36,9 +31,9 @@ export default function DosageCalculator({ onClose }) {
     sessionId: storeSessionId,
     setSessionId,
     transcript: storeTranscript,
-    prepareForCalculation,          // <-- from updated store
-    inputs: storeInputs,            // { drug, age, weight, condition }
-    context: storeContext,          // { drug_suggestions, ... }
+    prepareForCalculation,        // from store (if defined)
+    inputs: storeInputs,          // { drug, age, weight, condition }
+    context: storeContext,        // { condition, age_years, weight_kg, drug_suggestions, ... }
   } = useDosageStore?.() || {};
 
   // Ensure a session id (persist it in store if available)
@@ -55,7 +50,7 @@ export default function DosageCalculator({ onClose }) {
 
   const transcript = (storeTranscript || "").trim();
 
-  // === Local UI state (mirrors store inputs, filled on demand) ===
+  // === Local UI state ===
   const [condition, setCondition] = useState("");
   const [drugSuggestions, setDrugSuggestions] = useState([]);
   const [drug, setDrug] = useState("");
@@ -65,13 +60,31 @@ export default function DosageCalculator({ onClose }) {
   const [useStream, setUseStream] = useState(true);
   const [streaming, setStreaming] = useState(false);
   const [loading, setLoading] = useState(false);
-  const [screenText, setScreenText] = useState("0");
   const [error, setError] = useState(null);
+
+  // NEW: multi-line LCD screen content
+  const [screenText, setScreenText] = useState("Ready");
+
   const [results, setResults] = useState({ dosage: "", regimen: "", notes: "" });
   const [activeField, setActiveField] = useState("age");
   const abortRef = useRef(null);
 
   // ---------- Helpers ----------
+  const composeScreenFromResults = (res) => {
+    const d = (res?.dosage || "").trim();
+    const r = (res?.regimen || "").trim();
+    const n = (res?.notes || "").trim();
+    const lines = [];
+    if (d) lines.push(`Dosage: ${d}`);
+    if (r) lines.push(`Regimen: ${r}`);
+    if (n) lines.push(`Notes: ${n}`);
+    return lines.length ? lines.join("\n") : "No result";
+  };
+
+  const setScreenFromResults = (res) => {
+    setScreenText(composeScreenFromResults(res));
+  };
+
   const extractJsonDict = (text) => {
     if (!text) return null;
     const cleaned = text.replace(/```json|```/gi, "").trim();
@@ -98,10 +111,10 @@ export default function DosageCalculator({ onClose }) {
       const missing = Array.isArray(data?.missing) ? data.missing.join(", ") : null;
       const detail = missing ? `Missing: ${missing}` : (data?.error || txt);
       setError(detail || "Bad Request");
-      setScreenText("Err");
+      setScreenText(`Error\n${detail || "Bad Request"}`);
     } catch {
       setError("Bad Request");
-      setScreenText("Err");
+      setScreenText("Error\nBad Request");
     }
   };
 
@@ -111,14 +124,15 @@ export default function DosageCalculator({ onClose }) {
   );
 
   /**
-   * Pulls prepared data from the store into the calculator's local UI
-   * WITHOUT clobbering what the user already typed here.
+   * Pull prepared values from store to local UI without clobbering what user has typed.
    */
   const syncFromStoreToLocal = () => {
     const sInputs = storeInputs || {};
     const sCtx = storeContext || {};
 
-    if (!condition && sInputs.condition) setCondition(String(sInputs.condition));
+    if (!condition && (sInputs.condition || sCtx.condition)) {
+      setCondition(String(sInputs.condition || sCtx.condition));
+    }
     if (!age && sInputs.age !== "" && sInputs.age != null) setAge(String(sInputs.age));
     if (!weight && sInputs.weight !== "" && sInputs.weight != null) setWeight(String(sInputs.weight));
 
@@ -129,20 +143,82 @@ export default function DosageCalculator({ onClose }) {
     if (!drug && candidateDrug) setDrug(String(candidateDrug));
   };
 
-  // ---------- PREP STEP on Calculate: use the STORE to ensure context & fill fields ----------
+  /**
+   * Suggestion refresh (store → preferred; fallback to endpoints).
+   */
+  const refreshSuggestions = async () => {
+    try {
+      setError(null);
+      setScreenText("Updating suggestions…");
+
+      if (typeof prepareForCalculation === "function") {
+        await prepareForCalculation(); // pushes transcript, ensures context, suggests drugs
+        syncFromStoreToLocal();
+        setScreenText("Suggestions updated");
+        return;
+      }
+
+      // Fallback path
+      const r = await fetch(URLS.contextEnsure, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ session_id: sessionId, transcript: transcript || null }),
+      });
+      const ctx = await r.json();
+
+      // Fill local fields if we don't have them
+      if (ctx?.condition && !condition) setCondition(ctx.condition);
+      if (ctx?.age_years != null && !age) setAge(String(ctx.age_years));
+      if (ctx?.weight_kg != null && !weight) setWeight(String(ctx.weight_kg));
+
+      let sugg = Array.isArray(ctx?.drug_suggestions) ? ctx.drug_suggestions : [];
+      if (!sugg.length && (ctx?.condition || condition)) {
+        const sd = await fetch(URLS.suggestDrugs, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            session_id: sessionId,
+            condition: (ctx?.condition || condition || "").trim() || null,
+            transcript: transcript || null,
+          }),
+        });
+        const sj = await sd.json();
+        if (Array.isArray(sj?.drugs) && sj.drugs.length) sugg = sj.drugs;
+      }
+      if (sugg.length) setDrugSuggestions(sugg);
+      if (!drug && sugg.length) setDrug(sugg[0]);
+
+      setScreenText("Suggestions updated");
+    } catch (e) {
+      setError(e.message || "Failed to update suggestions.");
+      setScreenText(`Error\n${e.message || "Failed to update suggestions."}`);
+    }
+  };
+
+  // Prefill once on mount if we already have transcript but no suggestions/condition yet
+  useEffect(() => {
+    if (transcript && (!drugSuggestions.length || !condition)) {
+      refreshSuggestions();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // ---------- PREP before Calculate ----------
   const ensureContextAndPrefill = async () => {
-    // 1) End-to-end preparation (sends transcript, ensures context, suggests drugs)
+    // Prefer store path
     if (typeof prepareForCalculation === "function") {
       await prepareForCalculation();
+      syncFromStoreToLocal();
+      return true;
     }
-    // 2) Copy prepared values from store into local UI
-    syncFromStoreToLocal();
+    // Otherwise, reuse refreshSuggestions fallback
+    await refreshSuggestions();
     return true;
   };
 
   // ---------- Validation ----------
   const validate = () => {
-    const d = drug || (drugSuggestions?.[0] || "");
+    const d = (drug || "").trim() || (drugSuggestions?.[0] || "");
     if (!d) return "Please select or enter a valid drug.";
     const ageNum = age === "" ? null : Number(age);
     const weightNum = weight === "" ? null : Number(weight);
@@ -151,30 +227,26 @@ export default function DosageCalculator({ onClose }) {
     return null;
   };
 
-  // ---------- Calculate (single trigger) ----------
+  // ---------- Calculate ----------
   const handleCalculate = async () => {
     setError(null);
     setResults({ dosage: "", regimen: "", notes: "" });
-    setScreenText("…");
+    setScreenText("Calculating…");
     setLoading(true);
 
     try {
-      // A) Prepare context and prefill fields from backend (strict, via store)
       await ensureContextAndPrefill();
 
-      // B) Validate UI inputs after prefill
       const v = validate();
-      if (v) { setError(v); setLoading(false); setScreenText("Err"); return; }
+      if (v) { setError(v); setLoading(false); setScreenText(`Error\n${v}`); return; }
 
-      // C) If drug was still empty, auto-pick first suggestion
       if (!drug && drugSuggestions?.length) setDrug(drugSuggestions[0]);
 
-      // D) Run calculation (stream or not)
       if (useStream && "ReadableStream" in window) await runStreaming();
       else await runNonStream();
     } catch (e) {
       setError(e.message || "Something went wrong.");
-      setScreenText("Err");
+      setScreenText(`Error\n${e.message || "Something went wrong."}`);
     } finally {
       setLoading(false);
     }
@@ -199,12 +271,13 @@ export default function DosageCalculator({ onClose }) {
     if (!res.ok) throw new Error(await res.text());
 
     const data = await res.json();
-    setResults({
+    const next = {
       dosage: data?.dosage || "",
       regimen: data?.regimen || "",
       notes: data?.notes || "",
-    });
-    setScreenText(data?.dosage ? data.dosage : "0");
+    };
+    setResults(next);
+    setScreenFromResults(next);
   };
 
   // ---------- Streaming ----------
@@ -234,31 +307,32 @@ export default function DosageCalculator({ onClose }) {
       const decoder = new TextDecoder();
       let acc = "";
 
+      // While streaming, show the live text (not truncated)
       while (true) {
         const { done, value } = await reader.read();
         if (done) break;
         const chunk = decoder.decode(value, { stream: true });
         acc += chunk;
-        // Show only a short tail in the LCD screen
-        setScreenText(acc.slice(-28));
+        setScreenText(acc.slice(-1500)); // keep it readable; multi-line screen wraps
       }
 
       const parsed = extractJsonDict(acc);
       if (!parsed) {
         setError("The model did not return valid JSON.");
-        setScreenText("Err");
+        setScreenText("Error\nInvalid model output");
       } else {
-        setResults({
+        const next = {
           dosage: String(parsed.dosage || "").trim(),
           regimen: String(parsed.regimen || "").trim(),
           notes: String(parsed.notes || "").trim(),
-        });
-        setScreenText(parsed.dosage || "0");
+        };
+        setResults(next);
+        setScreenFromResults(next);
       }
     } catch (e) {
       if (e.name !== "AbortError") {
         setError(e.message || "Streaming failed.");
-        setScreenText("Err");
+        setScreenText(`Error\n${e.message || "Streaming failed."}`);
       }
     } finally {
       setStreaming(false);
@@ -269,7 +343,11 @@ export default function DosageCalculator({ onClose }) {
   const onKey = (k) => {
     const setFn = activeField === "age" ? setAge : setWeight;
     const val = activeField === "age" ? age : weight;
-    if (k === "AC") { setFn(""); setScreenText("0"); return; }
+    if (k === "AC") {
+      setFn("");
+      setScreenText("0");
+      return;
+    }
     if (k === "." && String(val).includes(".")) return;
     const next = String(val || "") + k;
     setFn(next);
@@ -319,7 +397,7 @@ export default function DosageCalculator({ onClose }) {
         </div>
       </div>
 
-      {/* LCD-like calculator SCREEN (single-line, right aligned) */}
+      {/* MULTI-LINE LCD screen */}
       <div className="dc-screen" aria-live="polite">
         {screenText}
       </div>
@@ -336,14 +414,19 @@ export default function DosageCalculator({ onClose }) {
         {error && <div className="dc-callout dc-error">⚠️ {error}</div>}
 
         <div className="dc-grid">
-          {/* Drug (dynamic suggestions) */}
+          {/* Drug (dynamic suggestions or type manually) */}
           <div className="dc-field" style={{ gridColumn: "1 / -1" }}>
-            <label className="dc-label" htmlFor="drug">Drug</label>
+            <div className="dc-label-row">
+              <label className="dc-label" htmlFor="drug">Drug</label>
+              <button type="button" className="dc-link" onClick={refreshSuggestions}>
+                Get suggestions
+              </button>
+            </div>
             <input
               id="drug"
               className="dc-input"
               list="drug-suggestions"
-              placeholder="Select or type suggested drug"
+              placeholder="Select or type drug name"
               value={drug}
               onChange={(e) => setDrug(e.target.value)}
             />
@@ -382,7 +465,7 @@ export default function DosageCalculator({ onClose }) {
           </div>
         </div>
 
-        {/* Calculator keypad (compact height, 3D-ish keys) */}
+        {/* Keypad */}
         <div className="dc-keypad">
           {KEYPAD.map((row, idx) => (
             <div className="dc-keypad-row" key={idx}>
@@ -408,7 +491,7 @@ export default function DosageCalculator({ onClose }) {
           </div>
         </div>
 
-        {/* Results (compact) */}
+        {/* Results remain below as well (for copy/paste), but screen shows all too */}
         {(results.dosage || results.regimen || results.notes) && (
           <div className="dc-callout dc-success" aria-live="polite">
             {results.dosage && <p><strong>Dosage:</strong> {results.dosage}</p>}

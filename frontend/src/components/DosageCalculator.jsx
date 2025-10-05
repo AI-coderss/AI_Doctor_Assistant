@@ -12,16 +12,13 @@ import useDosageStore from "../store/dosageStore";
  *
  * Trigger model:
  *  - Pressing "Calculate" will:
- *      1) read transcript from Zustand store
- *      2) POST /context-ensure (strict extraction)
- *      3) fill condition/age/weight/drug suggestions
- *      4) call /calculate-dosage-(stream)-with-context
+ *      1) send transcript to backend + strict extract context (store)
+ *      2) prefill condition/age/weight/drug suggestions from store
+ *      3) call /calculate-dosage-(stream)-with-context
  */
 
 const API_BASE = "https://ai-doctor-assistant-backend-server.onrender.com";
 const URLS = {
-  contextEnsure: `${API_BASE}/context-ensure`,
-  suggestDrugs: `${API_BASE}/suggest-drugs`,
   calcStream: `${API_BASE}/calculate-dosage-stream-with-context`,
   calc: `${API_BASE}/calculate-dosage-with-context`,
 };
@@ -35,12 +32,13 @@ const KEYPAD = [
 
 export default function DosageCalculator({ onClose }) {
   // === Store wiring ===
-  // Expecting your Zustand store to expose these (gracefully degrade if not).
   const {
     sessionId: storeSessionId,
     setSessionId,
     transcript: storeTranscript,
-    setTranscript: setStoreTranscript,
+    prepareForCalculation,          // <-- from updated store
+    inputs: storeInputs,            // { drug, age, weight, condition }
+    context: storeContext,          // { drug_suggestions, ... }
   } = useDosageStore?.() || {};
 
   // Ensure a session id (persist it in store if available)
@@ -57,7 +55,7 @@ export default function DosageCalculator({ onClose }) {
 
   const transcript = (storeTranscript || "").trim();
 
-  // === Local UI state ===
+  // === Local UI state (mirrors store inputs, filled on demand) ===
   const [condition, setCondition] = useState("");
   const [drugSuggestions, setDrugSuggestions] = useState([]);
   const [drug, setDrug] = useState("");
@@ -112,49 +110,33 @@ export default function DosageCalculator({ onClose }) {
     [drugSuggestions]
   );
 
-  // ---------- PREP STEP on Calculate: ensure context & fill fields ----------
+  /**
+   * Pulls prepared data from the store into the calculator's local UI
+   * WITHOUT clobbering what the user already typed here.
+   */
+  const syncFromStoreToLocal = () => {
+    const sInputs = storeInputs || {};
+    const sCtx = storeContext || {};
+
+    if (!condition && sInputs.condition) setCondition(String(sInputs.condition));
+    if (!age && sInputs.age !== "" && sInputs.age != null) setAge(String(sInputs.age));
+    if (!weight && sInputs.weight !== "" && sInputs.weight != null) setWeight(String(sInputs.weight));
+
+    const sugg = Array.isArray(sCtx.drug_suggestions) ? sCtx.drug_suggestions : [];
+    if (!drugSuggestions.length && sugg.length) setDrugSuggestions(sugg);
+
+    const candidateDrug = sInputs.drug || (sugg.length ? sugg[0] : "");
+    if (!drug && candidateDrug) setDrug(String(candidateDrug));
+  };
+
+  // ---------- PREP STEP on Calculate: use the STORE to ensure context & fill fields ----------
   const ensureContextAndPrefill = async () => {
-    // 1) Strict extraction
-    const r = await fetch(URLS.contextEnsure, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        session_id: sessionId,
-        transcript: transcript || null,
-      }),
-    });
-    const ctx = await r.json();
-
-    // Apply context into the UI
-    if (ctx?.condition) setCondition(ctx.condition);
-    if (ctx?.age_years != null && age === "") setAge(String(ctx.age_years));
-    if (ctx?.weight_kg != null && weight === "") setWeight(String(ctx.weight_kg));
-    if (Array.isArray(ctx?.drug_suggestions) && ctx.drug_suggestions.length) {
-      setDrugSuggestions(ctx.drug_suggestions);
-      if (!drug) setDrug(ctx.drug_suggestions[0] || "");
+    // 1) End-to-end preparation (sends transcript, ensures context, suggests drugs)
+    if (typeof prepareForCalculation === "function") {
+      await prepareForCalculation();
     }
-
-    // 2) If we still have no suggestions but do have a condition, ask for them
-    const haveSuggestions = Array.isArray(ctx?.drug_suggestions) && ctx.drug_suggestions.length;
-    const cnd = (ctx?.condition || condition || "").trim();
-    if (!haveSuggestions && cnd) {
-      const sd = await fetch(URLS.suggestDrugs, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          session_id: sessionId,
-          condition: cnd,
-          transcript: transcript || null,
-        }),
-      });
-      const sj = await sd.json();
-      if (Array.isArray(sj?.drugs) && sj.drugs.length) {
-        setDrugSuggestions(sj.drugs);
-        if (!drug) setDrug(sj.drugs[0] || "");
-      }
-    }
-
-    // Now we have the best-possible fields before calling dosage
+    // 2) Copy prepared values from store into local UI
+    syncFromStoreToLocal();
     return true;
   };
 
@@ -177,7 +159,7 @@ export default function DosageCalculator({ onClose }) {
     setLoading(true);
 
     try {
-      // A) Prepare context and prefill fields from backend (strict)
+      // A) Prepare context and prefill fields from backend (strict, via store)
       await ensureContextAndPrefill();
 
       // B) Validate UI inputs after prefill

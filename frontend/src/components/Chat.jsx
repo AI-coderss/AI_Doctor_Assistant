@@ -21,6 +21,7 @@ import VoiceRecorderPanel from "./VoiceRecorderPanel";
 import useLiveTranscriptStore from "../store/useLiveTranscriptStore";
 import LabResultsUploader from "./LabResultsUploader";
 import MedicationChecker from "./MedicationChecker"; // ✅
+import useDosageStore from "../store/dosageStore";
 import CalculateDosageButton from "./CalculateDosageButton"; // ✅
 import { Howl } from "howler";
 
@@ -33,7 +34,7 @@ const drawerComponentOverrides = `
   .tools-grid {
     display: grid;
     grid-template-columns: repeat(3, minmax(0, 1fr));
-    column-gap: 16px;         /* horizontal gap between the 3 tiles */
+       /* horizontal gap between the 3 tiles */
     row-gap: 6px;            /* vertical gap for the second row */
     align-items: start;
     justify-items: center;     /* center each tile in its grid cell */
@@ -575,21 +576,39 @@ const Chat = () => {
     });
   };
 
-  const handleAssistantContextTranscript = async (transcript) => {
+ const handleAssistantContextTranscript = async (transcript) => {
+  try {
+    const t = (transcript || "").trim();
+    if (!t) return;
+
+    // 1) Persist context for RAG/dosage endpoints
+    await fetch(`${BACKEND_BASE}/set-context`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ session_id: sessionId, transcript: t }),
+    });
+
+    // 2) Prime voice-mode service (fire-and-forget)
+    fetch(
+      "https://ai-doctor-assistant-voice-mode-webrtc.onrender.com/api/session-context",
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ session_id: sessionId, transcript: t }),
+      }
+    ).catch(() => {});
+
+    // 3) Mirror locally for DosageCalculator (Zustand)
     try {
-      if (!transcript || !transcript.trim()) return;
-      await fetch(
-        "https://ai-doctor-assistant-voice-mode-webrtc.onrender.com/api/session-context",
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ session_id: sessionId, transcript }),
-        }
-      );
-    } catch (e) {
-      console.error("Failed to send transcript context:", e);
-    }
-  };
+      const store = useDosageStore.getState();
+      store.setTranscript?.(t);
+      store.setSessionId?.(sessionId);
+    } catch {}
+
+  } catch (e) {
+    console.error("Failed to send transcript context:", e);
+  }
+};
 
   /** Specialty form streaming (if used elsewhere) */
   const handleFormStreamEvent = (evt) => {

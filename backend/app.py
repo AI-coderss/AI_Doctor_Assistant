@@ -98,9 +98,6 @@ CORS(
             "allow_headers": ["Content-Type", "Authorization", "Accept"],
             "supports_credentials": True,
         },
-
-        # --- Existing endpoints (fixed the missing leading / where needed) ---
-
         r"/api/rtc-transcribe-connect": {
             "origins": [
                 "https://ai-doctor-assistant-app-dev.onrender.com",

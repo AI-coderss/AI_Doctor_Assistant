@@ -7,7 +7,7 @@ import "../styles/ChatInputWidget.css";
 
 // Your backend endpoint:
 const BACKEND_TRANSCRIBE_URL =
-  "https://ai-doctor-assistant-backend-server.onrender.com/transcribe";
+  "https://ai-doctor-assistant-backend-server.onrender.com/transcribe_widget";
 
 // Keep this tiny: pick a sane MIME and map to an extension
 const pickMime = () => {

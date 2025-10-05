@@ -121,7 +121,7 @@ CORS(
             "supports_credentials": True,
         },
 
-        r"/api/rtc-transcribe-nodes-connect": {
+        r"/transcribe_widget": {
             "origins": [
                 "https://ai-doctor-assistant-app-dev.onrender.com",
                 "http://localhost:3000",
@@ -2634,8 +2634,8 @@ def speech_to_text(path: str) -> dict:
         text = res
     return {"text": (text or "").strip()}
 
-@app.route("/transcribe", methods=["POST"])
-def transcribe():
+@app.route("/transcribe_widget", methods=["POST"])
+def transcribe_widget():
     if "audio_data" not in request.files:
         return jsonify({"error": "No audio file provided"}), 400
 

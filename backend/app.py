@@ -84,158 +84,93 @@ def _safe_json_dict(text: str):
 
 app = Flask(__name__)
 from flask_cors import CORS
-ALLOWED_ORIGINS = [
-    "https://ai-doctor-assistant-app-dev.onrender.com",
-    "http://localhost:3000",
-]
 
 CORS(
     app,
     resources={
-        # ---- Medication checker (new) ----
-        r"/meds/*": {
-            "origins": ALLOWED_ORIGINS,
-            "methods": ["POST", "GET", "OPTIONS"],
-            "allow_headers": ["Content-Type", "Authorization"],
-            "supports_credentials": True,
-            "expose_headers": ["Content-Type"],
-        },
-
-        # ---- Labs + OCR ----
-        r"/ocr": {
-            "origins": ALLOWED_ORIGINS,
-            "methods": ["POST", "OPTIONS"],
-            "allow_headers": ["Content-Type", "Authorization"],
-            "supports_credentials": True,
-        },
-        r"/api/ocr": {
-            "origins": ALLOWED_ORIGINS,
-            "methods": ["POST", "OPTIONS"],
-            "allow_headers": ["Content-Type", "Authorization"],
-            "supports_credentials": True,
-        },
-        r"/labs/*": {
-            "origins": ALLOWED_ORIGINS,
-            "methods": ["POST", "GET", "OPTIONS"],
-            "allow_headers": ["Content-Type", "Authorization"],
-            "supports_credentials": True,
-        },
-
-        # ---- Core chat / RAG streams ----
-        r"/stream": {
-            "origins": ALLOWED_ORIGINS,
-            "methods": ["POST", "OPTIONS"],
-            "allow_headers": ["Content-Type", "Authorization"],
-            "supports_credentials": True,
-        },
-        r"/generate": {
-            "origins": ALLOWED_ORIGINS,
-            "methods": ["POST", "OPTIONS"],
-            "allow_headers": ["Content-Type", "Authorization"],
-            "supports_credentials": True,
-        },
-        r"/case-second-opinion-stream": {
-            "origins": ALLOWED_ORIGINS,
-            "methods": ["POST", "OPTIONS"],
-            "allow_headers": ["Content-Type", "Authorization"],
-            "supports_credentials": True,
-        },
-        r"/form-report-stream": {
-            "origins": ALLOWED_ORIGINS,
-            "methods": ["POST", "OPTIONS"],
-            "allow_headers": ["Content-Type", "Authorization"],
-            "supports_credentials": True,
-        },
-        r"/prompt-formatter": {
-            "origins": ALLOWED_ORIGINS,
-            "methods": ["POST", "OPTIONS"],
-            "allow_headers": ["Content-Type", "Authorization"],
-            "supports_credentials": True,
-        },
-
-        # ---- Dosage endpoints ----
-        r"/calculate-dosage": {
-            "origins": ALLOWED_ORIGINS,
-            "methods": ["POST", "OPTIONS"],
-            "allow_headers": ["Content-Type", "Authorization"],
-            "supports_credentials": True,
-        },
-        r"/calculate-dosage-stream": {
-            "origins": ALLOWED_ORIGINS,
-            "methods": ["POST", "OPTIONS"],
-            "allow_headers": ["Content-Type", "Authorization"],
-            "supports_credentials": True,
-        },
-        r"/calculate-dosage-with-context": {
-            "origins": ALLOWED_ORIGINS,
-            "methods": ["POST", "OPTIONS"],
-            "allow_headers": ["Content-Type", "Authorization"],
-            "supports_credentials": True,
-        },
-        r"/calculate-dosage-stream-with-context": {
-            "origins": ALLOWED_ORIGINS,
-            "methods": ["POST", "OPTIONS"],
-            "allow_headers": ["Content-Type", "Authorization"],
-            "supports_credentials": True,
-        },
-
-        # ---- Realtime / notes (you already had these, keeping them tidy) ----
-        r"/api/rtc-transcribe-connect": {
-            "origins": ALLOWED_ORIGINS,
-            "methods": ["GET", "POST", "OPTIONS"],
-            "allow_headers": ["Content-Type", "Authorization"],
-            "supports_credentials": True,
-        },
-        r"/api/rtc-transcribe-nodes-connect": {
-            "origins": ALLOWED_ORIGINS,
-            "methods": ["POST", "OPTIONS"],
-            "allow_headers": ["Content-Type", "Authorization"],
-            "supports_credentials": True,
-        },
-        r"/api/notes-structure-stream": {
-            "origins": ALLOWED_ORIGINS,
-            "methods": ["POST", "OPTIONS"],
-            "allow_headers": ["Content-Type", "Authorization"],
-            "supports_credentials": True,
-        },
-        r"/api/notes-second-opinion-stream": {
-            "origins": ALLOWED_ORIGINS,
-            "methods": ["POST", "OPTIONS"],
-            "allow_headers": ["Content-Type", "Authorization"],
-            "supports_credentials": True,
-        },
-
-        # ---- Generic API catch-all ----
-        r"/api/*": {
-            "origins": ALLOWED_ORIGINS,
-            "methods": ["GET", "POST", "OPTIONS"],
-            "allow_headers": ["Content-Type", "Authorization"],
-            "supports_credentials": True,
-        },
-
-        # ---- Final safety net (ensures 4xx/5xx also carry CORS) ----
+        # Default policy (applies to everything unless a more specific rule below overrides it)
         r"/*": {
-            "origins": ALLOWED_ORIGINS,
+            "origins": [
+                "https://ai-doctor-assistant-app-dev.onrender.com",
+                "http://localhost:3000",
+            ],
             "methods": ["GET", "POST", "OPTIONS"],
-            "allow_headers": ["Content-Type", "Authorization"],
+            "allow_headers": ["Content-Type", "Authorization", "Accept"],
             "supports_credentials": True,
-            "expose_headers": ["Content-Type"],
         },
-        r"api/rtc-transcribe-connect": {
-            "origins": ALLOWED_ORIGINS,
+
+        # --- Existing endpoints (fixed the missing leading / where needed) ---
+
+        r"/api/rtc-transcribe-connect": {
+            "origins": [
+                "https://ai-doctor-assistant-app-dev.onrender.com",
+                "http://localhost:3000",
+            ],
             "methods": ["GET", "POST", "OPTIONS"],
-            "allow_headers": ["Content-Type", "Authorization"],
+            "allow_headers": ["Content-Type", "Authorization", "Accept"],
             "supports_credentials": True,
-            "expose_headers": ["Content-Type"],
         },
-        r"api/rtc-transcribe-nodes-connect": {
-                "origins": ALLOWED_ORIGINS,
-                "methods": ["GET", "POST", "OPTIONS"],
-                "allow_headers": ["Content-Type", "Authorization"],
-                "supports_credentials": True,
-                "expose_headers": ["Content-Type"],
+
+        r"/analyze-form-case-stream": {
+            "origins": [
+                "https://ai-doctor-assistant-app-dev.onrender.com",
+                "http://localhost:3000",
+            ],
+            "methods": ["POST", "OPTIONS"],
+            "allow_headers": ["Content-Type", "Authorization", "Accept"],
+            "supports_credentials": True,
         },
-    })
+
+        r"/api/rtc-transcribe-nodes-connect": {
+            "origins": [
+                "https://ai-doctor-assistant-app-dev.onrender.com",
+                "http://localhost:3000",
+            ],
+            "methods": ["POST", "OPTIONS"],
+            "allow_headers": ["Content-Type", "Authorization", "Accept"],
+            "supports_credentials": True,
+        },
+
+        r"/ocr": {
+            "origins": [
+                "https://ai-doctor-assistant-app-dev.onrender.com",
+                "http://localhost:3000",
+            ],
+            "methods": ["POST", "OPTIONS"],
+            "allow_headers": ["Content-Type", "Authorization", "Accept"],
+            "supports_credentials": True,
+        },
+
+        r"/api/ocr": {
+            "origins": [
+                "https://ai-doctor-assistant-app-dev.onrender.com",
+                "http://localhost:3000",
+            ],
+            "methods": ["POST", "OPTIONS"],
+            "allow_headers": ["Content-Type", "Authorization", "Accept"],
+            "supports_credentials": True,
+        },
+
+        # --- NEW: Medication checker endpoints (cover all /meds/* routes) ---
+
+        r"/meds/parse": {
+            "origins": [
+                "https://ai-doctor-assistant-app-dev.onrender.com",
+                "http://localhost:3000",
+            ],  "methods": ["POST", "OPTIONS"],       "allow_headers": ["Content-Type", "Authorization", "Accept"],
+            "supports_credentials": True,
+        },
+        r"/meds/map": {
+            "origins": ["https://ai-doctor-assistant-app-dev.onrender.com",
+                "http://localhost:3000",
+            ],
+            "methods": ["POST", "OPTIONS"],
+            "allow_headers": ["Content-Type", "Authorization", "Accept"],
+            "supports_credentials": True,
+        },
+    }
+)
+
 # Optional: hard cap request size (mirrors OCR_MAX_BYTES)
 app.config["MAX_CONTENT_LENGTH"] = int(os.environ.get("OCR_MAX_BYTES", 20 * 1024 * 1024))
 
@@ -2683,6 +2618,48 @@ def meds_analyze_stream():
             yield chunk
 
     return Response(stream_with_context(generate()), content_type="text/plain")
+# ============================== Speech-to-Text ==============================
+SUPPORTED_FORMATS = ['flac', 'm4a', 'mp3', 'mp4', 'mpeg', 'mpga', 'oga', 'ogg', 'wav', 'webm']
 
+def speech_to_text(path: str) -> dict:
+    with open(path, "rb") as f:
+        res = client.audio.transcriptions.create(
+            model="whisper-1",
+            file=f,
+            response_format="text"   # simplest: returns raw text string
+        )
+    # Some SDKs return a str directly for response_format="text"
+    text = getattr(res, "text", None)
+    if isinstance(res, str) and not text:
+        text = res
+    return {"text": (text or "").strip()}
+
+@app.route("/transcribe", methods=["POST"])
+def transcribe():
+    if "audio_data" not in request.files:
+        return jsonify({"error": "No audio file provided"}), 400
+
+    audio_file = request.files["audio_data"]
+    file_extension = (audio_file.filename.rsplit(".", 1)[-1] if "." in audio_file.filename else "").lower()
+
+    if file_extension not in SUPPORTED_FORMATS:
+        return jsonify({
+            "error": f"Unsupported file format: {file_extension}. "
+                     f"Supported formats: {SUPPORTED_FORMATS}"
+        }), 400
+
+    with tempfile.NamedTemporaryFile(delete=False, suffix=f".{file_extension}") as tmp:
+        audio_file.save(tmp.name)
+        temp_path = tmp.name
+
+    try:
+        transcript_result = speech_to_text(temp_path)
+    finally:
+        try:
+            os.remove(temp_path)
+        except Exception:
+            pass
+
+    return jsonify({"transcript": transcript_result.get("text", "")})
 if __name__ == "__main__":
     app.run(host="127.0.0.1", port=5050, debug=True)

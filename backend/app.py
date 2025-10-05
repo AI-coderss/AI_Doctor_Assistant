@@ -221,9 +221,21 @@ CORS(
             "supports_credentials": True,
             "expose_headers": ["Content-Type"],
         },
-    },
-    supports_credentials=True,
-)
+        r"api/rtc-transcribe-connect": {
+            "origins": ALLOWED_ORIGINS,
+            "methods": ["GET", "POST", "OPTIONS"],
+            "allow_headers": ["Content-Type", "Authorization"],
+            "supports_credentials": True,
+            "expose_headers": ["Content-Type"],
+        },
+        r"api/rtc-transcribe-nodes-connect": {
+                "origins": ALLOWED_ORIGINS,
+                "methods": ["GET", "POST", "OPTIONS"],
+                "allow_headers": ["Content-Type", "Authorization"],
+                "supports_credentials": True,
+                "expose_headers": ["Content-Type"],
+        },
+    })
 # Optional: hard cap request size (mirrors OCR_MAX_BYTES)
 app.config["MAX_CONTENT_LENGTH"] = int(os.environ.get("OCR_MAX_BYTES", 20 * 1024 * 1024))
 

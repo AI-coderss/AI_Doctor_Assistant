@@ -165,6 +165,15 @@ CORS(
             "allow_headers": ["Content-Type", "Authorization", "Accept"],
             "supports_credentials": True,
         },
+        r"/vision/analyze": {
+        "origins": [
+            "https://ai-doctor-assistant-app-dev.onrender.com",
+            "http://localhost:3000",
+        ],
+        "methods": ["POST"],
+        "allow_headers": ["Content-Type", "Authorization"],
+        "supports_credentials": True,
+    },
     }
 )
 
@@ -2658,5 +2667,75 @@ def transcribe_widget():
             pass
 
     return jsonify({"transcript": transcript_result.get("text", "")})
+# ============================== Medical Vision ==============================
+MEDICAL_VISION_SYSTEM_PROMPT = (
+    "You are an AI clinical imaging assistant speaking to a physician (not the patient). "
+    "Analyze the attached clinical image. Use a doctor-to-doctor tone. "
+    "Identify the likely modality (e.g., X-ray, CT slice, MRI, ultrasound, ECG tracing, fundus photo, dermoscopy, wound photo, microscope slide, etc.), "
+    "describe key findings with concise bullets, provide a short differential with reasoning, "
+    "suggest targeted next steps (tests, views, measurements), and mention safety red flags. "
+    "Do NOT claim to make a diagnosis; do not fabricate measurements. "
+    "Be succinct and evidence-minded."
+)
+
+def _file_to_data_url(file_storage):
+    data = file_storage.read()
+    if not data:
+        return None
+    mimetype = file_storage.mimetype or "application/octet-stream"
+    b64 = base64.b64encode(data).decode("ascii")
+    return f"data:{mimetype};base64,{b64}"
+
+@app.route("/vision/analyze", methods=["POST"])
+def vision_analyze():
+    """
+    Form-data:
+      - image: file (required)
+      - prompt: optional string to refine the question
+    Returns: { "text": "...", "meta": { "filename": "...", "mimetype": "...", "size": int } }
+    """
+    try:
+        if "image" not in request.files:
+            return jsonify(error="Missing file field 'image'."), 400
+
+        f = request.files["image"]
+        if not (f and (f.mimetype or "").startswith("image/")):
+            return jsonify(error="Only image/* files are accepted."), 400
+
+        data_url = _file_to_data_url(f)
+        if not data_url:
+            return jsonify(error="Empty file or read error."), 400
+
+        user_prompt = request.form.get("prompt", "").strip() or \
+            "Please provide a physician-facing analysis of this medical image."
+
+        # Compose vision request
+        resp = client.responses.create(
+            model="gpt-4.1-mini",
+            input=[
+                {
+                    "role": "system",
+                    "content": [{"type": "input_text", "text": MEDICAL_VISION_SYSTEM_PROMPT}],
+                },
+                {
+                    "role": "user",
+                    "content": [
+                        {"type": "input_text", "text": user_prompt},
+                        {"type": "input_image", "image_url": data_url},
+                    ],
+                },
+            ],
+        )
+
+        text = resp.output_text or ""
+        meta = {
+            "filename": getattr(f, "filename", None),
+            "mimetype": f.mimetype,
+            "size": request.content_length or None,
+        }
+        return jsonify(text=text, meta=meta), 200
+
+    except Exception as e:
+        return jsonify(error=str(e)), 500
 if __name__ == "__main__":
     app.run(host="127.0.0.1", port=5050, debug=True)

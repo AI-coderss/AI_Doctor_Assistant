@@ -23,6 +23,7 @@ import LabResultsUploader from "./LabResultsUploader";
 import MedicationChecker from "./MedicationChecker"; // ✅
 import useDosageStore from "../store/dosageStore";
 import CalculateDosageButton from "./CalculateDosageButton"; // ✅
+import MedicalImageAnalyzer from "./MedicalImageAnalyzer"; // ✅ NEW (Vision)
 import { Howl } from "howler";
 
 let localStream;
@@ -34,8 +35,8 @@ const drawerComponentOverrides = `
   .tools-grid {
     display: grid;
     grid-template-columns: repeat(3, minmax(0, 1fr));
-       /* horizontal gap between the 3 tiles */
-    row-gap: 6px;            /* vertical gap for the second row */
+    column-gap: 16px;          /* horizontal gap between the 3 tiles */
+    row-gap: 16px;             /* vertical gap for the second row */
     align-items: start;
     justify-items: center;     /* center each tile in its grid cell */
     padding: 16px;             /* consistent inner padding for the drawer */
@@ -71,7 +72,6 @@ const drawerComponentOverrides = `
     margin: 0 0 8px 0;          /* a little bottom space before the button/uploader */
   }
 `;
-
 
 /** Normalize bot markdown a bit */
 function normalizeMarkdown(input = "") {
@@ -146,7 +146,7 @@ const Chat = () => {
     return () => {
       try {
         toggleSfxRef.current?.unload();
-      } catch { }
+      } catch {}
     };
   }, []);
 
@@ -183,11 +183,7 @@ const Chat = () => {
         return arr;
       });
     }
-    if (
-      !isStreaming &&
-      liveIdxRef.current !== null &&
-      !finalizeTimerRef.current
-    ) {
+    if (!isStreaming && liveIdxRef.current !== null && !finalizeTimerRef.current) {
       finalizeTimerRef.current = setTimeout(() => {
         setChats((prev) => {
           const arr = [...prev];
@@ -240,22 +236,16 @@ const Chat = () => {
         }
       };
       pc.onicecandidateerror = (e) => console.error("ICE candidate error:", e);
-      pc.onnegotiationneeded = () => { };
+      pc.onnegotiationneeded = () => {};
       pc.onconnectionstatechange = () => {
-        if (
-          pc.connectionState === "closed" ||
-          pc.connectionState === "failed"
-        ) {
+        if (pc.connectionState === "closed" || pc.connectionState === "failed") {
           setConnectionStatus("error");
           setIsMicActive(false);
         }
       };
 
-      if (!localStream)
-        console.error("localStream undefined when adding track.");
-      stream
-        .getAudioTracks()
-        .forEach((track) => pc.addTrack(track, localStream));
+      if (!localStream) console.error("localStream undefined when adding track.");
+      stream.getAudioTracks().forEach((track) => pc.addTrack(track, localStream));
 
       const channel = pc.createDataChannel("response");
       channel.onopen = () => {
@@ -292,9 +282,7 @@ const Chat = () => {
         const msg = JSON.parse(event.data);
         switch (msg.type) {
           case "response.audio.delta": {
-            const chunk = Uint8Array.from(atob(msg.delta), (c) =>
-              c.charCodeAt(0)
-            );
+            const chunk = Uint8Array.from(atob(msg.delta), (c) => c.charCodeAt(0));
             const tmp = new Uint8Array(pcmBuffer.byteLength + chunk.byteLength);
             tmp.set(new Uint8Array(pcmBuffer), 0);
             tmp.set(chunk, pcmBuffer.byteLength);
@@ -331,8 +319,7 @@ const Chat = () => {
                 dataArray.reduce((sum, val) => sum + val, 0) / dataArray.length;
               const normalized = Math.max(0.5, Math.min(2, avg / 50));
               setAudioScale(normalized);
-              if (!el.paused && !el.ended)
-                requestAnimationFrame(monitorBotVolume);
+              if (!el.paused && !el.ended) requestAnimationFrame(monitorBotVolume);
             };
             monitorBotVolume();
             setAudioWave(true);
@@ -364,7 +351,7 @@ const Chat = () => {
           sdp: offer.sdp.replace(
             /a=rtpmap:\d+ opus\/48000\/2/g,
             "a=rtpmap:111 opus/48000/2\r\n" +
-            "a=fmtp:111 minptime=10;useinbandfec=1"
+              "a=fmtp:111 minptime=10;useinbandfec=1"
           ),
         };
         await pc.setLocalDescription(modifiedOffer);
@@ -393,8 +380,7 @@ const Chat = () => {
           body: offer.sdp,
         }
       );
-      if (!res.ok)
-        throw new Error(`Server responded with status ${res.status}`);
+      if (!res.ok) throw new Error(`Server responded with status ${res.status}`);
       const answer = await res.text();
       await pc.setRemoteDescription({ type: "answer", sdp: answer });
     } catch (error) {
@@ -412,44 +398,42 @@ const Chat = () => {
     if (connectionStatus === "connected" && localStream) {
       const newMicState = !isMicActive;
       setIsMicActive(newMicState);
-      localStream
-        .getAudioTracks()
-        .forEach((track) => (track.enabled = newMicState));
+      localStream.getAudioTracks().forEach((track) => (track.enabled = newMicState));
     }
   };
 
   const closeVoiceSession = () => {
     try {
       stopAudio?.();
-    } catch { }
+    } catch {}
     try {
       const { setAudioScale } = useAudioForVisualizerStore.getState();
       setAudioScale(1);
-    } catch { }
+    } catch {}
     if (audioPlayerRef.current) {
       try {
         audioPlayerRef.current.pause();
-      } catch { }
+      } catch {}
       audioPlayerRef.current.srcObject = null;
       audioPlayerRef.current.src = "";
     }
     if (dataChannel && dataChannel.readyState !== "closed") {
       try {
         dataChannel.close();
-      } catch { }
+      } catch {}
     }
     if (peerConnection) {
       try {
         peerConnection.getSenders?.().forEach((s) => s.track?.stop());
-      } catch { }
+      } catch {}
       try {
         peerConnection.close();
-      } catch { }
+      } catch {}
     }
     if (localStream) {
       try {
         localStream.getTracks().forEach((t) => t.stop());
-      } catch { }
+      } catch {}
       localStream = null;
     }
     setDataChannel(null);
@@ -463,14 +447,14 @@ const Chat = () => {
     setIsVoiceMode(true);
     if (audioPlayerRef.current) {
       audioPlayerRef.current.muted = true;
-      audioPlayerRef.current.play().catch(() => { });
+      audioPlayerRef.current.play().catch(() => {});
     }
     try {
       if (toggleSfxRef.current) {
         toggleSfxRef.current.stop();
         toggleSfxRef.current.play();
       }
-    } catch { }
+    } catch {}
   };
 
   // Text chat → /stream
@@ -576,39 +560,38 @@ const Chat = () => {
     });
   };
 
- const handleAssistantContextTranscript = async (transcript) => {
-  try {
-    const t = (transcript || "").trim();
-    if (!t) return;
+  const handleAssistantContextTranscript = async (transcript) => {
+    try {
+      const t = (transcript || "").trim();
+      if (!t) return;
 
-    // 1) Persist context for RAG/dosage endpoints
-    await fetch(`${BACKEND_BASE}/set-context`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ session_id: sessionId, transcript: t }),
-    });
-
-    // 2) Prime voice-mode service (fire-and-forget)
-    fetch(
-      "https://ai-doctor-assistant-voice-mode-webrtc.onrender.com/api/session-context",
-      {
+      // 1) Persist context for RAG/dosage endpoints
+      await fetch(`${BACKEND_BASE}/set-context`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ session_id: sessionId, transcript: t }),
-      }
-    ).catch(() => {});
+      });
 
-    // 3) Mirror locally for DosageCalculator (Zustand)
-    try {
-      const store = useDosageStore.getState();
-      store.setTranscript?.(t);
-      store.setSessionId?.(sessionId);
-    } catch {}
+      // 2) Prime voice-mode service (fire-and-forget)
+      fetch(
+        "https://ai-doctor-assistant-voice-mode-webrtc.onrender.com/api/session-context",
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ session_id: sessionId, transcript: t }),
+        }
+      ).catch(() => {});
 
-  } catch (e) {
-    console.error("Failed to send transcript context:", e);
-  }
-};
+      // 3) Mirror locally for DosageCalculator (Zustand)
+      try {
+        const store = useDosageStore.getState();
+        store.setTranscript?.(t);
+        store.setSessionId?.(sessionId);
+      } catch {}
+    } catch (e) {
+      console.error("Failed to send transcript context:", e);
+    }
+  };
 
   /** Specialty form streaming (if used elsewhere) */
   const handleFormStreamEvent = (evt) => {
@@ -808,8 +791,9 @@ const Chat = () => {
           return (
             <div
               key={index}
-              className={`chat-message ${chat.who} ${chat.live ? "live" : ""} ${chat.streaming ? "streaming" : ""
-                }`}
+              className={`chat-message ${chat.who} ${chat.live ? "live" : ""} ${
+                chat.streaming ? "streaming" : ""
+              }`}
             >
               {chat.who === "bot" && (
                 <figure className="avatar">
@@ -1027,9 +1011,33 @@ const Chat = () => {
           </div>
         </div>
 
-        {/* 4) Dosage calculator button (new row, 3 per row grid) */}
+        {/* 4) Dosage calculator button (second row) */}
         <div className="tool-wrapper">
           <CalculateDosageButton />
+        </div>
+
+        {/* 5) Medical image analyzer (Vision) — placed alongside calculator on second row */}
+        <div className="tool-wrapper">
+          <MedicalImageAnalyzer
+            onResult={(text, meta) => {
+              setChats((prev) => [
+                ...prev,
+                {
+                  who: "bot",
+                  msg: normalizeMarkdown(
+                    [
+                      "**Medical Image Analysis (Vision)**",
+                      meta?.filename ? `*Source:* ${meta.filename}` : null,
+                      "",
+                      text,
+                    ]
+                      .filter(Boolean)
+                      .join("\n")
+                  ),
+                },
+              ]);
+            }}
+          />
         </div>
       </DrawComponent>
     </div>
@@ -1075,7 +1083,6 @@ const DrawComponent = ({ children }) => {
           >
             {children}
           </motion.div>
-
         )}
       </AnimatePresence>
 
@@ -1237,7 +1244,7 @@ function LabRow({ lab }) {
     const rightYellowBeg = Math.max(high - band, low);
     const rightRedStart = Math.min(high + band, max);
 
-    const total = max - min || 1;
+    const total = (max - min) || 1;
     redL = ((leftRedEnd - min) / total) * 100;
     yellowL = ((leftYellowEnd - leftRedEnd) / total) * 100;
     green = ((rightYellowBeg - leftYellowEnd) / total) * 100;
@@ -1277,9 +1284,7 @@ function LabRow({ lab }) {
         <div className="lab-row__name">{name}</div>
         <div className="lab-row__range">
           {Number.isFinite(low) && Number.isFinite(high) ? (
-            <>
-              Normal range: {low} – {high} {unit}
-            </>
+            <>Normal range: {low} – {high} {unit}</>
           ) : (
             <em>Normal range: unknown</em>
           )}
@@ -1293,30 +1298,17 @@ function LabRow({ lab }) {
             : ""}
         </div>
         <div className="bar">
-          {redL > 0 && (
-            <div className="seg seg--red" style={{ flexBasis: `${redL}%` }} />
-          )}
+          {redL > 0 && <div className="seg seg--red" style={{ flexBasis: `${redL}%` }} />}
           {yellowL > 0 && (
-            <div
-              className="seg seg--yellow"
-              style={{ flexBasis: `${yellowL}%` }}
-            />
+            <div className="seg seg--yellow" style={{ flexBasis: `${yellowL}%` }} />
           )}
           {green > 0 && (
-            <div
-              className="seg seg--green"
-              style={{ flexBasis: `${green}%` }}
-            />
+            <div className="seg seg--green" style={{ flexBasis: `${green}%` }} />
           )}
           {yellowR > 0 && (
-            <div
-              className="seg seg--yellow"
-              style={{ flexBasis: `${yellowR}%` }}
-            />
+            <div className="seg seg--yellow" style={{ flexBasis: `${yellowR}%` }} />
           )}
-          {redR > 0 && (
-            <div className="seg seg--red" style={{ flexBasis: `${redR}%` }} />
-          )}
+          {redR > 0 && <div className="seg seg--red" style={{ flexBasis: `${redR}%` }} />}
 
           <div className="indicator" style={{ left: `${posPct}%` }} />
         </div>

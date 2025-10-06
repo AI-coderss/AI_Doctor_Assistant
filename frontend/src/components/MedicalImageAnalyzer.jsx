@@ -23,7 +23,7 @@ export default function MedicalImageAnalyzer({ onResult }) {
     try {
       const form = new FormData();
       form.append("image", file);
-      // Optional instruction override for a particular case:
+      // Optional override:
       // form.append("prompt", "Focus on pneumothorax signs.");
 
       const res = await fetch(VISION_URL, { method: "POST", body: form });
@@ -47,15 +47,21 @@ export default function MedicalImageAnalyzer({ onResult }) {
     <div className="vision-tool">
       <motion.button
         type="button"
-        className="vision-btn"
+        className={`vision-btn ${busy ? "is-busy" : ""}`}
         onClick={onPick}
-        whileHover={{ scale: 1.02 }}
-        whileTap={{ scale: 0.98 }}
+        whileHover={{ scale: busy ? 1 : 1.02 }}
+        whileTap={{ scale: busy ? 1 : 0.98 }}
         disabled={busy}
         title="Analyze medical image"
         aria-label="Analyze medical image"
+        aria-busy={busy}
+        aria-describedby="vision-status"
       >
-        {busy ? "Analyzing…" : "Analyze Image"}
+        {busy ? (
+          <span className="rainbow-spinner" aria-hidden="true" />
+        ) : (
+          "Analyze Image"
+        )}
       </motion.button>
 
       <input
@@ -69,6 +75,11 @@ export default function MedicalImageAnalyzer({ onResult }) {
           e.target.value = "";
         }}
       />
+
+      {/* Status text below the button */}
+      <div id="vision-status" className="vision-status" aria-live="polite">
+        {busy ? "Analyzing the medical image…" : ""}
+      </div>
 
       {err ? <div className="vision-error">{err}</div> : null}
     </div>

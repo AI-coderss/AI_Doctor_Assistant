@@ -2711,7 +2711,7 @@ def vision_analyze():
 
         # Compose vision request
         resp = client.responses.create(
-            model="gpt-4.1-mini",
+            model="gpt-4o",
             input=[
                 {
                     "role": "system",

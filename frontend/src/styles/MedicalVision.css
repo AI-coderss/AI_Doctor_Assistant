@@ -1,31 +1,114 @@
-.vision-tool {
-  display: grid;
-  gap: 8px;
-  width: 220px; /* matches other small tools */
+:root{
+  /* 🌈 Spinner palette (edit if you want different colors) */
+  --color-red: red;
+  --color-orange: orange;
+  --color-yellow: yellow;
+  --color-green: green;
+  --color-blue: blue;
+  --color-purple: purple;
+  --color-violet: violet;
 }
 
-.vision-btn {
-  appearance: none;
-  border: none;
-  border-radius: 10px;
-  padding: 12px 14px;
-  font-weight: 800;
-  cursor: pointer;
-  background: linear-gradient(135deg,#0ea5e9,#6366f1);
-  color: #fff;
-  box-shadow: 0 6px 14px rgba(14,165,233,.25), inset 0 1px 0 rgba(255,255,255,.85);
+/* Container */
+.vision-tool{
+  display:grid;
+  gap:8px;
+  width:220px; /* keep consistent with your other tools */
 }
 
-.vision-btn:disabled {
-  opacity: .7;
-  cursor: default;
+/* Button */
+.vision-btn{
+  appearance:none;
+  border:none;
+  border-radius:10px;
+  padding:12px 14px;
+  font-weight:800;
+  cursor:pointer;
+  background:linear-gradient(135deg,#0ea5e9,#6366f1);
+  color:#fff;
+  box-shadow:0 6px 14px rgba(14,165,233,.25), inset 0 1px 0 rgba(255,255,255,.85);
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  min-height:44px; /* ensures height stays stable when swapping to spinner */
 }
 
-.vision-error {
-  font-size: 12px;
-  color: #b91c1c;
-  background: rgba(185,28,28,.08);
-  border: 1px solid rgba(185,28,28,.25);
-  border-radius: 8px;
-  padding: 6px 8px;
+.vision-btn.is-busy{
+  filter:saturate(0.95);
+  cursor:default;
+}
+
+.vision-btn:disabled{
+  opacity:.75;
+}
+
+/* 🌈 Rainbow spinner INSIDE the button */
+.rainbow-spinner{
+  width:22px;
+  height:22px;
+  border-radius:50%;
+  border:3px solid transparent;
+  border-top-color:var(--color-red);
+  border-right-color:var(--color-orange);
+  border-bottom-color:var(--color-green);
+  border-left-color:var(--color-blue);
+  animation:rainbowSpin 0.9s linear infinite;
+  display:inline-block;
+}
+
+@keyframes rainbowSpin{
+  0%{
+    transform:rotate(0deg);
+    border-top-color:var(--color-red);
+    border-right-color:var(--color-orange);
+    border-bottom-color:var(--color-green);
+    border-left-color:var(--color-blue);
+  }
+  25%{
+    border-top-color:var(--color-orange);
+    border-right-color:var(--color-yellow);
+    border-bottom-color:var(--color-blue);
+    border-left-color:var(--color-purple);
+  }
+  50%{
+    border-top-color:var(--color-yellow);
+    border-right-color:var(--color-green);
+    border-bottom-color:var(--color-red);
+    border-left-color:var(--color-orange);
+  }
+  75%{
+    border-top-color:var(--color-green);
+    border-right-color:var(--color-blue);
+    border-bottom-color:var(--color-violet);
+    border-left-color:var(--color-red);
+  }
+  100%{
+    transform:rotate(360deg);
+    border-top-color:var(--color-red);
+    border-right-color:var(--color-orange);
+    border-bottom-color:var(--color-green);
+    border-left-color:var(--color-blue);
+  }
+}
+
+/* Status line under the button (pre-reserved height so layout doesn't jump) */
+.vision-status{
+  min-height:18px;
+  font-size:12px;
+  font-weight:600;
+  color:#334155;
+  text-align:center;
+}
+
+/* Error chip */
+.vision-error{
+  font-size:12px;
+  color:#ef4444;
+  background:rgba(239,68,68,0.08);
+  border:1px solid rgba(239,68,68,0.25);
+  padding:6px 8px;
+  border-radius:10px;
+  width:100%;
+  box-sizing:border-box;
+  text-align:center;
 }

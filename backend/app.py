@@ -2,6 +2,7 @@ import os
 import tempfile
 import ast
 from uuid import uuid4
+import base64, uuid, json
 from datetime import datetime
 import json
 import logging
@@ -2668,14 +2669,17 @@ def transcribe_widget():
 
     return jsonify({"transcript": transcript_result.get("text", "")})
 # ============================== Medical Vision ==============================
+# In-memory caches (swap to Redis/DB in production)
+VISION_CACHE = {}        # image_id -> {"data_url": ..., "meta": {...}, "session_id": ...}
+SESSION_CONTEXT = {}     # session_id -> {"transcript": "...", "summary": "...", ...}
+# ^ If you already have a context store from /set-context, reuse that instead of this dict.
+
 MEDICAL_VISION_SYSTEM_PROMPT = (
     "You are an AI clinical imaging assistant speaking to a physician (not the patient). "
-    "Analyze the attached clinical image. Use a doctor-to-doctor tone. "
-    "Identify the likely modality (e.g., X-ray, CT slice, MRI, ultrasound, ECG tracing, fundus photo, dermoscopy, wound photo, microscope slide, etc.), "
-    "describe key findings with concise bullets, provide a short differential with reasoning, "
-    "suggest targeted next steps (tests, views, measurements), and mention safety red flags. "
-    "Do NOT claim to make a diagnosis; do not fabricate measurements. "
-    "Be succinct and evidence-minded."
+    "Use a doctor-to-doctor tone. "
+    "Identify the likely modality (e.g., X-ray, CT, MRI, ultrasound, ECG, fundus, dermoscopy, wound photo, slide). "
+    "Be succinct, evidence-minded, and avoid patient-facing language. "
+    "Never fabricate measurements; do not claim a diagnosis."
 )
 
 def _file_to_data_url(file_storage):
@@ -2686,54 +2690,198 @@ def _file_to_data_url(file_storage):
     b64 = base64.b64encode(data).decode("ascii")
     return f"data:{mimetype};base64,{b64}"
 
+def _get_session_context_text(session_id: str) -> str:
+    """
+    Pull the current clinical context so the vision model understands the case.
+    Replace this with your existing context store (e.g., the one set by /set-context).
+    """
+    ctx = (SESSION_CONTEXT or {}).get(session_id) or {}
+    bits = []
+    if ctx.get("summary"):
+        bits.append(f"SUMMARY:\n{ctx['summary']}")
+    if ctx.get("transcript"):
+        bits.append(f"TRANSCRIPT (recent):\n{ctx['transcript'][:4000]}")
+    if ctx.get("condition"):
+        bits.append(f"PROVISIONAL CONDITION: {ctx['condition']}")
+    return "\n\n".join(bits) if bits else "No additional session context available."
+
+def _extract_numbered_questions(markdown_text: str):
+    """
+    Heuristic: extract lines like '1. ...', '2. ...' to return as a questions array.
+    Helpful for clients that want machine-readable prompts; text is still returned for chat.
+    """
+    if not markdown_text:
+        return []
+    out = []
+    for line in markdown_text.splitlines():
+        line = line.strip()
+        # 1. Question text
+        if line[:2].isdigit() or line.startswith("1."):
+            pass  # fall through to regex
+        import re
+        m = re.match(r"^\s*\d+\.\s+(.*)$", line)
+        if m:
+            q = m.group(1).strip()
+            if q:
+                out.append(q)
+    return out
+
 @app.route("/vision/analyze", methods=["POST"])
 def vision_analyze():
     """
-    Form-data:
+    Two-phase endpoint.
+
+    Phase A (init): multipart/form-data
       - image: file (required)
-      - prompt: optional string to refine the question
-    Returns: { "text": "...", "meta": { "filename": "...", "mimetype": "...", "size": int } }
+      - session_id: optional (recommended) – ties into whole app context
+      - prompt: optional string (overrides default instruction)
+    -> returns:
+       { phase: "questions",
+         text: "<physician-facing follow-up questions>",
+         questions: ["Q1", "Q2", ...],     # best-effort extraction
+         image_id: "<id for finalize>",
+         meta: {...}
+       }
+
+    Phase B (finalize): application/json
+      { "image_id": "<from init>", "answers": ["...","..."], "session_id": "..." }
+    -> returns:
+       { phase: "final", text: "<final report markdown>", meta: {...} }
     """
     try:
-        if "image" not in request.files:
-            return jsonify(error="Missing file field 'image'."), 400
+        # -------- PHASE A: INIT (upload) --------
+        if "image" in request.files:
+            f = request.files["image"]
+            if not (f and (f.mimetype or "").startswith("image/")):
+                return jsonify(error="Only image/* files are accepted."), 400
 
-        f = request.files["image"]
-        if not (f and (f.mimetype or "").startswith("image/")):
-            return jsonify(error="Only image/* files are accepted."), 400
+            data_url = _file_to_data_url(f)
+            if not data_url:
+                return jsonify(error="Empty file or read error."), 400
 
-        data_url = _file_to_data_url(f)
-        if not data_url:
-            return jsonify(error="Empty file or read error."), 400
+            session_id = (request.form.get("session_id") or "").strip() or None
+            user_prompt = request.form.get("prompt", "").strip() or \
+                "Before any final report, ask targeted follow-up questions you need to optimize the read."
 
-        user_prompt = request.form.get("prompt", "").strip() or \
-            "Please provide a physician-facing analysis of this medical image."
+            ctx_text = _get_session_context_text(session_id) if session_id else "No additional session context."
 
-        # Compose vision request
-        resp = client.responses.create(
+            # Compose: ask QUESTIONS FIRST (no final report yet)
+            # Return a short, physician-facing set of 3–6 targeted questions.
+            init_resp = client.responses.create(
+                model="gpt-4o",
+                input=[
+                    {
+                        "role": "system",
+                        "content": [
+                            {"type": "input_text", "text": MEDICAL_VISION_SYSTEM_PROMPT},
+                            {"type": "input_text", "text":
+                                "You are in PHASE A (follow-up questions first). "
+                                "Given the image and case context, produce 3–6 concise, targeted questions "
+                                "that would materially change or sharpen your final read. "
+                                "Prefer specifics (e.g., acuity, clinical status, device placement context, "
+                                "prior comparisons, suspected complication). "
+                                "Do NOT produce a final report in this phase."
+                             },
+                        ],
+                    },
+                    {
+                        "role": "user",
+                        "content": [
+                            {"type": "input_text", "text":
+                                f"CASE CONTEXT (from session {session_id or 'n/a'}):\n{ctx_text}\n\n"
+                                f"PHASE A TASK: {user_prompt}"
+                             },
+                            {"type": "input_image", "image_url": data_url},
+                        ],
+                    },
+                ],
+            )
+
+            text = init_resp.output_text or "Please answer the follow-up questions to proceed."
+            questions = _extract_numbered_questions(text)
+
+            image_id = str(uuid.uuid4())
+            meta = {
+                "filename": getattr(f, "filename", None),
+                "mimetype": f.mimetype,
+                "size": request.content_length or None,
+            }
+            VISION_CACHE[image_id] = {
+                "data_url": data_url,
+                "meta": meta,
+                "session_id": session_id,
+            }
+
+            return jsonify(
+                phase="questions",
+                text=text,
+                questions=questions,
+                image_id=image_id,
+                meta=meta,
+            ), 200
+
+        # -------- PHASE B: FINALIZE (answers -> final report) --------
+        data = request.get_json(silent=True) or {}
+        image_id = (data.get("image_id") or "").strip()
+        answers = data.get("answers")
+        session_id = (data.get("session_id") or "").strip() or None
+
+        if not image_id:
+            return jsonify(error="Missing image_id."), 400
+        if answers is None:
+            return jsonify(error="Missing answers (array or string)."), 400
+
+        rec = VISION_CACHE.get(image_id)
+        if not rec:
+            return jsonify(error="Unknown or expired image_id."), 400
+
+        data_url = rec["data_url"]
+        meta = rec["meta"]
+        ctx_text = _get_session_context_text(session_id or rec.get("session_id"))
+
+        if isinstance(answers, list):
+            answers_text = "\n".join(f"- {a}" for a in answers if str(a).strip())
+        else:
+            answers_text = str(answers or "").strip()
+
+        # Compose FINAL report with answers + context
+        final_resp = client.responses.create(
             model="gpt-4o",
             input=[
                 {
                     "role": "system",
-                    "content": [{"type": "input_text", "text": MEDICAL_VISION_SYSTEM_PROMPT}],
+                    "content": [
+                        {"type": "input_text", "text": MEDICAL_VISION_SYSTEM_PROMPT},
+                        {"type": "input_text", "text":
+                            "You are now in PHASE B (final report). "
+                            "Integrate: case context, the image, and the doctor's answers. "
+                            "Return a concise, physician-facing read with this structure:\n"
+                            "1) Modality & adequacy (if relevant)\n"
+                            "2) Key findings (bulleted, precise)\n"
+                            "3) Focused differential with rationale\n"
+                            "4) Recommendations (next steps / measurements / views)\n"
+                            "5) Safety red flags\n"
+                            "Avoid patient-facing language. Do not fabricate measurements."
+                         },
+                    ],
                 },
                 {
                     "role": "user",
                     "content": [
-                        {"type": "input_text", "text": user_prompt},
+                        {"type": "input_text", "text":
+                            f"CASE CONTEXT (from session {session_id or 'n/a'}):\n{ctx_text}"
+                         },
+                        {"type": "input_text", "text":
+                            f"PHASE B – DOCTOR ANSWERS:\n{answers_text or 'No additional answers provided.'}"
+                         },
                         {"type": "input_image", "image_url": data_url},
                     ],
                 },
             ],
         )
 
-        text = resp.output_text or ""
-        meta = {
-            "filename": getattr(f, "filename", None),
-            "mimetype": f.mimetype,
-            "size": request.content_length or None,
-        }
-        return jsonify(text=text, meta=meta), 200
+        text = final_resp.output_text or "No report generated."
+        return jsonify(phase="final", text=text, meta=meta), 200
 
     except Exception as e:
         return jsonify(error=str(e)), 500

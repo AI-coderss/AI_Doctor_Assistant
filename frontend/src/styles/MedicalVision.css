@@ -1,5 +1,5 @@
-:root{
-  /* 🌈 Spinner palette (edit if you want different colors) */
+:root {
+  /* 🌈 Spinner palette */
   --color-red: red;
   --color-orange: orange;
   --color-yellow: yellow;
@@ -7,108 +7,280 @@
   --color-blue: blue;
   --color-purple: purple;
   --color-violet: violet;
+
+  /* Follow-up form palette */
+  --vf-border: rgba(0, 0, 0, .14);
+  --vf-bg: rgba(255, 255, 255, .65);
+  --vf-bg-input: rgba(255, 255, 255, .75);
+  --vf-shadow: 0 14px 36px rgba(0, 0, 0, .18);
+  --vf-focus: #3750D8;
+  --vf-text: #0f172a;
+  --vf-muted: #475569;
+  --vf-danger: #ef4444;
 }
 
-/* Container */
-.vision-tool{
-  display:grid;
-  gap:8px;
-  width:220px; /* keep consistent with your other tools */
+[data-theme="dark"] {
+  --vf-border: rgba(255, 255, 255, .18);
+  --vf-bg: rgba(20, 20, 28, .65);
+  --vf-bg-input: rgba(30, 30, 40, .7);
+  --vf-shadow: 0 20px 44px rgba(0, 0, 0, .5);
+  --vf-text: #e5e7eb;
+  --vf-muted: #94a3b8;
 }
 
-/* Button */
-.vision-btn{
-  appearance:none;
-  border:none;
-  border-radius:10px;
-  padding:12px 14px;
-  font-weight:800;
-  cursor:pointer;
-  background:linear-gradient(135deg,#0ea5e9,#6366f1);
-  color:#fff;
-  box-shadow:0 6px 14px rgba(14,165,233,.25), inset 0 1px 0 rgba(255,255,255,.85);
-  display:flex;
-  align-items:center;
-  justify-content:center;
-  min-height:44px; /* ensures height stays stable when swapping to spinner */
+/* ───────────────────────────────────────────────────────────
+   Tool tile (small footprint in the drawer)
+   ─────────────────────────────────────────────────────────── */
+.vision-tool {
+  display: grid;
+  gap: 8px;
+  width: 220px; /* stays small in the drawer */
 }
 
-.vision-btn.is-busy{
-  filter:saturate(0.95);
-  cursor:default;
+/* Analyze button */
+.vision-btn {
+  appearance: none;
+  border: none;
+  border-radius: 10px;
+  padding: 12px 14px;
+  font-weight: 800;
+  cursor: pointer;
+  background: linear-gradient(135deg, #0ea5e9, #6366f1);
+  color: #fff;
+  box-shadow: 0 6px 14px rgba(14, 165, 233, .25), inset 0 1px 0 rgba(255, 255, 255, .85);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 44px;
+}
+.vision-btn:disabled { opacity: .75; cursor: default; }
+
+/* Hide the button while busy; show the external loader instead */
+.vision-btn.is-busy { display: none; }
+
+/* External rainbow loader (replaces the button while busy) */
+.vision-loader {
+  display: none;
+  place-items: center;
+  gap: 8px;
+  padding: 6px 0;
+}
+.vision-btn.is-busy + .vision-loader { display: grid; }
+
+.rainbow-spinner {
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  border: 6px solid transparent;
+  border-top-color: var(--color-red);
+  border-right-color: var(--color-orange);
+  border-bottom-color: var(--color-green);
+  border-left-color: var(--color-blue);
+  animation: rainbowSpin .9s linear infinite;
+}
+@keyframes rainbowSpin {
+  0%   { transform: rotate(0deg);
+         border-top-color: var(--color-red);
+         border-right-color: var(--color-orange);
+         border-bottom-color: var(--color-green);
+         border-left-color: var(--color-blue); }
+  25%  { border-top-color: var(--color-orange);
+         border-right-color: var(--color-yellow);
+         border-bottom-color: var(--color-blue);
+         border-left-color: var(--color-purple); }
+  50%  { border-top-color: var(--color-yellow);
+         border-right-color: var(--color-green);
+         border-bottom-color: var(--color-red);
+         border-left-color: var(--color-orange); }
+  75%  { border-top-color: var(--color-green);
+         border-right-color: var(--color-blue);
+         border-bottom-color: var(--color-violet);
+         border-left-color: var(--color-red); }
+  100% { transform: rotate(360deg);
+         border-top-color: var(--color-red);
+         border-right-color: var(--color-orange);
+         border-bottom-color: var(--color-green);
+         border-left-color: var(--color-blue); }
 }
 
-.vision-btn:disabled{
-  opacity:.75;
+.vision-loader__label {
+  font-size: 12px;
+  font-weight: 700;
+  color: #334155;
+  text-align: center;
 }
 
-/* 🌈 Rainbow spinner INSIDE the button */
-.rainbow-spinner{
-  width:22px;
-  height:22px;
-  border-radius:50%;
-  border:3px solid transparent;
-  border-top-color:var(--color-red);
-  border-right-color:var(--color-orange);
-  border-bottom-color:var(--color-green);
-  border-left-color:var(--color-blue);
-  animation:rainbowSpin 0.9s linear infinite;
-  display:inline-block;
-}
-
-@keyframes rainbowSpin{
-  0%{
-    transform:rotate(0deg);
-    border-top-color:var(--color-red);
-    border-right-color:var(--color-orange);
-    border-bottom-color:var(--color-green);
-    border-left-color:var(--color-blue);
-  }
-  25%{
-    border-top-color:var(--color-orange);
-    border-right-color:var(--color-yellow);
-    border-bottom-color:var(--color-blue);
-    border-left-color:var(--color-purple);
-  }
-  50%{
-    border-top-color:var(--color-yellow);
-    border-right-color:var(--color-green);
-    border-bottom-color:var(--color-red);
-    border-left-color:var(--color-orange);
-  }
-  75%{
-    border-top-color:var(--color-green);
-    border-right-color:var(--color-blue);
-    border-bottom-color:var(--color-violet);
-    border-left-color:var(--color-red);
-  }
-  100%{
-    transform:rotate(360deg);
-    border-top-color:var(--color-red);
-    border-right-color:var(--color-orange);
-    border-bottom-color:var(--color-green);
-    border-left-color:var(--color-blue);
-  }
-}
-
-/* Status line under the button (pre-reserved height so layout doesn't jump) */
-.vision-status{
-  min-height:18px;
-  font-size:12px;
-  font-weight:600;
-  color:#334155;
-  text-align:center;
+/* Status line */
+.vision-status {
+  min-height: 18px;
+  font-size: 12px;
+  font-weight: 600;
+  color: #334155;
+  text-align: center;
 }
 
 /* Error chip */
-.vision-error{
-  font-size:12px;
-  color:#ef4444;
-  background:rgba(239,68,68,0.08);
-  border:1px solid rgba(239,68,68,0.25);
-  padding:6px 8px;
-  border-radius:10px;
-  width:100%;
-  box-sizing:border-box;
-  text-align:center;
+.vision-error {
+  font-size: 12px;
+  color: #ef4444;
+  background: rgba(239, 68, 68, 0.08);
+  border: 1px solid rgba(239, 68, 68, 0.25);
+  padding: 6px 8px;
+  border-radius: 10px;
+  width: 100%;
+  box-sizing: border-box;
+  text-align: center;
+}
+
+/* ───────────────────────────────────────────────────────────
+   DRAGGABLE FOLLOW-UP FLYOUT (wide, fixed, like recorder)
+   ─────────────────────────────────────────────────────────── */
+.vision-followup-flyout {
+  position: fixed !important;
+  left: 28px;
+  bottom: 120px;
+  width: 560px;
+  max-width: 92vw;
+
+  /* ⬆️ Force above EVERYTHING, even other fixed stacks */
+  z-index: 2147483647 !important;
+
+  display: grid;
+  gap: 10px;
+  pointer-events: auto;
+}
+
+@media (min-width: 1280px) {
+  .vision-followup-flyout { width: 640px; }
+}
+
+/* Drag header */
+.vf-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 8px 12px;
+  border-radius: 12px;
+  background: var(--vf-bg);
+  border: 1px solid var(--vf-border);
+  box-shadow: var(--vf-shadow);
+  cursor: grab;
+  user-select: none;
+}
+.vf-header:active { cursor: grabbing; }
+
+.vf-title { font-weight: 800; }
+.vf-close {
+  appearance: none;
+  border: 1px solid var(--vf-border);
+  background: rgba(255, 255, 255, .6);
+  color: var(--vf-text);
+  border-radius: 10px;
+  padding: 6px 10px;
+  cursor: pointer;
+}
+
+/* Card body that holds questions + actions */
+.vision-followup {
+  display: grid;
+  gap: 10px;
+  padding: 12px;
+  border: 1px solid var(--vf-border);
+  border-radius: 12px;
+  background: var(--vf-bg);
+  box-shadow: var(--vf-shadow);
+  color: var(--vf-text);
+}
+
+.vision-qna__list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 10px;
+}
+.vision-qna__item { display: grid; gap: 6px; }
+.vision-qna__q    { font-size: .92rem; color: var(--vf-text); }
+
+/* Inputs */
+.vf-textarea {
+  width: 100%;
+  border: 1px solid var(--vf-border);
+  border-radius: 10px;
+  background: var(--vf-bg-input);
+  color: var(--vf-text);
+  padding: 8px 9px;
+  font-size: .9rem;
+  outline: none;
+  min-height: 64px;
+  max-height: 160px;
+  resize: vertical;
+  transition: box-shadow .15s ease, border-color .15s ease, background-color .15s ease;
+}
+.vf-textarea:focus {
+  border-color: color-mix(in oklab, var(--vf-focus) 60%, white 40%);
+  box-shadow: 0 0 0 2px color-mix(in oklab, var(--vf-focus) 30%, transparent 70%);
+}
+
+/* Inline label/hint */
+.vf-label {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: .82rem;
+  font-weight: 700;
+}
+.vf-hint {
+  font-size: .74rem;
+  font-weight: 600;
+  color: var(--vf-muted);
+}
+
+/* Actions row */
+.vf-actions {
+  display: flex;
+  gap: 10px;
+  justify-content: flex-end;
+}
+
+/* Buttons */
+.vf-btn {
+  appearance: none;
+  border: 1px solid var(--vf-border);
+  border-radius: 10px;
+  padding: 9px 12px;
+  font-weight: 800;
+  font-size: .9rem;
+  cursor: pointer;
+  background: rgba(255, 255, 255, .65);
+  color: var(--vf-text);
+  box-shadow: 0 3px 10px rgba(0, 0, 0, .06), inset 0 1px 0 rgba(255, 255, 255, .6);
+  transition: transform .12s ease, box-shadow .2s ease, background-color .15s ease, filter .15s ease;
+}
+.vf-btn:hover   { transform: translateY(-1px); box-shadow: 0 6px 16px rgba(0, 0, 0, .1); }
+.vf-btn:active  { transform: translateY(0); }
+.vf-btn:disabled{ opacity: .7; cursor: not-allowed; transform: none; box-shadow: none; }
+
+.vf-btn--primary {
+  border: none;
+  background: linear-gradient(135deg, #6366f1, #7c3aed);
+  color: #fff;
+  box-shadow: 0 8px 18px rgba(99, 102, 241, .25), inset 0 1px 0 rgba(255, 255, 255, .75);
+}
+.vf-btn--ghost {
+  background: transparent;
+  border: 1px solid var(--vf-border);
+  color: var(--vf-text);
+}
+
+/* Narrow screens */
+@media (max-width: 480px) {
+  .vision-followup-flyout {
+    left: 12px;
+    bottom: 96px;
+    width: calc(100vw - 24px);
+  }
+  .vf-header, .vision-followup { padding: 10px; }
 }

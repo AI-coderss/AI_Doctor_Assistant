@@ -18,7 +18,7 @@ import os.path as osp
 import random
 from dotenv import load_dotenv
 from flask import Flask, request, jsonify, Response, stream_with_context, make_response
-from flask_cors import CORS
+from flask_cors import CORS, cross_origin
 import qdrant_client
 from openai import OpenAI
 from prompts.prompt import engineeredprompt
@@ -393,13 +393,24 @@ def transcribe():
     return jsonify({"transcript": transcript_text})
 
 
-# ====== NEW: /case-second-opinion-stream (UPDATED) ======
+# Mount BOTH spellings to avoid client/server mismatch
+@app.route("/case-second-opinion-stream", methods=["POST", "OPTIONS"])
+@app.route("/case-second_opinion_stream", methods=["POST", "OPTIONS"])
+@cross_origin(  # works with your CORS(app, resources=...) too
+    origins=[
+        "https://ai-doctor-assistant-app-dev.onrender.com",
+        "http://localhost:3000",
+    ],
+    methods=["POST", "OPTIONS"],
+    allow_headers=["Content-Type", "Authorization", "Accept", "X-Requested-With"],
+    expose_headers=["Content-Type"],
+    supports_credentials=True,
+    max_age=86400,
+)
 def case_second_opinion_stream():
     """
     Streams a SECOND OPINION analysis. The model MUST start with a fenced JSON block
-    matching the contract below (so the front-end can render donuts + ICD-10 table),
-    followed by the human-readable sections (diagnosis, differential, labs, imaging,
-    prescriptions, recommendations, treatment plan). Mermaid is allowed at the end.
+    (contract below) for charts & ICD-10 table; then continue with the narrative sections.
 
     JSON contract (first thing in the output):
     ```json
@@ -416,42 +427,52 @@ def case_second_opinion_stream():
       "services": ["STRING", "..."]
     }
     ```
+    Then continue with (in this order):
+      The diagnosis:
+      The differential diagnosis:
+      The recommended lab test and investigation:
+      Drug prescriptions:
+      Recommendations to The Doctor:
+      Treatment plan:
+    (Optional) Append a Mermaid flow at the end: ```mermaid ...```
     """
 
     # --- 1) Preflight (CORS) ---
     if request.method == "OPTIONS":
-        # flask-cors adds the headers; 204 is fine for preflight
+        # flask-cors adds headers; 204 is sufficient for preflight
         return make_response(("", 204))
 
-    # --- 2) Parse body (accept JSON and resilient to text/plain proxies) ---
+    # --- 2) Parse body robustly (accept JSON and text/plain fallbacks) ---
     data = request.get_json(silent=True) or {}
     if not data and request.data:
         try:
-            data = json.loads(request.data.decode("utf-8") or "{}")
+            data = json.loads((request.data or b"{}").decode("utf-8"))
         except Exception:
             data = {}
 
     context = (data.get("context") or "").strip()
     session_id = data.get("session_id", str(uuid4()))
 
-    # --- 3) Require context; try to be helpful if missing ---
     if not context:
         return jsonify({"error": "No context provided"}), 400
 
-    # --- 4) Init chat session store if needed ---
+    # --- 3) Init chat history ---
     if session_id not in chat_sessions:
         chat_sessions[session_id] = []
 
-    # --- 5) Light transcript cleanup (remove timestamps, stage cues, dup spaces) ---
+    # --- 4) Light transcript cleanup (extract relevant text) ---
     def _clean_transcript(t: str) -> str:
-        t = re.sub(r"\[\d{1,2}:\d{2}(?::\d{2})?\]", " ", t)        # [00:12] or [01:02:03]
+        # Remove timestamps like [00:12] or [01:02:03]
+        t = re.sub(r"\[\d{1,2}:\d{2}(?::\d{2})?\]", " ", t)
+        # Remove (inaudible), (noise), etc.
         t = re.sub(r"\([^\)]*?(noise|inaudible|laughter)[^\)]*\)", " ", t, flags=re.I)
+        # Collapse whitespace
         t = re.sub(r"\s+", " ", t).strip()
         return t
 
     context_clean = _clean_transcript(context)
 
-    # --- 6) Strong, JSON-first instruction for the model ---
+    # --- 5) JSON-first instruction (exact sections for your UI) ---
     structured_instruction = (
         "SECOND OPINION CASE ANALYSIS.\n"
         "You MUST begin your response with a single fenced JSON block exactly as specified below. "
@@ -484,14 +505,13 @@ def case_second_opinion_stream():
         "If helpful, append a flow pathway as a Mermaid block wrapped in ```mermaid ...```."
     )
 
-    # Provide the model a focused version of the transcript
     rag_input = (
         f"{structured_instruction}\n\n"
         "Patient consultation transcript (cleaned):\n"
         f"{context_clean}\n"
     )
 
-    # --- 7) Stream out tokens as plain text for the frontend reader ---
+    # --- 6) Stream out tokens as plain text for the frontend ---
     def generate():
         answer_acc = ""
         try:
@@ -503,23 +523,19 @@ def case_second_opinion_stream():
                 if not token:
                     continue
                 answer_acc += token
-                # Important: yield small pieces frequently to keep the stream alive
-                yield token
+                yield token  # small/frequent chunks keep the connection alive
         except Exception as e:
-            # Surface vector errors to the client to aid debugging
             yield f"\n[Vector error: {str(e)}]"
 
-        # Persist into chat history after streaming completes
+        # Save to chat history after stream ends
         chat_sessions.setdefault(session_id, [])
         chat_sessions[session_id].append({"role": "user", "content": "[Voice Transcript Submitted]"})
         chat_sessions[session_id].append({"role": "assistant", "content": answer_acc})
 
-    # Disable proxy buffering where supported and set text/plain for the stream
     resp = Response(stream_with_context(generate()), mimetype="text/plain; charset=utf-8")
-    resp.headers["X-Accel-Buffering"] = "no"   # nginx
+    resp.headers["X-Accel-Buffering"] = "no"   # hint for nginx/rev proxies
     resp.headers["Cache-Control"] = "no-store"
     return resp
-
 # ===== existing endpoints (unchanged) =====
 
 @app.route("/stream", methods=["POST"])

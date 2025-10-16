@@ -339,9 +339,33 @@ def transcribe():
 
     return jsonify({"transcript": transcript_text})
 
-# ====== NEW: /case-second-opinion-stream ======
-@app.route("/case-second-opinion-stream", methods=["POST"])
+
+# ====== NEW: /case-second-opinion-stream (UPDATED) ======
+@app.route("/case-second_opinion_stream", methods=["POST"])
 def case_second_opinion_stream():
+    """
+    Streams a SECOND OPINION analysis with a strict JSON header so the front-end
+    can render charts, ICD-10 table, and sections reliably.
+
+    Output contract (MUST start with a fenced JSON block):
+    ```json
+    {
+      "primary_diagnosis": {"name": "...", "icd10": "..."},                # required
+      "differential_diagnosis": [                                          # required
+        {"name": "...", "probability_percent": 42, "icd10": "..."},        # 0–100, sum ~100
+        ...
+      ],
+      "recommended_labs": ["...","..."],                                   # optional
+      "imaging": ["...","..."],                                            # optional (radiology/investigations)
+      "prescriptions": ["...","..."],                                      # optional (drugs/doses)
+      "recommendations": ["...","..."],                                    # optional (to the doctor)
+      "treatment_plan": ["...","..."],                                     # optional
+      "services": ["...","..."]                                            # optional (referrals/clinic services)
+    }
+    ```
+    After that JSON, the model may continue with a human-readable narrative
+    (The diagnosis:, The differential diagnosis:, etc.) as before.
+    """
     data = request.get_json() or {}
     context = (data.get("context") or "").strip()
     session_id = data.get("session_id", str(uuid4()))
@@ -352,10 +376,26 @@ def case_second_opinion_stream():
     if session_id not in chat_sessions:
         chat_sessions[session_id] = []
 
-    # Force a structured medical answer; English only; allows Mermaid at end if model decides
     structured_instruction = (
         "SECOND OPINION CASE ANALYSIS.\n"
-        "Using ONLY the transcript and retrieved clinical knowledge, respond in ENGLISH with the following exact sections:\n\n"
+        "You MUST begin your response with a single fenced JSON block exactly as specified below. "
+        "Use ENGLISH. Use ICD-10-CM codes when applicable. Probabilities must be integers 0–100 that sum ~100.\n\n"
+        "Start your output with ONLY this JSON (no text before it):\n"
+        "```json\n"
+        "{\n"
+        '  "primary_diagnosis": {"name": "STRING", "icd10": "STRING or null"},\n'
+        '  "differential_diagnosis": [\n'
+        '    {"name": "STRING", "probability_percent": 35, "icd10": "STRING or null"}\n'
+        "  ],\n"
+        '  "recommended_labs": ["ARRAY OF STRINGS"],\n'
+        '  "imaging": ["ARRAY OF STRINGS"],\n'
+        '  "prescriptions": ["ARRAY OF STRINGS"],\n'
+        '  "recommendations": ["ARRAY OF STRINGS"],\n'
+        '  "treatment_plan": ["ARRAY OF STRINGS"],\n'
+        '  "services": ["ARRAY OF STRINGS"]\n'
+        "}\n"
+        "```\n\n"
+        "After that JSON block, continue with the human-readable sections in this exact order:\n"
         "The diagnosis:\n"
         "The differential diagnosis:\n"
         "The recommended lab test and investigation:\n"
@@ -380,6 +420,7 @@ def case_second_opinion_stream():
             }):
                 token = chunk.get("answer", "")
                 answer_acc += token
+                # Stream raw tokens to the client as before
                 yield token
         except Exception as e:
             yield f"\n[Vector error: {str(e)}]"
@@ -390,6 +431,8 @@ def case_second_opinion_stream():
         chat_sessions[session_id].append({"role": "assistant", "content": answer_acc})
 
     return Response(stream_with_context(generate()), content_type="text/plain")
+
+
 
 # ===== existing endpoints (unchanged) =====
 

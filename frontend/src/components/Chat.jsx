@@ -35,22 +35,22 @@ const drawerComponentOverrides = `
   .tools-grid {
     display: grid;
     grid-template-columns: repeat(3, minmax(0, 1fr));
-    column-gap: 16px;          /* horizontal gap between the 3 tiles */
-    row-gap: 16px;             /* vertical gap for the second row */
+    column-gap: 16px;
+    row-gap: 16px;
     align-items: start;
-    justify-items: center;     /* center each tile in its grid cell */
-    padding: 16px;             /* consistent inner padding for the drawer */
+    justify-items: center;
+    padding: 16px;
   }
 
   /* Each child the drawer renders */
   .tool-wrapper {
     display: flex;
-    justify-content: center;   /* center content horizontally */
+    justify-content: center;
     align-items: stretch;
     width: 100%;
   }
 
-  /* Unify tile widths (so 3 look aligned in each row) */
+  /* Unify tile widths */
   .tool-wrapper > *:first-child,
   .tool-wrapper .record-case-btn-left,
   .tool-wrapper .record-timer-fixed,
@@ -60,17 +60,74 @@ const drawerComponentOverrides = `
     left: auto !important;
     bottom: auto !important;
     transform: none !important;
-    margin: 0 auto !important;   /* center inside column */
+    margin: 0 auto !important;
     z-index: 1 !important;
     width: 100% !important;
-    max-width: 160px;            /* <- adjust to taste (150–180 works well) */
+    max-width: 160px;
   }
 
-  /* Make the yellow "lab prompt" card breathe and align */
   .labs-prompt {
     width: 100%;
-    margin: 0 0 8px 0;          /* a little bottom space before the button/uploader */
+    margin: 0 0 8px 0;
   }
+
+  /* --- minimal styling for second opinion panel (safe defaults) --- */
+  .so-card {
+    border: 1px solid rgba(0,0,0,0.08);
+    border-radius: 14px;
+    background: rgba(255,255,255,0.92);
+    box-shadow: 0 8px 24px rgba(0,0,0,0.08);
+    padding: 14px;
+  }
+  .so-header {
+    display: flex; align-items: center; justify-content: space-between;
+    gap: 12px; margin-bottom: 10px;
+  }
+  .so-title { font-weight: 800; font-size: 16px; }
+  .so-sub { font-size: 12px; opacity: 0.7; }
+  .so-grid {
+    display: grid;
+    grid-template-columns: repeat( auto-fit, minmax(220px, 1fr) );
+    gap: 12px;
+  }
+  .so-section {
+    border: 1px dashed rgba(0,0,0,0.1);
+    border-radius: 12px;
+    padding: 10px;
+    background: rgba(246,248,255,0.8);
+  }
+  .so-sec-title { font-weight: 700; font-size: 13px; margin-bottom: 6px; }
+  .so-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 13px;
+  }
+  .so-table th, .so-table td {
+    border-bottom: 1px solid rgba(0,0,0,0.06);
+    padding: 6px 4px; text-align: left;
+  }
+  .so-diffs {
+    display: grid;
+    grid-template-columns: repeat( auto-fit, minmax(220px, 1fr) );
+    gap: 10px;
+  }
+  .so-chip {
+    display: inline-flex; align-items: center; gap: 6px;
+    padding: 6px 10px; border-radius: 999px;
+    background: rgba(55,80,216,0.08);
+    border: 1px solid rgba(55,80,216,0.25);
+    font-size: 12px; font-weight: 700;
+  }
+  .so-accordion details {
+    border: 1px solid rgba(0,0,0,0.08);
+    border-radius: 10px; background: #fff; padding: 8px 10px;
+  }
+  .so-accordion summary {
+    cursor: pointer; font-weight: 700; font-size: 13px;
+    list-style: none; outline: none;
+  }
+  .so-accordion summary::-webkit-details-marker { display: none; }
+  .so-accordion .inner { padding-top: 8px; }
 `;
 
 /** Normalize bot markdown a bit */
@@ -99,6 +156,230 @@ function normalizeMarkdown(input = "") {
     }
   }
   return collapsed.join("\n").trim();
+}
+
+/* ---------- Helpers for Second Opinion JSON extraction ---------- */
+function extractJsonBlock(text = "") {
+  // Prefer fenced ```json ... ```
+  const fence = /```json([\s\S]*?)```/i.exec(text);
+  if (fence && fence[1]) return fence[1].trim();
+
+  // Fallback: try to find the first top-level { ... }
+  const firstBrace = text.indexOf("{");
+  const lastBrace = text.lastIndexOf("}");
+  if (firstBrace !== -1 && lastBrace !== -1 && lastBrace > firstBrace) {
+    return text.slice(firstBrace, lastBrace + 1);
+  }
+  return null;
+}
+
+function tryParseJsonLoose(raw) {
+  if (!raw) return null;
+  let s = raw;
+
+  // Normalize smart quotes
+  s = s.replace(/[\u201C\u201D\u201E\u201F\u2033\u2036]/g, '"').replace(/[\u2018\u2019]/g, "'");
+
+  // Remove trailing commas in objects/arrays
+  s = s.replace(/,\s*}/g, "}").replace(/,\s*]/g, "]");
+
+  try {
+    return JSON.parse(s);
+  } catch (e) {
+    // Try second time after removing BOM or stray backticks
+    s = s.replace(/^\uFEFF/, "").replace(/```/g, "");
+    try {
+      return JSON.parse(s);
+    } catch {
+      return null;
+    }
+  }
+}
+
+function ensureOpinionShape(obj) {
+  if (!obj || typeof obj !== "object") return null;
+  const out = {
+    primary_diagnosis: obj.primary_diagnosis || null,
+    differential_diagnosis: Array.isArray(obj.differential_diagnosis) ? obj.differential_diagnosis : [],
+    recommended_labs: Array.isArray(obj.recommended_labs) ? obj.recommended_labs : [],
+    imaging: Array.isArray(obj.imaging) ? obj.imaging : [],
+    prescriptions: Array.isArray(obj.prescriptions) ? obj.prescriptions : [],
+    recommendations: Array.isArray(obj.recommendations) ? obj.recommendations : [],
+    treatment_plan: Array.isArray(obj.treatment_plan) ? obj.treatment_plan : [],
+    services: Array.isArray(obj.services) ? obj.services : []
+  };
+
+  // Clamp probabilities and coerce ints
+  out.differential_diagnosis = out.differential_diagnosis.map((d) => {
+    const p = Math.max(0, Math.min(100, Math.round(Number(d?.probability_percent || 0))));
+    return {
+      name: d?.name || "Unknown",
+      probability_percent: p,
+      icd10: (d?.icd10 == null || d?.icd10 === "") ? null : String(d.icd10)
+    };
+  });
+
+  return out;
+}
+
+/* ---------- Donut chart (pure SVG) ---------- */
+function Donut({ value = 0, size = 88, stroke = 10, label = "" }) {
+  const v = Math.max(0, Math.min(100, Number(value) || 0));
+  const r = (size - stroke) / 2;
+  const c = 2 * Math.PI * r;
+  const dash = (v / 100) * c;
+  return (
+    <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`} role="img" aria-label={`${label} ${v}%`}>
+      <circle cx={size/2} cy={size/2} r={r} strokeWidth={stroke} stroke="rgba(0,0,0,0.08)" fill="none"/>
+      <circle
+        cx={size/2}
+        cy={size/2}
+        r={r}
+        strokeWidth={stroke}
+        strokeDasharray={`${dash} ${c - dash}`}
+        strokeLinecap="round"
+        transform={`rotate(-90 ${size/2} ${size/2})`}
+        fill="none"
+      />
+      <text x="50%" y="50%" dominantBaseline="central" textAnchor="middle" fontSize="14" fontWeight="800">
+        {v}%
+      </text>
+    </svg>
+  );
+}
+
+/* ---------- Accordion helper (native <details>) ---------- */
+function Accordion({ title, children, defaultOpen = false }) {
+  return (
+    <div className="so-accordion">
+      <details open={defaultOpen}>
+        <summary>{title}</summary>
+        <div className="inner">{children}</div>
+      </details>
+    </div>
+  );
+}
+
+/* ---------- Second Opinion panel ---------- */
+function SecondOpinionPanel({ data, narrative }) {
+  const diffs = Array.isArray(data?.differential_diagnosis) ? data.differential_diagnosis : [];
+  const primary = data?.primary_diagnosis;
+
+  return (
+    <div className="so-card">
+      <div className="so-header">
+        <div>
+          <div className="so-title">AI Second Opinion</div>
+          {primary?.name && (
+            <div className="so-sub">
+              Primary diagnosis: <span className="so-chip">{primary.name}{primary.icd10 ? ` • ${primary.icd10}` : ""}</span>
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* Differential diagnosis with donuts */}
+      {diffs.length > 0 && (
+        <div className="so-section" style={{ marginBottom: 10 }}>
+          <div className="so-sec-title">Differential diagnosis (probabilities)</div>
+          <div className="so-diffs">
+            {diffs.map((d, i) => (
+              <div key={i} style={{ display: "flex", alignItems: "center", gap: 10, border: "1px solid rgba(0,0,0,0.06)", borderRadius: 12, padding: 8, background: "#fff" }}>
+                <Donut value={d.probability_percent} label={d.name} />
+                <div style={{ display: "grid", gap: 4 }}>
+                  <div style={{ fontWeight: 800, fontSize: 13 }}>{d.name}</div>
+                  <div style={{ fontSize: 12, opacity: 0.7 }}>
+                    Probability: <b>{d.probability_percent}%</b>
+                  </div>
+                  <div style={{ fontSize: 12, opacity: 0.7 }}>
+                    ICD-10: <code>{d.icd10 || "—"}</code>
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* ICD-10 table */}
+      {diffs.length > 0 && (
+        <div className="so-section" style={{ marginBottom: 10 }}>
+          <div className="so-sec-title">ICD-10 Summary</div>
+          <table className="so-table">
+            <thead>
+              <tr>
+                <th>Diagnosis</th>
+                <th>ICD-10</th>
+                <th>Probability</th>
+              </tr>
+            </thead>
+            <tbody>
+              {diffs.map((d, i) => (
+                <tr key={i}>
+                  <td>{d.name}</td>
+                  <td><code>{d.icd10 || "—"}</code></td>
+                  <td>{d.probability_percent}%</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      {/* Collapsible sections */}
+      <div className="so-grid" style={{ marginBottom: 8 }}>
+        {data?.recommended_labs?.length > 0 && (
+          <Accordion title="Recommended lab tests & investigations">
+            <ul style={{ margin: 0, paddingLeft: 16 }}>
+              {data.recommended_labs.map((t, i) => <li key={i}>{t}</li>)}
+            </ul>
+          </Accordion>
+        )}
+        {data?.imaging?.length > 0 && (
+          <Accordion title="Imaging / Radiology">
+            <ul style={{ margin: 0, paddingLeft: 16 }}>
+              {data.imaging.map((t, i) => <li key={i}>{t}</li>)}
+            </ul>
+          </Accordion>
+        )}
+        {data?.prescriptions?.length > 0 && (
+          <Accordion title="Drug prescriptions">
+            <ul style={{ margin: 0, paddingLeft: 16 }}>
+              {data.prescriptions.map((t, i) => <li key={i}>{t}</li>)}
+            </ul>
+          </Accordion>
+        )}
+        {data?.recommendations?.length > 0 && (
+          <Accordion title="Recommendations to the doctor">
+            <ul style={{ margin: 0, paddingLeft: 16 }}>
+              {data.recommendations.map((t, i) => <li key={i}>{t}</li>)}
+            </ul>
+          </Accordion>
+        )}
+        {data?.treatment_plan?.length > 0 && (
+          <Accordion title="Treatment plan">
+            <ul style={{ margin: 0, paddingLeft: 16 }}>
+              {data.treatment_plan.map((t, i) => <li key={i}>{t}</li>)}
+            </ul>
+          </Accordion>
+        )}
+        {data?.services?.length > 0 && (
+          <Accordion title="Services / Referrals">
+            <ul style={{ margin: 0, paddingLeft: 16 }}>
+              {data.services.map((t, i) => <li key={i}>{t}</li>)}
+            </ul>
+          </Accordion>
+        )}
+      </div>
+
+      {/* Optional: show the full narrative under a collapsible */}
+      {narrative && (
+        <Accordion title="Full narrative" defaultOpen={false}>
+          <ReactMarkdown remarkPlugins={[remarkGfm]}>{narrative}</ReactMarkdown>
+        </Accordion>
+      )}
+    </div>
+  );
 }
 
 const Chat = () => {
@@ -538,12 +819,46 @@ const Chat = () => {
     );
   };
 
-  // Second opinion stream (voice panel)
+  // ====== SECOND OPINION STREAM (voice panel integration) ======
   const opinionBufferRef = useRef("");
   const opinionStreamingRef = useRef(false);
+
+  const finalizeSecondOpinion = () => {
+    const full = opinionBufferRef.current || "";
+    // Try to extract and parse JSON
+    const jsonRaw = extractJsonBlock(full);
+    const parsed = tryParseJsonLoose(jsonRaw);
+    const shaped = ensureOpinionShape(parsed);
+
+    setChats((prev) => {
+      const updated = [...prev];
+      const last = updated[updated.length - 1];
+      // If the last bubble is a streaming bot bubble, we'll replace it with the panel if we parsed JSON
+      if (last && last.streaming) {
+        updated.pop();
+      }
+      if (shaped) {
+        updated.push({
+          who: "bot",
+          type: "secondOpinion",
+          opinion: shaped,
+          narrative: normalizeMarkdown(full.replace(jsonRaw || "", "").replace(/```json[\s\S]*?```/i, "").trim())
+        });
+      } else {
+        // Fallback to plain markdown bubble
+        updated.push({ who: "bot", msg: normalizeMarkdown(full) });
+      }
+      return updated;
+    });
+
+    opinionBufferRef.current = "";
+    opinionStreamingRef.current = false;
+  };
+
+  // VoiceRecorderPanel will call this for streaming tokens and with done=true at the end
   const handleOpinionStream = (chunkOrFull, done = false) => {
     if (done) {
-      opinionStreamingRef.current = false;
+      finalizeSecondOpinion();
       return;
     }
     const chunk = String(chunkOrFull || "");
@@ -788,6 +1103,7 @@ const Chat = () => {
       <div className="chat-content">
         {chats.map((chat, index) => {
           const isLabCard = chat?.type === "labs" && Array.isArray(chat.labs);
+          const isSecondOpinion = chat?.type === "secondOpinion" && chat.opinion;
           return (
             <div
               key={index}
@@ -803,6 +1119,8 @@ const Chat = () => {
               <div className="message-text">
                 {isLabCard ? (
                   <LabsPanel labs={chat.labs} meta={chat.meta} />
+                ) : isSecondOpinion ? (
+                  <SecondOpinionPanel data={chat.opinion} narrative={chat.narrative} />
                 ) : (
                   <>
                     {renderMessageRich(chat.msg, index)}
@@ -1057,20 +1375,19 @@ const DrawComponent = ({ children }) => {
       <AnimatePresence>
         {isOpen && (
           <motion.div
-            className="tools-grid"                        // ← add this
+            className="tools-grid"
             initial={{ opacity: 0, y: 50, scale: 0.9 }}
             animate={{ opacity: 1, y: 0, scale: 1 }}
             exit={{ opacity: 0, y: 50, scale: 0.9 }}
             transition={{ duration: 0.3, ease: "easeInOut" }}
             style={{
-              minWidth: "480px",                          // your chosen drawer width
+              minWidth: "480px",
               background: "rgba(255, 255, 255, 0.9)",
               backdropFilter: "blur(10px)",
               borderRadius: "16px",
               boxShadow: "0 8px 30px rgba(0,0,0,0.12)",
               border: "1px solid rgba(0,0,0,0.08)",
 
-              /* keep these consistent with the CSS class above (OK to leave duplicated) */
               display: "grid",
               gridTemplateColumns: "repeat(3, minmax(0, 1fr))",
               columnGap: "16px",

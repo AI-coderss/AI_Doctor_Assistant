@@ -17,7 +17,7 @@ from typing import List, Dict, Any
 import os.path as osp
 import random
 from dotenv import load_dotenv
-from flask import Flask, request, jsonify, Response, stream_with_context
+from flask import Flask, request, jsonify, Response, stream_with_context, make_response
 from flask_cors import CORS
 import qdrant_client
 from openai import OpenAI
@@ -394,45 +394,69 @@ def transcribe():
 
 
 # ====== NEW: /case-second-opinion-stream (UPDATED) ======
-@app.route("/case-second_opinion_stream", methods=["POST"])
 def case_second_opinion_stream():
     """
-    Streams a SECOND OPINION analysis with a strict JSON header so the front-end
-    can render charts, ICD-10 table, and sections reliably.
+    Streams a SECOND OPINION analysis. The model MUST start with a fenced JSON block
+    matching the contract below (so the front-end can render donuts + ICD-10 table),
+    followed by the human-readable sections (diagnosis, differential, labs, imaging,
+    prescriptions, recommendations, treatment plan). Mermaid is allowed at the end.
 
-    Output contract (MUST start with a fenced JSON block):
+    JSON contract (first thing in the output):
     ```json
     {
-      "primary_diagnosis": {"name": "...", "icd10": "..."},                # required
-      "differential_diagnosis": [                                          # required
-        {"name": "...", "probability_percent": 42, "icd10": "..."},        # 0–100, sum ~100
-        ...
+      "primary_diagnosis": {"name": "STRING", "icd10": "STRING or null"},
+      "differential_diagnosis": [
+        {"name": "STRING", "probability_percent": 35, "icd10": "STRING or null"}
       ],
-      "recommended_labs": ["...","..."],                                   # optional
-      "imaging": ["...","..."],                                            # optional (radiology/investigations)
-      "prescriptions": ["...","..."],                                      # optional (drugs/doses)
-      "recommendations": ["...","..."],                                    # optional (to the doctor)
-      "treatment_plan": ["...","..."],                                     # optional
-      "services": ["...","..."]                                            # optional (referrals/clinic services)
+      "recommended_labs": ["STRING", "..."],
+      "imaging": ["STRING", "..."],
+      "prescriptions": ["STRING", "..."],
+      "recommendations": ["STRING", "..."],
+      "treatment_plan": ["STRING", "..."],
+      "services": ["STRING", "..."]
     }
     ```
-    After that JSON, the model may continue with a human-readable narrative
-    (The diagnosis:, The differential diagnosis:, etc.) as before.
     """
-    data = request.get_json() or {}
+
+    # --- 1) Preflight (CORS) ---
+    if request.method == "OPTIONS":
+        # flask-cors adds the headers; 204 is fine for preflight
+        return make_response(("", 204))
+
+    # --- 2) Parse body (accept JSON and resilient to text/plain proxies) ---
+    data = request.get_json(silent=True) or {}
+    if not data and request.data:
+        try:
+            data = json.loads(request.data.decode("utf-8") or "{}")
+        except Exception:
+            data = {}
+
     context = (data.get("context") or "").strip()
     session_id = data.get("session_id", str(uuid4()))
 
+    # --- 3) Require context; try to be helpful if missing ---
     if not context:
         return jsonify({"error": "No context provided"}), 400
 
+    # --- 4) Init chat session store if needed ---
     if session_id not in chat_sessions:
         chat_sessions[session_id] = []
 
+    # --- 5) Light transcript cleanup (remove timestamps, stage cues, dup spaces) ---
+    def _clean_transcript(t: str) -> str:
+        t = re.sub(r"\[\d{1,2}:\d{2}(?::\d{2})?\]", " ", t)        # [00:12] or [01:02:03]
+        t = re.sub(r"\([^\)]*?(noise|inaudible|laughter)[^\)]*\)", " ", t, flags=re.I)
+        t = re.sub(r"\s+", " ", t).strip()
+        return t
+
+    context_clean = _clean_transcript(context)
+
+    # --- 6) Strong, JSON-first instruction for the model ---
     structured_instruction = (
         "SECOND OPINION CASE ANALYSIS.\n"
         "You MUST begin your response with a single fenced JSON block exactly as specified below. "
-        "Use ENGLISH. Use ICD-10-CM codes when applicable. Probabilities must be integers 0–100 that sum ~100.\n\n"
+        "Do NOT output any text before the JSON block. Use ENGLISH. "
+        "Use ICD-10-CM codes when applicable. Probabilities must be integers 0–100 that sum ~100.\n\n"
         "Start your output with ONLY this JSON (no text before it):\n"
         "```json\n"
         "{\n"
@@ -455,15 +479,19 @@ def case_second_opinion_stream():
         "Drug prescriptions:\n"
         "Recommendations to The Doctor:\n"
         "Treatment plan:\n\n"
-        "Keep it specific and evidence-aware; include dosages when appropriate. "
-        "If helpful, you MAY append a flow pathway as a Mermaid block wrapped in ```mermaid ...```."
+        "Guidance: Be specific and evidence-aware; include typical adult dosages when appropriate. "
+        "Only use content inferable from the transcript and retrieved clinical knowledge. "
+        "If helpful, append a flow pathway as a Mermaid block wrapped in ```mermaid ...```."
     )
 
+    # Provide the model a focused version of the transcript
     rag_input = (
         f"{structured_instruction}\n\n"
-        f"Patient consultation transcript:\n{context}\n"
+        "Patient consultation transcript (cleaned):\n"
+        f"{context_clean}\n"
     )
 
+    # --- 7) Stream out tokens as plain text for the frontend reader ---
     def generate():
         answer_acc = ""
         try:
@@ -472,20 +500,25 @@ def case_second_opinion_stream():
                 "input": rag_input
             }):
                 token = chunk.get("answer", "")
+                if not token:
+                    continue
                 answer_acc += token
-                # Stream raw tokens to the client as before
+                # Important: yield small pieces frequently to keep the stream alive
                 yield token
         except Exception as e:
+            # Surface vector errors to the client to aid debugging
             yield f"\n[Vector error: {str(e)}]"
 
-        # persist into chat history after streaming completes
+        # Persist into chat history after streaming completes
         chat_sessions.setdefault(session_id, [])
         chat_sessions[session_id].append({"role": "user", "content": "[Voice Transcript Submitted]"})
         chat_sessions[session_id].append({"role": "assistant", "content": answer_acc})
 
-    return Response(stream_with_context(generate()), content_type="text/plain")
-
-
+    # Disable proxy buffering where supported and set text/plain for the stream
+    resp = Response(stream_with_context(generate()), mimetype="text/plain; charset=utf-8")
+    resp.headers["X-Accel-Buffering"] = "no"   # nginx
+    resp.headers["Cache-Control"] = "no-store"
+    return resp
 
 # ===== existing endpoints (unchanged) =====
 

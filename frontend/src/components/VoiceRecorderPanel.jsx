@@ -12,7 +12,7 @@ import "../styles/VoiceRecorderPanel.css";
  * - On Stop => POST audio to transcribeUrl (multipart, {fileFieldName}).
  * - When transcript ready => calls onTranscriptReady(transcript) + shows "Analyze Case".
  * - "Analyze Case" streams from opinionUrl and forwards chunks to onOpinion.
- * - Transcript is kept in-memory only; never rendered.
+ * - Now passes session_id to backend (aligned with chat.jsx).
  *
  * Props:
  *   transcribeUrl      : string
@@ -45,6 +45,13 @@ const VoiceRecorderPanel = ({
   // keep transcript in memory (not rendered)
   const transcriptRef = useRef("");
 
+  // session id (align with chat.jsx)
+  const [sessionId] = useState(() => {
+    const id = localStorage.getItem("sessionId") || crypto.randomUUID();
+    localStorage.setItem("sessionId", id);
+    return id;
+  });
+
   // ---- TIMER (for launcher while recording) ----
   const [elapsedMs, setElapsedMs] = useState(0);
   const rafRef = useRef(null);
@@ -56,7 +63,7 @@ const VoiceRecorderPanel = ({
     const h = Math.floor(ms / 3600000);
     const m = Math.floor((ms % 3600000) / 60000);
     const s = Math.floor((ms % 60000) / 1000);
-    const cs = Math.floor((ms % 1000) / 10); // centiseconds
+    const cs = Math.floor((ms % 1000) / 10);
     const pad = (n) => (n < 10 ? "0" + n : String(n));
     return `${pad(h)}:${pad(m)}:${pad(s)}:${pad(cs)}`;
   };
@@ -82,12 +89,10 @@ const VoiceRecorderPanel = ({
 
     // pause / resume
     if (isRecording && isPaused) {
-      // pause: freeze elapsed and store accum
       cancelAnimationFrame(rafRef.current);
       rafRef.current = null;
       pausedAccumRef.current = elapsedMs;
     } else if (isRecording && !isPaused) {
-      // resume
       startAtRef.current = performance.now();
       if (!rafRef.current) rafRef.current = requestAnimationFrame(tick);
     }
@@ -100,7 +105,6 @@ const VoiceRecorderPanel = ({
     }
 
     return () => {
-      // safeguard on unmount
       if (rafRef.current) cancelAnimationFrame(rafRef.current);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -142,10 +146,12 @@ const VoiceRecorderPanel = ({
       });
       const form = new FormData();
       form.append(fileFieldName, audioFile);
+      form.append("session_id", sessionId); // optional, helps server correlate
 
       setLoading(true);
       const { data } = await axios.post(transcribeUrl, form, {
         headers: { "Content-Type": "multipart/form-data" },
+        withCredentials: false,
       });
 
       const txt = String(data?.transcript ?? "");
@@ -153,7 +159,6 @@ const VoiceRecorderPanel = ({
       const ready = Boolean(txt);
       setIsTranscriptReady(ready);
 
-      // notify parent (for WebRTC priming, etc.)
       if (ready && typeof onTranscriptReady === "function") {
         onTranscriptReady(txt);
       }
@@ -165,21 +170,46 @@ const VoiceRecorderPanel = ({
     }
   };
 
-  // stream RAG second opinion
+  // stream RAG second opinion (now includes session_id + tougher streaming)
   const analyzeCase = async () => {
     if (!transcriptRef.current) return;
 
+    const payload = {
+      context: transcriptRef.current,
+      session_id: sessionId,
+    };
+
     try {
       setLoading(true);
+
+      // IMPORTANT: explicit Accept to match backend text streaming
       const resp = await fetch(opinionUrl, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ context: transcriptRef.current }),
+        mode: "cors",
+        credentials: "omit",
+        headers: {
+          "Content-Type": "application/json",
+          "Accept": "text/plain",
+        },
+        body: JSON.stringify(payload),
+        // keepalive can help if user navigates away mid-stream
+        keepalive: true,
       });
 
-      if (!resp.ok || !resp.body) {
-        console.error("Stream request failed:", resp.status);
+      if (!resp.ok) {
+        console.error("Stream request failed:", resp.status, resp.statusText);
         setLoading(false);
+        return;
+      }
+      if (!resp.body) {
+        console.error("Readable stream not available on this browser/host");
+        // Fallback: read as text (non-streaming proxies)
+        const text = await resp.text();
+        if (typeof onOpinion === "function") {
+          onOpinion(text, true);
+        }
+        setLoading(false);
+        setOpen(false);
         return;
       }
 
@@ -188,6 +218,7 @@ const VoiceRecorderPanel = ({
       let done = false;
       let aggregated = "";
 
+      // Push chunks to chat.jsx in real-time
       while (!done) {
         const { value, done: d } = await reader.read();
         done = d;
@@ -195,11 +226,12 @@ const VoiceRecorderPanel = ({
           const chunk = decoder.decode(value, { stream: true });
           aggregated += chunk;
           if (typeof onOpinion === "function") onOpinion(chunk, false);
-          else console.log("[AI chunk]", chunk);
         }
       }
+
       if (typeof onOpinion === "function") onOpinion(aggregated, true);
     } catch (e) {
+      // net::ERR_FAILED typically = CORS or network block
       console.error("Streaming error:", e);
     } finally {
       setLoading(false);
@@ -224,7 +256,6 @@ const VoiceRecorderPanel = ({
       ) : (
         <div className="record-timer-fixed" aria-live="polite">
           <div className={`button-container ${isPaused ? "paused" : "running"}`}>
-            {/* Decorative inner "button" animates shape; not clickable while recording */}
             <div className={`button ${isRecording ? "square" : ""}`} />
           </div>
           <h2 className={`timeroutput show`}>{formatTime(elapsedMs)}</h2>
@@ -305,6 +336,7 @@ const VoiceRecorderPanel = ({
 };
 
 export default VoiceRecorderPanel;
+
 
 
 

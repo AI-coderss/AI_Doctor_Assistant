@@ -26,6 +26,10 @@ import CalculateDosageButton from "./CalculateDosageButton"; // ✅
 import MedicalImageAnalyzer from "./MedicalImageAnalyzer"; // ✅ NEW (Vision)
 import { Howl } from "howler";
 
+/* === NEW: Real-Time Case Analysis components === */
+import RealTimeCaseAnalysisTrigger from "./RealTimeCaseAnalysisTrigger";
+import RealTimeCaseAnalysisBubble from "./RealTimeCaseAnalysisBubble";
+
 let localStream;
 const BACKEND_BASE = "https://ai-doctor-assistant-backend-server.onrender.com";
 
@@ -330,6 +334,7 @@ const Chat = () => {
             break;
           }
           case "response.audio_transcript.delta":
+            // handled by the RTCA bubble for analysis if needed
             break;
           case "output_audio_buffer.stopped":
             setAudioWave(false);
@@ -654,6 +659,9 @@ const Chat = () => {
   const LABS_TOKEN_RE = /\[request_labs\]/i;
   const LABS_TOKEN_RE_GLOBAL = /\[request_labs\]/gi;
 
+  /* === NEW: RTCA token regex === */
+  const RTCA_TOKEN_RE = /\[rtca\]/i;
+
   const stripLabsTokenFromBubble = (bubbleIdx) => {
     setChats((prev) => {
       const arr = [...prev];
@@ -719,7 +727,29 @@ const Chat = () => {
   }
 
   // Render with inline uploader injection when bot asks for labs
+  // === UPDATED: handle [rtca] tokens first, then labs ===
   const renderMessageRich = (message, bubbleIdx) => {
+    // 1) Inline RTCA bubble(s)
+    if (RTCA_TOKEN_RE.test(message || "")) {
+      const chunks = String(message || "").split(RTCA_TOKEN_RE);
+      const nodes = [];
+      chunks.forEach((seg, idx) => {
+        if (seg) nodes.push(<div key={`rtca-seg-${bubbleIdx}-${idx}`}>{renderMessage(seg)}</div>);
+        if (idx < chunks.length - 1) {
+          nodes.push(
+            <RealTimeCaseAnalysisBubble
+              key={`rtca-bubble-${bubbleIdx}-${idx}`}
+              backendBase={BACKEND_BASE}
+              sessionId={sessionId}
+            />
+          );
+        }
+      });
+      // If there were only RTCA tokens, we're done; if text remains, labs logic below will render inside seg divs.
+      if (nodes.length) return nodes;
+    }
+
+    // 2) Labs token injection (existing behavior)
     if (!LABS_TOKEN_RE.test(message || "")) {
       return renderMessage(message);
     }
@@ -1037,6 +1067,15 @@ const Chat = () => {
                 },
               ]);
             }}
+          />
+        </div>
+
+        {/* 6) NEW — Real-Time Case Analysis trigger (next to Analyze Image) */}
+        <div className="tool-wrapper">
+          <RealTimeCaseAnalysisTrigger
+            onInsertBubble={(token) =>
+              setChats((prev) => [...prev, { who: "bot", msg: token }])
+            }
           />
         </div>
       </DrawComponent>
@@ -1377,3 +1416,4 @@ function toNum(x) {
   }
   return NaN;
 }
+

@@ -1,0 +1,76 @@
+/* Trigger button (Tools drawer tile) */
+.rtca-trigger-btn {
+  padding: 10px 12px;
+  border-radius: 12px;
+  border: 0;
+  cursor: pointer;
+  background: #1f7a8c;
+  color: #fff;
+  font-weight: 700;
+  width: 100%;
+  transition: filter .2s ease, transform .04s ease;
+}
+.rtca-trigger-btn:hover { filter: brightness(1.05); }
+.rtca-trigger-btn:active { transform: translateY(1px); }
+
+/* Chat-bubble container */
+.rtca-bubble {
+  display: grid;
+  gap: 8px;
+}
+
+/* Donut minis row */
+.rtca-donuts {
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+/* Single donut + labels */
+.rtca-donut-card {
+  display: grid;
+  justify-items: center;
+}
+/*.rtca-donut-chart {
+  /* Highcharts container sizing handled by options; keep clean here */
+
+.rtca-dx-label {
+  font-size: 12px;
+  font-weight: 700;
+  text-align: center;
+  max-width: 160px;
+}
+.rtca-icd {
+  font-size: 11px;
+  opacity: 0.8;
+  text-align: center;
+}
+
+/* Accordions */
+.rtca-accordion {
+  border: 1px solid rgba(0,0,0,.08);
+  border-radius: 10px;
+  padding: 6px 10px;
+  background: rgba(255,255,255,.65);
+}
+.rtca-accordion > summary {
+  font-weight: 800;
+  cursor: pointer;
+  outline: none;
+}
+.rtca-list {
+  margin-top: 6px;
+  padding-left: 18px;
+}
+
+/* Notes + tiny transcript peek */
+.rtca-notes {
+  white-space: pre-wrap;
+  opacity: .9;
+  margin-top: 6px;
+}
+.rtca-transcript-peek {
+  font-size: 11px;
+  opacity: .6;
+  margin-top: 4px;
+}

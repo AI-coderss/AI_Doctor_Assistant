@@ -41,6 +41,8 @@ OCR_SPACE_API_KEY = os.getenv("OCR_SPACE_API_KEY")
 # Provider plan guard (per OCR.Space docs: Free≈1MB, PRO≈5MB, PRO PDF≈100MB+)
 # This is a best-effort early guard; the provider still enforces its own limits.
 PROVIDER_LIMIT_MB = int(os.getenv("OCR_PROVIDER_LIMIT_MB", "1"))  # 1|5|100
+# --- Real-time Case Analysis (in-memory series for visuals) ---
+dx_series = {}  # session_id -> { label: [[ts_ms, p], ...] }
 
 # Flask request cap (bytes); keep >= provider limit (default 20MB)
 MAX_BYTES = int(os.getenv("OCR_MAX_BYTES", 20 * 1024 * 1024))
@@ -2885,5 +2887,171 @@ def vision_analyze():
 
     except Exception as e:
         return jsonify(error=str(e)), 500
+def _build_case_analysis_prompt(transcript: str, limit_diags: int = 5) -> str:
+    """
+    STRICT JSON ONLY. ICD-10 codes must appear in retrieved context; do not invent.
+    The existing retrieval chain will inject the docs; we just instruct the model.
+    """
+    return (
+        "REAL-TIME CASE ANALYSIS.\n"
+        "Return STRICT JSON ONLY using this schema:\n"
+        "{\n"
+        '  "diagnoses": [\n'
+        '     {"label":"short diagnosis name","p":0.0-1.0,"icd10":["codes","from","context"]}\n'
+        f"  ],\n"
+        '  "labs": ["test 1","test 2"],\n'
+        '  "radiology": ["study 1","study 2"],\n'
+        '  "recommendations": ["short actionable bullets"],\n'
+        '  "notes": "concise running assessment"\n'
+        "}\n"
+        "Rules:\n"
+        f"- Limit diagnoses to {limit_diags} max; probabilities should sum ~1.\n"
+        "- Use ONLY ICD-10 codes that appear verbatim in retrieved documents; if none, use [].\n"
+        "- Keep items concise and clinically useful.\n"
+        "\n"
+        f"TRANSCRIPT:\n{transcript}\n"
+    )
+
+def _renorm_probs(diags: list) -> list:
+    """Clamp to [0,1], then renormalize to ~1. Operates on list of dicts."""
+    if not isinstance(diags, list):
+        return []
+    total = 0.0
+    for d in diags:
+        try:
+            d["p"] = max(0.0, min(1.0, float(d.get("p", 0.0))))
+        except Exception:
+            d["p"] = 0.0
+        total += d["p"]
+    if total > 1e-9:
+        for d in diags:
+            d["p"] = d["p"] / total
+    return diags
+
+def _update_dx_timeseries(session_id: str, diags: list, now_ms: int):
+    """Keep a short rolling series per diagnosis label."""
+    bucket = dx_series.setdefault(session_id, {})
+    MAX_POINTS = 180  # ~90s if client polls ~500ms
+    labels_present = set()
+    for d in (diags or []):
+        lbl = (d.get("label") or "").strip()
+        if not lbl:
+            continue
+        labels_present.add(lbl)
+        arr = bucket.setdefault(lbl, [])
+        arr.append([now_ms, round(float(d.get("p", 0.0)), 6)])
+        if len(arr) > MAX_POINTS:
+            del arr[:-MAX_POINTS]
+    # Optional pruning (lazy)
+
+def _build_highcharts_payload(session_id: str, diags: list, now_ms: int):
+    """
+    Returns { donut_parts, bars, timeseries } in Highcharts-friendly shapes:
+    - donut_parts: per-diagnosis 2-slice pie (p vs remainder) -> series.pie.data = [{name,y},...]
+    - bars: categories + single-series (percent) for horizontal bars
+    - timeseries: [{name,label, data:[[ts_ms, percent], ...]}]
+    """
+    labels = [d.get("label", "") for d in (diags or [])]
+    probs_pct = [round(float(d.get("p", 0.0)) * 100.0, 2) for d in (diags or [])]
+
+    donut_parts = [
+        {
+            "label": lbl,
+            "parts": [
+                {"name": lbl, "y": round(float(pct) / 100.0, 6)},
+                {"name": "other", "y": round(1.0 - (float(pct) / 100.0), 6)},
+            ],
+        }
+        for lbl, pct in zip(labels, probs_pct)
+        if lbl
+    ]
+
+    bars = {
+        "categories": labels,
+        "series": [
+            {"name": "Probability", "data": probs_pct}
+        ]
+    }
+
+    series_bucket = dx_series.get(session_id, {})
+    timeseries = [
+        {
+            "name": lbl,
+            "data": [[int(ts), round(p * 100.0, 2)] for ts, p in (series_bucket.get(lbl) or [])],
+        }
+        for lbl in labels if lbl
+    ]
+
+    return {
+        "updatedAt": now_ms,
+        "donut_parts": donut_parts,
+        "bars": bars,
+        "timeseries": timeseries,
+    }
+# ===== NEW: Real-time Case Analysis snapshot (NDJSON) =====
+@app.route("/case-analysis-live", methods=["POST"])
+def case_analysis_live():
+    """
+    Body: { session_id?, transcript }
+    - Uses your existing `conversation_rag_chain` (RAG) to produce a STRICT JSON snapshot.
+    - Returns NDJSON (single line per request) shaped for the chat bubble + Highcharts.
+    - ICD-10 codes must be present in retrieved context (prompt forbids invention).
+    """
+    data = request.get_json() or {}
+    session_id = data.get("session_id", str(uuid4()))
+    transcript = (data.get("transcript") or "").strip()
+    if not transcript:
+        return jsonify({"error": "No transcript"}), 400
+
+    # Build strict JSON instruction + transcript. Docs come from the retriever in your chain.
+    prompt = _build_case_analysis_prompt(transcript, limit_diags=5)
+
+    try:
+        response = conversation_rag_chain.invoke({
+            "chat_history": chat_sessions.get(session_id, []),
+            "input": prompt
+        })
+        raw = (response.get("answer") or "").strip()
+        parsed = _extract_json_dict(raw) or {}
+    except Exception as e:
+        return jsonify({"error": f"RAG error: {str(e)}"}), 502
+
+    # Normalize payload
+    diags = parsed.get("diagnoses") or []
+    # keep only top 5 by p (if model sent more)
+    try:
+        diags = sorted(diags, key=lambda d: float(d.get("p", 0.0)), reverse=True)[:5]
+    except Exception:
+        diags = diags[:5]
+    diags = _renorm_probs(diags)
+
+    payload = {
+        "diagnoses": [
+            {
+                "label": str(d.get("label", "")).strip(),
+                "p": float(d.get("p", 0.0)),
+                "icd10": [str(c).strip() for c in (d.get("icd10") or []) if str(c).strip()],
+            }
+            for d in diags
+            if str(d.get("label", "")).strip()
+        ],
+        "labs": [str(x).strip() for x in (parsed.get("labs") or []) if str(x).strip()],
+        "radiology": [str(x).strip() for x in (parsed.get("radiology") or []) if str(x).strip()],
+        "recommendations": [str(x).strip() for x in (parsed.get("recommendations") or []) if str(x).strip()],
+        "notes": str(parsed.get("notes") or "").strip(),
+    }
+
+    # Update visuals timeline
+    from datetime import datetime
+    now_ms = int(datetime.utcnow().timestamp() * 1000)
+    _update_dx_timeseries(session_id, payload["diagnoses"], now_ms)
+    visuals = _build_highcharts_payload(session_id, payload["diagnoses"], now_ms)
+    payload["visuals"] = visuals
+
+    def generate():
+        yield json.dumps(payload, ensure_ascii=False) + "\n"
+
+    return Response(stream_with_context(generate()), mimetype="application/x-ndjson")
+
 if __name__ == "__main__":
     app.run(host="127.0.0.1", port=5050, debug=True)

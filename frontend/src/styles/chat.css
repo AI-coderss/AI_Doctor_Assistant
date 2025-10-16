@@ -1179,3 +1179,65 @@
   .voice-assistant-wrapper{ --orb-size:clamp(200px,76vw,300px); }
   .connection-status{ bottom:70px; }
 }
+.rca-bubble {
+  border: 1px solid rgba(0,0,0,0.08);
+  border-radius: 14px;
+  padding: 12px;
+  background: #fff;
+}
+
+.rca-top {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+  gap: 12px;
+  margin-bottom: 8px;
+}
+
+.rca-donut {
+  display: grid;
+  place-items: center;
+  gap: 6px;
+}
+
+.rca-label {
+  font-weight: 600;
+  font-size: 13px;
+  text-align: center;
+}
+
+.rca-icd {
+  font-size: 12px;
+  opacity: 0.8;
+  text-align: center;
+}
+
+.rca-bar {
+  margin: 4px 0 10px;
+}
+
+.rca-accordion {
+  border-top: 1px dashed rgba(0,0,0,0.08);
+  padding-top: 6px;
+  margin-top: 8px;
+}
+
+.rca-accordion > summary {
+  cursor: pointer;
+  font-weight: 600;
+  list-style: none;
+}
+
+.rca-accordion > summary::-webkit-details-marker {
+  display: none;
+}
+
+.rca-list {
+  margin: 8px 0 0;
+  padding-left: 16px;
+}
+
+.rca-notes {
+  margin-top: 6px;
+  white-space: pre-wrap;
+  line-height: 1.45;
+}

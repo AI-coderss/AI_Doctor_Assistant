@@ -3,7 +3,7 @@
 /* eslint-disable no-useless-concat */
 /* eslint-disable no-loop-func */
 /* eslint-disable react-hooks/exhaustive-deps */
-import React, { useState, useEffect, useRef, useMemo } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import ChatInputWidget from "./ChatInputWidget.jsx";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
@@ -26,35 +26,31 @@ import CalculateDosageButton from "./CalculateDosageButton"; // ✅
 import MedicalImageAnalyzer from "./MedicalImageAnalyzer"; // ✅ NEW (Vision)
 import { Howl } from "howler";
 
-/* 🔵 NEW: charts for recorded-case visualization */
-import Highcharts from "highcharts";
-import HighchartsReact from "highcharts-react-official";
-
 let localStream;
 const BACKEND_BASE = "https://ai-doctor-assistant-backend-server.onrender.com";
 
-/* Force fixed-position pieces to play nicely in the drawer. */
+// Force fixed-position pieces to play nicely in the drawer.
 const drawerComponentOverrides = `
   /* Drawer grid + spacing */
   .tools-grid {
     display: grid;
     grid-template-columns: repeat(3, minmax(0, 1fr));
-    column-gap: 16px;
-    row-gap: 16px;
+    column-gap: 16px;          /* horizontal gap between the 3 tiles */
+    row-gap: 16px;             /* vertical gap for the second row */
     align-items: start;
-    justify-items: center;
-    padding: 16px;
+    justify-items: center;     /* center each tile in its grid cell */
+    padding: 16px;             /* consistent inner padding for the drawer */
   }
 
   /* Each child the drawer renders */
   .tool-wrapper {
     display: flex;
-    justify-content: center;
+    justify-content: center;   /* center content horizontally */
     align-items: stretch;
     width: 100%;
   }
 
-  /* Unify tile widths */
+  /* Unify tile widths (so 3 look aligned in each row) */
   .tool-wrapper > *:first-child,
   .tool-wrapper .record-case-btn-left,
   .tool-wrapper .record-timer-fixed,
@@ -64,15 +60,16 @@ const drawerComponentOverrides = `
     left: auto !important;
     bottom: auto !important;
     transform: none !important;
-    margin: 0 auto !important;
+    margin: 0 auto !important;   /* center inside column */
     z-index: 1 !important;
     width: 100% !important;
-    max-width: 160px;
+    max-width: 160px;            /* <- adjust to taste (150–180 works well) */
   }
 
+  /* Make the yellow "lab prompt" card breathe and align */
   .labs-prompt {
     width: 100%;
-    margin: 0 0 8px 0;
+    margin: 0 0 8px 0;          /* a little bottom space before the button/uploader */
   }
 `;
 
@@ -102,150 +99,6 @@ function normalizeMarkdown(input = "") {
     }
   }
   return collapsed.join("\n").trim();
-}
-// --- Add this to chat.jsx (e.g., near other helper components) ---
-function InlineLabsCard({ onParsedLabs, onStreamToken, onComplete }) {
-  const ref = React.useRef(null);
-
-  return (
-    <div className="inline-labs-card">
-      <div className="inline-labs-card__body">
-        <div className="inline-labs-card__title">Attach lab results</div>
-        <div className="inline-labs-card__hint">
-          Upload a PDF/image; I’ll parse values and summarize.
-        </div>
-        <div className="inline-labs-card__actions">
-          <button className="btn btn--primary" onClick={() => ref.current?.open()}>
-            Upload
-          </button>
-        </div>
-      </div>
-
-      {/* Hidden uploader instance that we trigger with the button above */}
-      <LabResultsUploader
-        ref={ref}
-        autoSend={true}
-        ocrLanguage="eng"
-        engine="2"
-        onParsedLabs={(labs, meta) => {
-          if (typeof onParsedLabs === "function") onParsedLabs(labs, meta);
-        }}
-        onBeforeSendToAI={(text, meta) =>
-          [
-            "You are a clinical AI assistant.",
-            "You are given OCR-extracted lab results below.",
-            "Summarize abnormal values (with units), compare to provided normal ranges, flag critical values,",
-            "and give a concise, guideline-aligned interpretation.",
-            `SOURCE FILE: ${meta?.filename || "Unknown"}`,
-            "",
-            "=== LAB RESULTS (OCR) ===",
-            text,
-          ].join("\n")
-        }
-        onAIStreamToken={(chunk) => {
-          if (typeof onStreamToken === "function") onStreamToken(String(chunk || ""));
-        }}
-        onAIResponse={(payload) => {
-          const full =
-            payload?.text ??
-            (typeof payload === "string" ? payload : JSON.stringify(payload));
-          if (typeof onComplete === "function") onComplete(full);
-        }}
-      />
-    </div>
-  );
-}
-
-/* 🔵 NEW: Strip a trailing JSON object we append from the backend */
-function stripTrailingJson(text) {
-  if (!text) return { plain: "", json: null };
-  const start = text.lastIndexOf("{");
-  const end = text.lastIndexOf("}");
-  if (start === -1 || end === -1 || end <= start) return { plain: text, json: null };
-  const maybe = text.slice(start, end + 1);
-  try {
-    const json = JSON.parse(maybe);
-    return { plain: text.slice(0, start).trimEnd(), json };
-  } catch {
-    return { plain: text, json: null };
-  }
-}
-
-/* 🔵 NEW: Recorded Case Analysis bubble (donuts + top comparison bar + accordions) */
-function RecordedCaseAnalysisBubble({ data, topK = 5 }) {
-  const diagnoses = Array.isArray(data?.diagnoses) ? data.diagnoses.slice(0, topK) : [];
-  const labs = Array.isArray(data?.labs) ? data.labs : [];
-  const radiology = Array.isArray(data?.radiology) ? data.radiology : [];
-  const recommendations = Array.isArray(data?.recommendations) ? data.recommendations : [];
-  const notes = typeof data?.notes === "string" ? data.notes : "";
-
-  const donutOptions = (label, p) => ({
-    chart: { type: "pie", backgroundColor: "transparent", height: 140, width: 140, margin: [0, 0, 0, 0] },
-    title: { text: `${Math.round((p || 0) * 100)}%`, align: "center", verticalAlign: "middle", y: 6 },
-    tooltip: { enabled: false },
-    plotOptions: {
-      pie: { innerSize: "70%", dataLabels: { enabled: false }, states: { hover: { enabled: false } }, animation: { duration: 250 } },
-    },
-    series: [
-      { name: label, data: [{ name: label, y: Math.max(0.001, p || 0) }, { name: "other", y: 1 - Math.max(0.001, p || 0) }] },
-    ],
-    credits: { enabled: false },
-    legend: { enabled: false },
-  });
-
-  const barOptions = useMemo(
-    () => ({
-      chart: { type: "bar", backgroundColor: "transparent", height: Math.max(220, 60 + 26 * diagnoses.length) },
-      title: { text: "Top comparison" },
-      xAxis: { categories: diagnoses.map((d) => d.label), title: { text: null } },
-      yAxis: { min: 0, max: 100, title: { text: "Probability (%)", align: "high" } },
-      tooltip: { valueSuffix: "%" },
-      plotOptions: { series: { animation: { duration: 250 }, dataLabels: { enabled: true, format: "{point.y:.0f}%" } } },
-      series: [{ name: "Probability", data: diagnoses.map((d) => Math.round((d.p || 0) * 100)) }],
-      credits: { enabled: false },
-    }),
-    [diagnoses]
-  );
-
-  return (
-    <div className="rca-bubble">
-      <div className="rca-top">
-        {diagnoses.map((d) => (
-          <div className="rca-donut" key={d.label}>
-            <HighchartsReact highcharts={Highcharts} options={donutOptions(d.label, d.p)} />
-            <div className="rca-label">{d.label}</div>
-            {Array.isArray(d.icd10) && d.icd10.length > 0 && (
-              <div className="rca-icd">ICD-10: {d.icd10.slice(0, 3).join(", ")}</div>
-            )}
-          </div>
-        ))}
-      </div>
-
-      <div className="rca-bar">
-        <HighchartsReact highcharts={Highcharts} options={barOptions} />
-      </div>
-
-      <details className="rca-accordion" open>
-        <summary>Recommended lab tests &amp; investigations</summary>
-        <ul className="rca-list">{labs.map((x, i) => <li key={i}>{x}</li>)}</ul>
-      </details>
-
-      <details className="rca-accordion">
-        <summary>Radiology</summary>
-        <ul className="rca-list">{radiology.map((x, i) => <li key={i}>{x}</li>)}</ul>
-      </details>
-
-      <details className="rca-accordion">
-        <summary>Recommendations to the doctor</summary>
-        <ul className="rca-list">{recommendations.map((x, i) => <li key={i}>{x}</li>)}</ul>
-      </details>
-
-      <details className="rca-accordion">
-        <summary>Clinical notes</summary>
-        <div className="rca-notes">{notes}</div>
-      </details>
-    </div>
-  );
 }
 
 const Chat = () => {
@@ -351,7 +204,7 @@ const Chat = () => {
     };
   }, [isStreaming, liveText]);
 
-  // Voice assistant (unchanged)
+  // Voice assistant
   const startWebRTC = async () => {
     if (peerConnection || connectionStatus === "connecting") return;
     setConnectionStatus("connecting");
@@ -685,30 +538,12 @@ const Chat = () => {
     );
   };
 
-  /* ===================== Recorded-case second opinion streaming ===================== */
+  // Second opinion stream (voice panel)
   const opinionBufferRef = useRef("");
   const opinionStreamingRef = useRef(false);
   const handleOpinionStream = (chunkOrFull, done = false) => {
     if (done) {
       opinionStreamingRef.current = false;
-      const { plain, json } = stripTrailingJson(opinionBufferRef.current);
-      setChats((prev) => {
-        const updated = [...prev];
-        const last = updated[updated.length - 1];
-        if (last && last.streaming) {
-          last.streaming = false;
-          last.msg = normalizeMarkdown(plain || "");
-        } else {
-          updated.push({ msg: normalizeMarkdown(plain || ""), who: "bot" });
-        }
-        if (
-          json &&
-          (json.diagnoses || json.labs || json.radiology || json.recommendations || json.notes)
-        ) {
-          updated.push({ who: "bot", type: "recorded-analysis", data: json });
-        }
-        return updated;
-      });
       return;
     }
     const chunk = String(chunkOrFull || "");
@@ -952,7 +787,6 @@ const Chat = () => {
       <audio ref={audioPlayerRef} playsInline style={{ display: "none" }} />
       <div className="chat-content">
         {chats.map((chat, index) => {
-          const isRecordedAnalysis = chat?.type === "recorded-analysis" && chat?.data; /* 🔵 NEW */
           const isLabCard = chat?.type === "labs" && Array.isArray(chat.labs);
           return (
             <div
@@ -967,9 +801,7 @@ const Chat = () => {
                 </figure>
               )}
               <div className="message-text">
-                {isRecordedAnalysis ? (
-                  <RecordedCaseAnalysisBubble data={chat.data} />
-                ) : isLabCard ? (
+                {isLabCard ? (
                   <LabsPanel labs={chat.labs} meta={chat.meta} />
                 ) : (
                   <>
@@ -1214,7 +1046,7 @@ const Chat = () => {
 
 export default Chat;
 
-/* Drawer wrapper */
+// Drawer wrapper
 const DrawComponent = ({ children }) => {
   const [isOpen, setIsOpen] = useState(false);
 
@@ -1231,13 +1063,14 @@ const DrawComponent = ({ children }) => {
             exit={{ opacity: 0, y: 50, scale: 0.9 }}
             transition={{ duration: 0.3, ease: "easeInOut" }}
             style={{
-              minWidth: "480px",
+              minWidth: "480px",                          // your chosen drawer width
               background: "rgba(255, 255, 255, 0.9)",
               backdropFilter: "blur(10px)",
               borderRadius: "16px",
               boxShadow: "0 8px 30px rgba(0,0,0,0.12)",
               border: "1px solid rgba(0,0,0,0.08)",
 
+              /* keep these consistent with the CSS class above (OK to leave duplicated) */
               display: "grid",
               gridTemplateColumns: "repeat(3, minmax(0, 1fr))",
               columnGap: "16px",
@@ -1274,10 +1107,7 @@ const DrawComponent = ({ children }) => {
           bottom: "12px",
           marginBottom: "8px",
         }}
-        onMouseDown={(e) => (e.currentTarget.style.transform = "scale(0.97)")}
-        onMouseUp={(e) => (e.currentTarget.style.transform = "scale(1.0)")}
         title="Toggle Tools"
-        aria-label="Toggle tools drawer"
       >
         {isOpen ? "✖" : "🛠️"}
       </button>
@@ -1285,7 +1115,7 @@ const DrawComponent = ({ children }) => {
   );
 };
 
-/* Mermaid collapsible (unchanged) */
+// Mermaid collapsible
 const CollapsibleDiagram = ({ chart }) => {
   const [isOpen, setIsOpen] = useState(false);
   return (
@@ -1314,8 +1144,9 @@ const CollapsibleDiagram = ({ chart }) => {
   );
 };
 
-/* ===== Visual Labs Panel (unchanged) ===== */
+/* ===== Visual Labs Panel using AI classification ===== */
 function LabsPanel({ labs = [], meta }) {
+  // Keep only sensible rows
   const valid = (Array.isArray(labs) ? labs : []).filter((l) => {
     const v = toNum(l?.value);
     const hasRange =
@@ -1340,7 +1171,7 @@ function LabsPanel({ labs = [], meta }) {
           </div>
         </div>
         <div className="labs-panel__body">
-          <div className="labs-panel__empty">
+          <div style={{ opacity: 0.7, fontSize: 13 }}>
             No parsable lab values were found in this upload.
           </div>
         </div>
@@ -1390,6 +1221,7 @@ function LabRow({ lab }) {
     max = high + Math.max(0.25 * span, 0.01 * Math.abs(high));
     band = Math.max(0.075 * span, 1e-6);
   } else {
+    // If no range, single-color bar per AI status
     min = 0;
     max = 1;
     band = 0.2;
@@ -1433,8 +1265,9 @@ function LabRow({ lab }) {
 
   // Status badge
   let status = "neutral";
-  if (["normal", "borderline", "abnormal"].includes(aiStatus)) status = aiStatus;
-  else if (
+  if (["normal", "borderline", "abnormal"].includes(aiStatus)) {
+    status = aiStatus;
+  } else if (
     Number.isFinite(low) &&
     Number.isFinite(high) &&
     Number.isFinite(value)
@@ -1451,9 +1284,7 @@ function LabRow({ lab }) {
         <div className="lab-row__name">{name}</div>
         <div className="lab-row__range">
           {Number.isFinite(low) && Number.isFinite(high) ? (
-            <>
-              Normal range: {low} – {high} {unit}
-            </>
+            <>Normal range: {low} – {high} {unit}</>
           ) : (
             <em>Normal range: unknown</em>
           )}
@@ -1467,27 +1298,17 @@ function LabRow({ lab }) {
             : ""}
         </div>
         <div className="bar">
-          {redL > 0 && (
-            <div className="seg seg--red" style={{ flexBasis: `${redL}%` }} />
-          )}
+          {redL > 0 && <div className="seg seg--red" style={{ flexBasis: `${redL}%` }} />}
           {yellowL > 0 && (
-            <div
-              className="seg seg--yellow"
-              style={{ flexBasis: `${yellowL}%` }}
-            />
+            <div className="seg seg--yellow" style={{ flexBasis: `${yellowL}%` }} />
           )}
           {green > 0 && (
             <div className="seg seg--green" style={{ flexBasis: `${green}%` }} />
           )}
           {yellowR > 0 && (
-            <div
-              className="seg seg--yellow"
-              style={{ flexBasis: `${yellowR}%` }}
-            />
+            <div className="seg seg--yellow" style={{ flexBasis: `${yellowR}%` }} />
           )}
-          {redR > 0 && (
-            <div className="seg seg--red" style={{ flexBasis: `${redR}%` }} />
-          )}
+          {redR > 0 && <div className="seg seg--red" style={{ flexBasis: `${redR}%` }} />}
 
           <div className="indicator" style={{ left: `${posPct}%` }} />
         </div>
@@ -1496,6 +1317,53 @@ function LabRow({ lab }) {
       <div className={`lab-row__value lab-row__value--${status}`}>
         {Number.isFinite(value) ? `${value} ${unit}` : "—"}
       </div>
+    </div>
+  );
+}
+
+function InlineLabsCard({ onStreamToken, onComplete, onParsedLabs }) {
+  const localRef = useRef(null);
+
+  return (
+    <div
+      style={{
+        margin: "10px 0",
+        padding: "10px 12px",
+        borderRadius: 12,
+        background: "rgba(10,102,194,0.08)",
+        border: "1px solid rgba(10,102,194,0.25)",
+      }}
+    >
+      <div style={{ fontWeight: 700, fontSize: 13, marginBottom: 6 }}>
+        Please upload the lab results (PDF/Image)
+      </div>
+      <LabResultsUploader
+        ref={localRef}
+        autoSend={true}
+        ocrLanguage="eng"
+        engine="2"
+        dense={true}
+        onParsedLabs={onParsedLabs}
+        onBeforeSendToAI={(text, meta) =>
+          [
+            "You are a clinical AI assistant.",
+            "You are given OCR-extracted lab results below.",
+            "Summarize abnormal values (with units), compare to provided normal ranges, flag critical values,",
+            "and give a concise, guideline-aligned interpretation.",
+            `SOURCE FILE: ${meta?.filename || "Unknown"}`,
+            "",
+            "=== LAB RESULTS (OCR) ===",
+            text,
+          ].join("\n")
+        }
+        onAIStreamToken={onStreamToken}
+        onAIResponse={(payload) => {
+          const full =
+            payload?.text ??
+            (typeof payload === "string" ? payload : JSON.stringify(payload));
+          onComplete(full);
+        }}
+      />
     </div>
   );
 }
@@ -1509,6 +1377,3 @@ function toNum(x) {
   }
   return NaN;
 }
-
-
-

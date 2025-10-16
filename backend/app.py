@@ -41,8 +41,6 @@ OCR_SPACE_API_KEY = os.getenv("OCR_SPACE_API_KEY")
 # Provider plan guard (per OCR.Space docs: Free≈1MB, PRO≈5MB, PRO PDF≈100MB+)
 # This is a best-effort early guard; the provider still enforces its own limits.
 PROVIDER_LIMIT_MB = int(os.getenv("OCR_PROVIDER_LIMIT_MB", "1"))  # 1|5|100
-# --- Real-time Case Analysis (in-memory series for visuals) ---
-dx_series = {}  # session_id -> { label: [[ts_ms, p], ...] }
 
 # Flask request cap (bytes); keep >= provider limit (default 20MB)
 MAX_BYTES = int(os.getenv("OCR_MAX_BYTES", 20 * 1024 * 1024))
@@ -341,7 +339,57 @@ def transcribe():
 
     return jsonify({"transcript": transcript_text})
 
+# ====== NEW: /case-second-opinion-stream ======
+@app.route("/case-second-opinion-stream", methods=["POST"])
+def case_second_opinion_stream():
+    data = request.get_json() or {}
+    context = (data.get("context") or "").strip()
+    session_id = data.get("session_id", str(uuid4()))
 
+    if not context:
+        return jsonify({"error": "No context provided"}), 400
+
+    if session_id not in chat_sessions:
+        chat_sessions[session_id] = []
+
+    # Force a structured medical answer; English only; allows Mermaid at end if model decides
+    structured_instruction = (
+        "SECOND OPINION CASE ANALYSIS.\n"
+        "Using ONLY the transcript and retrieved clinical knowledge, respond in ENGLISH with the following exact sections:\n\n"
+        "The diagnosis:\n"
+        "The differential diagnosis:\n"
+        "The recommended lab test and investigation:\n"
+        "Drug prescriptions:\n"
+        "Recommendations to The Doctor:\n"
+        "Treatment plan:\n\n"
+        "Keep it specific and evidence-aware; include dosages when appropriate. "
+        "If helpful, you MAY append a flow pathway as a Mermaid block wrapped in ```mermaid ...```."
+    )
+
+    rag_input = (
+        f"{structured_instruction}\n\n"
+        f"Patient consultation transcript:\n{context}\n"
+    )
+
+    def generate():
+        answer_acc = ""
+        try:
+            for chunk in conversation_rag_chain.stream({
+                "chat_history": chat_sessions.get(session_id, []),
+                "input": rag_input
+            }):
+                token = chunk.get("answer", "")
+                answer_acc += token
+                yield token
+        except Exception as e:
+            yield f"\n[Vector error: {str(e)}]"
+
+        # persist into chat history after streaming completes
+        chat_sessions.setdefault(session_id, [])
+        chat_sessions[session_id].append({"role": "user", "content": "[Voice Transcript Submitted]"})
+        chat_sessions[session_id].append({"role": "assistant", "content": answer_acc})
+
+    return Response(stream_with_context(generate()), content_type="text/plain")
 
 # ===== existing endpoints (unchanged) =====
 
@@ -2837,158 +2885,5 @@ def vision_analyze():
 
     except Exception as e:
         return jsonify(error=str(e)), 500
-    
-  # --- helpers (place near your other helpers; no external deps) ---
-def _build_visuals_from_diags(diags):
-    """
-    Build Highcharts-ready shapes:
-      - donut_parts: [{label, parts:[{name,y},{name:'other',y}]}]
-      - bars: { categories: [...], series:[{name:'Probability', data:[%...]}] }
-    """
-    labels = [d.get("label", "") for d in diags if d.get("label")]
-    probs = [float(d.get("p", 0.0)) for d in diags if d.get("label")]
-    probs_pct = [round(max(0.0, min(1.0, p)) * 100.0, 2) for p in probs]
-
-    donut_parts = [
-        {
-            "label": lbl,
-            "parts": [
-                {"name": lbl, "y": max(0.001, pct / 100.0)},
-                {"name": "other", "y": round(1.0 - max(0.001, pct / 100.0), 6)},
-            ],
-        }
-        for lbl, pct in zip(labels, probs_pct)
-    ]
-    bars = {
-        "categories": labels,
-        "series": [{"name": "Probability", "data": [round(p, 2) for p in probs_pct]}],
-    }
-    return {"donut_parts": donut_parts, "bars": bars}
-
-def _safe_json_loads(txt):
-    try:
-        import json
-        return json.loads(txt)
-    except Exception:
-        # fall back to your existing tolerant parser if present
-        try:
-            return _extract_json_dict(txt)  # defined in your codebase
-        except Exception:
-            return None
-        
-@app.post("/case-second-opinion-stream")
-def case_second_opinion_stream():
-    """
-    Request JSON:
-      { "context": "<full transcript text>", "session_id": "optional" }
-
-    Response (streamed):
-      1) Narrative analysis text (your current behavior).
-      2) NEW: a single trailing line with a JSON object:
-         {
-           "diagnoses":[{"label":"...", "p":0.83, "icd10":["..."]}, ...],
-           "labs":["..."],
-           "radiology":["..."],
-           "recommendations":["..."],
-           "notes":"...",
-           "visuals":{ "donut_parts":[...], "bars":{...} }
-         }
-    """
-    data = request.get_json(silent=True) or {}
-    session_id = data.get("session_id") or str(uuid4())
-    transcript = (data.get("context") or "").strip()
-    if not transcript:
-        return jsonify({"error": "empty context"}), 400
-
-    # 1) NARRATIVE prompt (free prose; you already stream this today)
-    narrative_prompt = "\n".join([
-        "You are a clinical AI assistant.",
-        "Given the following case transcript, provide a concise, guideline-aligned assessment and differential.",
-        "Do NOT include any JSON in this part; this is narrative text only.",
-        "",
-        f"TRANSCRIPT:\n{transcript}\n"
-    ])
-
-    # 2) STRUCTURED prompt (strict JSON; ICD-10 codes MUST come from retrieved context only)
-    structured_prompt = "\n".join([
-        "You are a clinical reasoning engine.",
-        "Return STRICT JSON only with this schema:",
-        "{",
-        '  "diagnoses": [ {"label": "short name", "p": 0.0-1.0, "icd10": ["codes from retrieved context only"]} ],',
-        '  "labs": ["concise items"],',
-        '  "radiology": ["concise items"],',
-        '  "recommendations": ["short actionable bullets"],',
-        '  "notes": "concise running assessment"',
-        "}",
-        "Rules:",
-        "- Total probabilities should sum to ~1.",
-        "- Use ONLY ICD-10 codes that appear verbatim in retrieved documents; if none, use [].",
-        "- Keep items concise.",
-        "",
-        f"TRANSCRIPT:\n{transcript}\n"
-    ])
-
-    # Run your existing conversational RAG chain twice:
-    #  A) narrative (text)
-    #  B) structured (JSON-only)
-    try:
-        # narrative
-        narr = conversation_rag_chain.invoke({
-            "chat_history": chat_sessions.get(session_id, []),
-            "input": narrative_prompt
-        })
-        narrative_text = (narr.get("answer") or narr if isinstance(narr, dict) else narr) or ""
-        narrative_text = str(narrative_text).strip()
-
-        # structured
-        struct = conversation_rag_chain.invoke({
-            "chat_history": chat_sessions.get(session_id, []),
-            "input": structured_prompt
-        })
-        struct_raw = (struct.get("answer") or struct if isinstance(struct, dict) else struct) or ""
-        struct_raw = str(struct_raw).strip()
-        struct_json = _safe_json_loads(struct_raw) or {}
-        # normalize/limit
-        diags = struct_json.get("diagnoses") or []
-        # cap to top 5 by p
-        try:
-            diags = sorted(diags, key=lambda d: float(d.get("p", 0.0)), reverse=True)[:5]
-        except Exception:
-            diags = diags[:5]
-        # clamp & renormalize
-        total = sum(max(0.0, min(1.0, float(d.get("p", 0.0)))) for d in diags) or 1.0
-        for d in diags:
-            try:
-                p = max(0.0, min(1.0, float(d.get("p", 0.0)))) / total
-            except Exception:
-                p = 0.0
-            d["p"] = p
-            # ensure icd10 is a list[str]
-            d["icd10"] = [str(c).strip() for c in (d.get("icd10") or []) if str(c).strip()]
-
-        struct_json["diagnoses"] = diags
-        struct_json["labs"] = [str(x).strip() for x in (struct_json.get("labs") or []) if str(x).strip()]
-        struct_json["radiology"] = [str(x).strip() for x in (struct_json.get("radiology") or []) if str(x).strip()]
-        struct_json["recommendations"] = [str(x).strip() for x in (struct_json.get("recommendations") or []) if str(x).strip()]
-        struct_json["notes"] = str(struct_json.get("notes") or "").strip()
-        struct_json["visuals"] = _build_visuals_from_diags(diags)
-
-    except Exception as e:
-        # If anything fails, still stream what we have
-        narrative_text = narrative_text if 'narrative_text' in locals() else ""
-        struct_json = {"diagnoses": [], "labs": [], "radiology": [], "recommendations": [], "notes": "", "visuals": {"donut_parts": [], "bars": {"categories": [], "series": [{"name":"Probability","data":[]}]}}}
-
-    def generate():
-        # Stream the narrative first (as a single chunk to keep things simple/robust)
-        if narrative_text:
-            yield narrative_text
-            if not narrative_text.endswith("\n"):
-                yield "\n"
-        # Then append the JSON block on its own line
-        import json as _json
-        yield _json.dumps(struct_json, ensure_ascii=False) + "\n"
-
-    # NOTE: `stream_with_context` keeps request context valid within the generator. :contentReference[oaicite:1]{index=1}
-    return Response(stream_with_context(generate()), mimetype="text/plain; charset=utf-8") 
 if __name__ == "__main__":
     app.run(host="127.0.0.1", port=5050, debug=True)

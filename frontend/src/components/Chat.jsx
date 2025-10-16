@@ -29,7 +29,7 @@ import { Howl } from "howler";
 let localStream;
 const BACKEND_BASE = "https://ai-doctor-assistant-backend-server.onrender.com";
 
-// Force fixed-position pieces to play nicely in the drawer.
+// Force fixed-position pieces to play nicely in the drawer + Second Opinion styling (no accordions).
 const drawerComponentOverrides = `
   /* Drawer grid + spacing */
   .tools-grid {
@@ -66,51 +66,22 @@ const drawerComponentOverrides = `
     max-width: 160px;
   }
 
-  .labs-prompt {
-    width: 100%;
-    margin: 0 0 8px 0;
-  }
+  .labs-prompt { width: 100%; margin: 0 0 8px 0; }
 
-  /* --- minimal styling for second opinion panel (safe defaults) --- */
+  /* --- Second Opinion (flat sections, larger donuts) --- */
   .so-card {
     border: 1px solid rgba(0,0,0,0.08);
-    border-radius: 14px;
-    background: rgba(255,255,255,0.92);
-    box-shadow: 0 8px 24px rgba(0,0,0,0.08);
-    padding: 14px;
+    border-radius: 16px;
+    background: rgba(255,255,255,0.96);
+    box-shadow: 0 8px 28px rgba(0,0,0,0.10);
+    padding: 16px;
   }
   .so-header {
     display: flex; align-items: center; justify-content: space-between;
-    gap: 12px; margin-bottom: 10px;
+    gap: 12px; margin-bottom: 14px;
   }
-  .so-title { font-weight: 800; font-size: 16px; }
-  .so-sub { font-size: 12px; opacity: 0.7; }
-  .so-grid {
-    display: grid;
-    grid-template-columns: repeat( auto-fit, minmax(220px, 1fr) );
-    gap: 12px;
-  }
-  .so-section {
-    border: 1px dashed rgba(0,0,0,0.1);
-    border-radius: 12px;
-    padding: 10px;
-    background: rgba(246,248,255,0.8);
-  }
-  .so-sec-title { font-weight: 700; font-size: 13px; margin-bottom: 6px; }
-  .so-table {
-    width: 100%;
-    border-collapse: collapse;
-    font-size: 13px;
-  }
-  .so-table th, .so-table td {
-    border-bottom: 1px solid rgba(0,0,0,0.06);
-    padding: 6px 4px; text-align: left;
-  }
-  .so-diffs {
-    display: grid;
-    grid-template-columns: repeat( auto-fit, minmax(220px, 1fr) );
-    gap: 10px;
-  }
+  .so-title { font-weight: 800; font-size: 18px; }
+  .so-sub { font-size: 13px; opacity: 0.8; }
   .so-chip {
     display: inline-flex; align-items: center; gap: 6px;
     padding: 6px 10px; border-radius: 999px;
@@ -118,16 +89,45 @@ const drawerComponentOverrides = `
     border: 1px solid rgba(55,80,216,0.25);
     font-size: 12px; font-weight: 700;
   }
-  .so-accordion details {
-    border: 1px solid rgba(0,0,0,0.08);
-    border-radius: 10px; background: #fff; padding: 8px 10px;
+
+  .so-section {
+    border: 1px dashed rgba(0,0,0,0.08);
+    border-radius: 12px;
+    padding: 12px;
+    background: #fff;
   }
-  .so-accordion summary {
-    cursor: pointer; font-weight: 700; font-size: 13px;
-    list-style: none; outline: none;
+  .so-sec-title { font-weight: 800; font-size: 14px; margin-bottom: 8px; }
+  .so-grid { display: grid; grid-template-columns: repeat( auto-fit, minmax(260px, 1fr) ); gap: 12px; }
+
+  /* Differential items with bigger donuts */
+  .so-diffs { display: grid; grid-template-columns: repeat( auto-fit, minmax(280px, 1fr) ); gap: 12px; }
+  .so-diff-item {
+    display: flex; align-items: center; gap: 14px;
+    border: 1px solid rgba(0,0,0,0.06); border-radius: 14px; padding: 10px; background: #fff;
   }
-  .so-accordion summary::-webkit-details-marker { display: none; }
-  .so-accordion .inner { padding-top: 8px; }
+  .so-diff-meta { display: grid; gap: 4px; }
+  .so-diff-name { font-weight: 800; font-size: 14px; }
+  .so-diff-sub { font-size: 12px; opacity: 0.75; }
+
+  .so-table {
+    width: 100%; border-collapse: collapse; font-size: 13px;
+  }
+  .so-table th, .so-table td {
+    border-bottom: 1px solid rgba(0,0,0,0.06); padding: 8px 6px; text-align: left;
+  }
+
+  .so-narrative {
+    border: 1px solid rgba(0,0,0,0.06);
+    background: #fff; border-radius: 12px; padding: 12px;
+  }
+
+  /* Donut theme (CSS vars for easy theming) */
+  :root {
+    --donut-fill: #3750D8;
+    --donut-track: #E5E7EB;
+    --donut-text: #111827;
+    --donut-subtext: #6B7280;
+  }
 `;
 
 /** Normalize bot markdown a bit */
@@ -160,11 +160,8 @@ function normalizeMarkdown(input = "") {
 
 /* ---------- Helpers for Second Opinion JSON extraction ---------- */
 function extractJsonBlock(text = "") {
-  // Prefer fenced ```json ... ```
   const fence = /```json([\s\S]*?)```/i.exec(text);
   if (fence && fence[1]) return fence[1].trim();
-
-  // Fallback: try to find the first top-level { ... }
   const firstBrace = text.indexOf("{");
   const lastBrace = text.lastIndexOf("}");
   if (firstBrace !== -1 && lastBrace !== -1 && lastBrace > firstBrace) {
@@ -176,23 +173,13 @@ function extractJsonBlock(text = "") {
 function tryParseJsonLoose(raw) {
   if (!raw) return null;
   let s = raw;
-
-  // Normalize smart quotes
   s = s.replace(/[\u201C\u201D\u201E\u201F\u2033\u2036]/g, '"').replace(/[\u2018\u2019]/g, "'");
-
-  // Remove trailing commas in objects/arrays
   s = s.replace(/,\s*}/g, "}").replace(/,\s*]/g, "]");
-
   try {
     return JSON.parse(s);
-  } catch (e) {
-    // Try second time after removing BOM or stray backticks
+  } catch {
     s = s.replace(/^\uFEFF/, "").replace(/```/g, "");
-    try {
-      return JSON.parse(s);
-    } catch {
-      return null;
-    }
+    try { return JSON.parse(s); } catch { return null; }
   }
 }
 
@@ -208,8 +195,6 @@ function ensureOpinionShape(obj) {
     treatment_plan: Array.isArray(obj.treatment_plan) ? obj.treatment_plan : [],
     services: Array.isArray(obj.services) ? obj.services : []
   };
-
-  // Clamp probabilities and coerce ints
   out.differential_diagnosis = out.differential_diagnosis.map((d) => {
     const p = Math.max(0, Math.min(100, Math.round(Number(d?.probability_percent || 0))));
     return {
@@ -218,49 +203,35 @@ function ensureOpinionShape(obj) {
       icd10: (d?.icd10 == null || d?.icd10 === "") ? null : String(d.icd10)
     };
   });
-
   return out;
 }
 
-/* ---------- Donut chart (pure SVG) ---------- */
-function Donut({ value = 0, size = 88, stroke = 10, label = "" }) {
+/* ---------- Donut chart (pure SVG) — larger, crisp, no animation ---------- */
+function Donut({ value = 0, size = 140, stroke = 16, label = "" }) {
   const v = Math.max(0, Math.min(100, Number(value) || 0));
   const r = (size - stroke) / 2;
   const c = 2 * Math.PI * r;
   const dash = (v / 100) * c;
+  const cx = size / 2, cy = size / 2;
+
   return (
     <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`} role="img" aria-label={`${label} ${v}%`}>
-      <circle cx={size/2} cy={size/2} r={r} strokeWidth={stroke} stroke="rgba(0,0,0,0.08)" fill="none"/>
+      {/* track */}
+      <circle cx={cx} cy={cy} r={r} strokeWidth={stroke} stroke="var(--donut-track)" fill="none" />
+      {/* value */}
       <circle
-        cx={size/2}
-        cy={size/2}
-        r={r}
-        strokeWidth={stroke}
-        strokeDasharray={`${dash} ${c - dash}`}
-        strokeLinecap="round"
-        transform={`rotate(-90 ${size/2} ${size/2})`}
-        fill="none"
+        cx={cx} cy={cy} r={r} strokeWidth={stroke}
+        stroke="var(--donut-fill)" strokeDasharray={`${dash} ${c - dash}`} strokeLinecap="round"
+        transform={`rotate(-90 ${cx} ${cy})`} fill="none"
       />
-      <text x="50%" y="50%" dominantBaseline="central" textAnchor="middle" fontSize="14" fontWeight="800">
-        {v}%
-      </text>
+      {/* % text */}
+      <text x="50%" y="50%" dominantBaseline="central" textAnchor="middle"
+        fontSize="18" fontWeight="800" fill="var(--donut-text)">{v}%</text>
     </svg>
   );
 }
 
-/* ---------- Accordion helper (native <details>) ---------- */
-function Accordion({ title, children, defaultOpen = false }) {
-  return (
-    <div className="so-accordion">
-      <details open={defaultOpen}>
-        <summary>{title}</summary>
-        <div className="inner">{children}</div>
-      </details>
-    </div>
-  );
-}
-
-/* ---------- Second Opinion panel ---------- */
+/* ---------- Second Opinion panel (no accordions; everything open) ---------- */
 function SecondOpinionPanel({ data, narrative }) {
   const diffs = Array.isArray(data?.differential_diagnosis) ? data.differential_diagnosis : [];
   const primary = data?.primary_diagnosis;
@@ -278,22 +249,18 @@ function SecondOpinionPanel({ data, narrative }) {
         </div>
       </div>
 
-      {/* Differential diagnosis with donuts */}
+      {/* Differential diagnosis with bigger donuts */}
       {diffs.length > 0 && (
-        <div className="so-section" style={{ marginBottom: 10 }}>
+        <div className="so-section" style={{ marginBottom: 12 }}>
           <div className="so-sec-title">Differential diagnosis (probabilities)</div>
           <div className="so-diffs">
             {diffs.map((d, i) => (
-              <div key={i} style={{ display: "flex", alignItems: "center", gap: 10, border: "1px solid rgba(0,0,0,0.06)", borderRadius: 12, padding: 8, background: "#fff" }}>
+              <div className="so-diff-item" key={i}>
                 <Donut value={d.probability_percent} label={d.name} />
-                <div style={{ display: "grid", gap: 4 }}>
-                  <div style={{ fontWeight: 800, fontSize: 13 }}>{d.name}</div>
-                  <div style={{ fontSize: 12, opacity: 0.7 }}>
-                    Probability: <b>{d.probability_percent}%</b>
-                  </div>
-                  <div style={{ fontSize: 12, opacity: 0.7 }}>
-                    ICD-10: <code>{d.icd10 || "—"}</code>
-                  </div>
+                <div className="so-diff-meta">
+                  <div className="so-diff-name">{d.name}</div>
+                  <div className="so-diff-sub">Probability: <b>{d.probability_percent}%</b></div>
+                  <div className="so-diff-sub">ICD-10: <code>{d.icd10 || "—"}</code></div>
                 </div>
               </div>
             ))}
@@ -303,7 +270,7 @@ function SecondOpinionPanel({ data, narrative }) {
 
       {/* ICD-10 table */}
       {diffs.length > 0 && (
-        <div className="so-section" style={{ marginBottom: 10 }}>
+        <div className="so-section" style={{ marginBottom: 12 }}>
           <div className="so-sec-title">ICD-10 Summary</div>
           <table className="so-table">
             <thead>
@@ -326,57 +293,64 @@ function SecondOpinionPanel({ data, narrative }) {
         </div>
       )}
 
-      {/* Collapsible sections */}
-      <div className="so-grid" style={{ marginBottom: 8 }}>
+      {/* Always-visible sections (no accordions) */}
+      <div className="so-grid" style={{ marginBottom: 12 }}>
         {data?.recommended_labs?.length > 0 && (
-          <Accordion title="Recommended lab tests & investigations">
-            <ul style={{ margin: 0, paddingLeft: 16 }}>
+          <div className="so-section">
+            <div className="so-sec-title">Recommended lab tests & investigations</div>
+            <ul style={{ margin: 0, paddingLeft: 18 }}>
               {data.recommended_labs.map((t, i) => <li key={i}>{t}</li>)}
             </ul>
-          </Accordion>
+          </div>
         )}
         {data?.imaging?.length > 0 && (
-          <Accordion title="Imaging / Radiology">
-            <ul style={{ margin: 0, paddingLeft: 16 }}>
+          <div className="so-section">
+            <div className="so-sec-title">Imaging / Radiology</div>
+            <ul style={{ margin: 0, paddingLeft: 18 }}>
               {data.imaging.map((t, i) => <li key={i}>{t}</li>)}
             </ul>
-          </Accordion>
+          </div>
         )}
         {data?.prescriptions?.length > 0 && (
-          <Accordion title="Drug prescriptions">
-            <ul style={{ margin: 0, paddingLeft: 16 }}>
+          <div className="so-section">
+            <div className="so-sec-title">Drug prescriptions</div>
+            <ul style={{ margin: 0, paddingLeft: 18 }}>
               {data.prescriptions.map((t, i) => <li key={i}>{t}</li>)}
             </ul>
-          </Accordion>
+          </div>
         )}
         {data?.recommendations?.length > 0 && (
-          <Accordion title="Recommendations to the doctor">
-            <ul style={{ margin: 0, paddingLeft: 16 }}>
+          <div className="so-section">
+            <div className="so-sec-title">Recommendations to the doctor</div>
+            <ul style={{ margin: 0, paddingLeft: 18 }}>
               {data.recommendations.map((t, i) => <li key={i}>{t}</li>)}
             </ul>
-          </Accordion>
+          </div>
         )}
         {data?.treatment_plan?.length > 0 && (
-          <Accordion title="Treatment plan">
-            <ul style={{ margin: 0, paddingLeft: 16 }}>
+          <div className="so-section">
+            <div className="so-sec-title">Treatment plan</div>
+            <ul style={{ margin: 0, paddingLeft: 18 }}>
               {data.treatment_plan.map((t, i) => <li key={i}>{t}</li>)}
             </ul>
-          </Accordion>
+          </div>
         )}
         {data?.services?.length > 0 && (
-          <Accordion title="Services / Referrals">
-            <ul style={{ margin: 0, paddingLeft: 16 }}>
+          <div className="so-section">
+            <div className="so-sec-title">Services / Referrals</div>
+            <ul style={{ margin: 0, paddingLeft: 18 }}>
               {data.services.map((t, i) => <li key={i}>{t}</li>)}
             </ul>
-          </Accordion>
+          </div>
         )}
       </div>
 
-      {/* Optional: show the full narrative under a collapsible */}
+      {/* Full narrative (always visible) */}
       {narrative && (
-        <Accordion title="Full narrative" defaultOpen={false}>
+        <div className="so-narrative">
+          <div className="so-sec-title" style={{ marginBottom: 6 }}>Narrative</div>
           <ReactMarkdown remarkPlugins={[remarkGfm]}>{narrative}</ReactMarkdown>
-        </Accordion>
+        </div>
       )}
     </div>
   );
@@ -425,9 +399,7 @@ const Chat = () => {
       preload: true,
     });
     return () => {
-      try {
-        toggleSfxRef.current?.unload();
-      } catch {}
+      try { toggleSfxRef.current?.unload(); } catch {}
     };
   }, []);
 
@@ -457,10 +429,7 @@ const Chat = () => {
     if (isStreaming && liveIdxRef.current !== null) {
       setChats((prev) => {
         const arr = [...prev];
-        arr[liveIdxRef.current] = {
-          ...arr[liveIdxRef.current],
-          msg: liveText || "",
-        };
+        arr[liveIdxRef.current] = { ...arr[liveIdxRef.current], msg: liveText || "" };
         return arr;
       });
     }
@@ -469,8 +438,7 @@ const Chat = () => {
         setChats((prev) => {
           const arr = [...prev];
           const idx = liveIdxRef.current;
-          if (arr[idx])
-            arr[idx] = { msg: liveText || arr[idx].msg || "", who: "me" };
+          if (arr[idx]) arr[idx] = { msg: liveText || arr[idx].msg || "", who: "me" };
           return arr;
         });
         liveIdxRef.current = null;
@@ -496,308 +464,138 @@ const Chat = () => {
       startVolumeMonitoring(stream, setAudioScale);
       localStream = stream;
       stream.getAudioTracks().forEach((track) => (track.enabled = true));
-      const pc = new RTCPeerConnection({
-        iceServers: [{ urls: "stun:stun.l.google.com:19302" }],
-      });
+      const pc = new RTCPeerConnection({ iceServers: [{ urls: "stun:stun.l.google.com:19302" }] });
 
       pc.ontrack = (event) => {
         const [stream] = event.streams;
         if (!audioPlayerRef.current) return;
         audioPlayerRef.current.srcObject = stream;
         setAudioUrl(stream);
-        audioPlayerRef.current
-          .play()
-          .catch((err) => console.error("live stream play failed:", err));
+        audioPlayerRef.current.play().catch((err) => console.error("live stream play failed:", err));
       };
       pc.oniceconnectionstatechange = () => {
         if (pc.iceConnectionState === "failed") {
-          console.error("ICE connection failed.");
-          pc.close();
-          setConnectionStatus("error");
+          console.error("ICE connection failed."); pc.close(); setConnectionStatus("error");
         }
       };
       pc.onicecandidateerror = (e) => console.error("ICE candidate error:", e);
-      pc.onnegotiationneeded = () => {};
       pc.onconnectionstatechange = () => {
         if (pc.connectionState === "closed" || pc.connectionState === "failed") {
-          setConnectionStatus("error");
-          setIsMicActive(false);
+          setConnectionStatus("error"); setIsMicActive(false);
         }
       };
 
-      if (!localStream) console.error("localStream undefined when adding track.");
       stream.getAudioTracks().forEach((track) => pc.addTrack(track, localStream));
 
       const channel = pc.createDataChannel("response");
       channel.onopen = () => {
         setConnectionStatus("connected");
         setIsMicActive(true);
-        channel.send(
-          JSON.stringify({
-            type: "conversation.item.create",
-            item: {
-              type: "message",
-              role: "user",
-              content: [{ type: "input_text", text: "hola" }],
-            },
-          })
-        );
+        channel.send(JSON.stringify({
+          type: "conversation.item.create",
+          item: { type: "message", role: "user", content: [{ type: "input_text", text: "hola" }] },
+        }));
         channel.send(JSON.stringify({ type: "response.create" }));
         micStream?.getAudioTracks().forEach((track) => (track.enabled = true));
       };
-      channel.onclose = () => {
-        if (pc.connectionState !== "closed") {
-          console.warn("Data channel closed unexpectedly.", pc.connectionState);
-        }
-        setConnectionStatus("idle");
-        setIsMicActive(false);
-      };
-      channel.onerror = (error) => {
-        console.error("Data channel error:", error);
-        setConnectionStatus("error");
-        setIsMicActive(false);
-      };
-
-      let pcmBuffer = new ArrayBuffer(0);
-      channel.onmessage = async (event) => {
-        const msg = JSON.parse(event.data);
-        switch (msg.type) {
-          case "response.audio.delta": {
-            const chunk = Uint8Array.from(atob(msg.delta), (c) => c.charCodeAt(0));
-            const tmp = new Uint8Array(pcmBuffer.byteLength + chunk.byteLength);
-            tmp.set(new Uint8Array(pcmBuffer), 0);
-            tmp.set(chunk, pcmBuffer.byteLength);
-            pcmBuffer = tmp.buffer;
-            break;
-          }
-          case "response.audio.done": {
-            const wav = encodeWAV(pcmBuffer, 24000, 1);
-            const blob = new Blob([wav], { type: "audio/wav" });
-            const url = URL.createObjectURL(blob);
-            const el = audioPlayerRef.current;
-            el.src = url;
-            el.volume = 1;
-            el.muted = false;
-            if (!audioContextRef.current) {
-              audioContextRef.current = new (window.AudioContext ||
-                window.webkitAudioContext)();
-            }
-            if (!audioSourceRef.current) {
-              audioSourceRef.current =
-                audioContextRef.current.createMediaElementSource(el);
-              analyserRef.current = audioContextRef.current.createAnalyser();
-              audioSourceRef.current.connect(analyserRef.current);
-              analyserRef.current.connect(audioContextRef.current.destination);
-              analyserRef.current.smoothingTimeConstant = 0.8;
-              analyserRef.current.fftSize = 256;
-            }
-            const analyser = analyserRef.current;
-            const dataArray = new Uint8Array(analyser.frequencyBinCount);
-            const { setAudioScale } = useAudioForVisualizerStore.getState();
-            const monitorBotVolume = () => {
-              analyser.getByteFrequencyData(dataArray);
-              const avg =
-                dataArray.reduce((sum, val) => sum + val, 0) / dataArray.length;
-              const normalized = Math.max(0.5, Math.min(2, avg / 50));
-              setAudioScale(normalized);
-              if (!el.paused && !el.ended) requestAnimationFrame(monitorBotVolume);
-            };
-            monitorBotVolume();
-            setAudioWave(true);
-            el.play().catch((err) =>
-              console.error("play error:", err.name, err.message)
-            );
-            pcmBuffer = new ArrayBuffer(0);
-            break;
-          }
-          case "response.audio_transcript.delta":
-            break;
-          case "output_audio_buffer.stopped":
-            setAudioWave(false);
-            stopAudio();
-            break;
-          default:
-            console.warn("Unhandled message type:", msg.type);
-        }
-      };
+      channel.onclose = () => { setConnectionStatus("idle"); setIsMicActive(false); };
+      channel.onerror = (error) => { console.error("Data channel error:", error); setConnectionStatus("error"); setIsMicActive(false); };
 
       let offer;
       try {
-        offer = await pc.createOffer({
-          offerToReceiveAudio: true,
-          offerToReceiveVideo: false,
-        });
+        offer = await pc.createOffer({ offerToReceiveAudio: true, offerToReceiveVideo: false });
         const modifiedOffer = {
           ...offer,
           sdp: offer.sdp.replace(
             /a=rtpmap:\d+ opus\/48000\/2/g,
-            "a=rtpmap:111 opus/48000/2\r\n" +
-              "a=fmtp:111 minptime=10;useinbandfec=1"
+            "a=rtpmap:111 opus/48000/2\r\n" + "a=fmtp:111 minptime=10;useinbandfec=1"
           ),
         };
         await pc.setLocalDescription(modifiedOffer);
       } catch (e) {
         console.error("Failed to create/set offer:", e);
-        pc.close();
-        setPeerConnection(null);
-        setDataChannel(null);
-        if (localStream) {
-          localStream.getTracks().forEach((track) => track.stop());
-          localStream = null;
-        }
-        setConnectionStatus("error");
-        setIsMicActive(false);
-        throw e;
+        pc.close(); setPeerConnection(null); setDataChannel(null);
+        if (localStream) { localStream.getTracks().forEach((track) => track.stop()); localStream = null; }
+        setConnectionStatus("error"); setIsMicActive(false); throw e;
       }
 
       const res = await fetch(
         `https://ai-doctor-assistant-voice-mode-webrtc.onrender.com/api/rtc-connect?session_id=${sessionId}`,
-        {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/sdp",
-            "X-Session-Id": sessionId,
-          },
-          body: offer.sdp,
-        }
+        { method: "POST", headers: { "Content-Type": "application/sdp", "X-Session-Id": sessionId }, body: offer.sdp }
       );
       if (!res.ok) throw new Error(`Server responded with status ${res.status}`);
       const answer = await res.text();
       await pc.setRemoteDescription({ type: "answer", sdp: answer });
     } catch (error) {
       console.error("WebRTC setup failed:", error);
-      setConnectionStatus("error");
-      setIsMicActive(false);
+      setConnectionStatus("error"); setIsMicActive(false);
     }
   };
 
   const toggleMic = () => {
-    if (connectionStatus === "idle" || connectionStatus === "error") {
-      startWebRTC();
-      return;
-    }
+    if (connectionStatus === "idle" || connectionStatus === "error") { startWebRTC(); return; }
     if (connectionStatus === "connected" && localStream) {
-      const newMicState = !isMicActive;
-      setIsMicActive(newMicState);
+      const newMicState = !isMicActive; setIsMicActive(newMicState);
       localStream.getAudioTracks().forEach((track) => (track.enabled = newMicState));
     }
   };
 
   const closeVoiceSession = () => {
-    try {
-      stopAudio?.();
-    } catch {}
-    try {
-      const { setAudioScale } = useAudioForVisualizerStore.getState();
-      setAudioScale(1);
-    } catch {}
-    if (audioPlayerRef.current) {
-      try {
-        audioPlayerRef.current.pause();
-      } catch {}
-      audioPlayerRef.current.srcObject = null;
-      audioPlayerRef.current.src = "";
-    }
-    if (dataChannel && dataChannel.readyState !== "closed") {
-      try {
-        dataChannel.close();
-      } catch {}
-    }
-    if (peerConnection) {
-      try {
-        peerConnection.getSenders?.().forEach((s) => s.track?.stop());
-      } catch {}
-      try {
-        peerConnection.close();
-      } catch {}
-    }
-    if (localStream) {
-      try {
-        localStream.getTracks().forEach((t) => t.stop());
-      } catch {}
-      localStream = null;
-    }
-    setDataChannel(null);
-    setPeerConnection(null);
-    setIsMicActive(false);
-    setConnectionStatus("idle");
-    setIsVoiceMode(false);
+    try { stopAudio?.(); } catch {}
+    try { const { setAudioScale } = useAudioForVisualizerStore.getState(); setAudioScale(1); } catch {}
+    if (audioPlayerRef.current) { try { audioPlayerRef.current.pause(); } catch {} audioPlayerRef.current.srcObject = null; audioPlayerRef.current.src = ""; }
+    if (dataChannel && dataChannel.readyState !== "closed") { try { dataChannel.close(); } catch {} }
+    if (peerConnection) { try { peerConnection.getSenders?.().forEach((s) => s.track?.stop()); } catch {} try { peerConnection.close(); } catch {} }
+    if (localStream) { try { localStream.getTracks().forEach((t) => t.stop()); } catch {} localStream = null; }
+    setDataChannel(null); setPeerConnection(null); setIsMicActive(false); setConnectionStatus("idle"); setIsVoiceMode(false);
   };
 
   const handleEnterVoiceMode = () => {
     setIsVoiceMode(true);
-    if (audioPlayerRef.current) {
-      audioPlayerRef.current.muted = true;
-      audioPlayerRef.current.play().catch(() => {});
-    }
-    try {
-      if (toggleSfxRef.current) {
-        toggleSfxRef.current.stop();
-        toggleSfxRef.current.play();
-      }
-    } catch {}
+    if (audioPlayerRef.current) { audioPlayerRef.current.muted = true; audioPlayerRef.current.play().catch(() => {}); }
+    try { if (toggleSfxRef.current) { toggleSfxRef.current.stop(); toggleSfxRef.current.play(); } } catch {}
   };
 
   // Text chat → /stream
   const handleNewMessage = async ({ text, skipEcho = false }) => {
     if (!text || !text.trim()) return;
-
     if (!skipEcho) setChats((prev) => [...prev, { msg: text, who: "me" }]);
 
     const res = await fetch(`${BACKEND_BASE}/stream`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
+      method: "POST", headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ message: text, session_id: sessionId }),
     });
 
     if (!res.ok || !res.body) {
-      setChats((prev) => [
-        ...prev,
-        { msg: "Something went wrong.", who: "bot" },
-      ]);
-      return;
+      setChats((prev) => [...prev, { msg: "Something went wrong.", who: "bot" }]); return;
     }
 
     const reader = res.body.getReader();
     const decoder = new TextDecoder();
-    let message = "";
-    let isFirstChunk = true;
+    let message = ""; let isFirstChunk = true;
 
     while (true) {
-      const { value, done } = await reader.read();
-      if (done) break;
+      const { value, done } = await reader.read(); if (done) break;
       const chunk = decoder.decode(value, { stream: true });
 
-      if (isFirstChunk) {
-        setChats((prev) => [...prev, { msg: "", who: "bot", streaming: true }]);
-        isFirstChunk = false;
-      }
+      if (isFirstChunk) { setChats((prev) => [...prev, { msg: "", who: "bot", streaming: true }]); isFirstChunk = false; }
 
       message += chunk;
-      setChats((prev) => {
-        const updated = [...prev];
-        updated[updated.length - 1].msg = message;
-        return updated;
-      });
+      setChats((prev) => { const updated = [...prev]; updated[updated.length - 1].msg = message; return updated; });
     }
 
     setChats((prev) => {
       const updated = [...prev];
       const last = updated[updated.length - 1];
-      if (last && last.streaming) {
-        last.streaming = false;
-        last.msg = normalizeMarkdown(last.msg);
-      }
+      if (last && last.streaming) { last.streaming = false; last.msg = normalizeMarkdown(last.msg); }
       return updated;
     });
   };
 
-  // Markdown renderer
+  // Markdown renderer (kept as-is)
   const renderMessage = (message) => {
     const regex = /```mermaid([\s\S]*?)```/g;
-    const parts = [];
-    let lastIndex = 0;
-    let match;
+    const parts = []; let lastIndex = 0; let match;
     while ((match = regex.exec(message))) {
       const before = message.slice(lastIndex, match.index);
       const code = match[1];
@@ -819,13 +617,12 @@ const Chat = () => {
     );
   };
 
-  // ====== SECOND OPINION STREAM (voice panel integration) ======
+  // ====== SECOND OPINION STREAM ======
   const opinionBufferRef = useRef("");
   const opinionStreamingRef = useRef(false);
 
   const finalizeSecondOpinion = () => {
     const full = opinionBufferRef.current || "";
-    // Try to extract and parse JSON
     const jsonRaw = extractJsonBlock(full);
     const parsed = tryParseJsonLoose(jsonRaw);
     const shaped = ensureOpinionShape(parsed);
@@ -833,10 +630,7 @@ const Chat = () => {
     setChats((prev) => {
       const updated = [...prev];
       const last = updated[updated.length - 1];
-      // If the last bubble is a streaming bot bubble, we'll replace it with the panel if we parsed JSON
-      if (last && last.streaming) {
-        updated.pop();
-      }
+      if (last && last.streaming) { updated.pop(); }
       if (shaped) {
         updated.push({
           who: "bot",
@@ -845,7 +639,6 @@ const Chat = () => {
           narrative: normalizeMarkdown(full.replace(jsonRaw || "", "").replace(/```json[\s\S]*?```/i, "").trim())
         });
       } else {
-        // Fallback to plain markdown bubble
         updated.push({ who: "bot", msg: normalizeMarkdown(full) });
       }
       return updated;
@@ -855,12 +648,8 @@ const Chat = () => {
     opinionStreamingRef.current = false;
   };
 
-  // VoiceRecorderPanel will call this for streaming tokens and with done=true at the end
   const handleOpinionStream = (chunkOrFull, done = false) => {
-    if (done) {
-      finalizeSecondOpinion();
-      return;
-    }
+    if (done) { finalizeSecondOpinion(); return; }
     const chunk = String(chunkOrFull || "");
     if (!opinionStreamingRef.current) {
       opinionStreamingRef.current = true;
@@ -877,54 +666,30 @@ const Chat = () => {
 
   const handleAssistantContextTranscript = async (transcript) => {
     try {
-      const t = (transcript || "").trim();
-      if (!t) return;
-
-      // 1) Persist context for RAG/dosage endpoints
+      const t = (transcript || "").trim(); if (!t) return;
       await fetch(`${BACKEND_BASE}/set-context`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
+        method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ session_id: sessionId, transcript: t }),
       });
-
-      // 2) Prime voice-mode service (fire-and-forget)
-      fetch(
-        "https://ai-doctor-assistant-voice-mode-webrtc.onrender.com/api/session-context",
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ session_id: sessionId, transcript: t }),
-        }
-      ).catch(() => {});
-
-      // 3) Mirror locally for DosageCalculator (Zustand)
-      try {
-        const store = useDosageStore.getState();
-        store.setTranscript?.(t);
-        store.setSessionId?.(sessionId);
-      } catch {}
-    } catch (e) {
-      console.error("Failed to send transcript context:", e);
-    }
+      fetch("https://ai-doctor-assistant-voice-mode-webrtc.onrender.com/api/session-context", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ session_id: sessionId, transcript: t }),
+      }).catch(() => {});
+      try { const store = useDosageStore.getState(); store.setTranscript?.(t); store.setSessionId?.(sessionId); } catch {}
+    } catch (e) { console.error("Failed to send transcript context:", e); }
   };
 
   /** Specialty form streaming (if used elsewhere) */
   const handleFormStreamEvent = (evt) => {
     if (!evt || !evt.type) return;
-    if (evt.type === "start") {
-      setChats((prev) => [...prev, { msg: "", who: "bot", streaming: true }]);
-      return;
-    }
+    if (evt.type === "start") { setChats((prev) => [...prev, { msg: "", who: "bot", streaming: true }]); return; }
     if (evt.type === "chunk") {
       const chunk = String(evt.data || "");
       setChats((prev) => {
         const updated = [...prev];
         const lastIdx = updated.length - 1;
-        if (!updated[lastIdx] || updated[lastIdx].who !== "bot") {
-          updated.push({ msg: "", who: "bot", streaming: true });
-        }
-        updated[updated.length - 1].msg =
-          (updated[updated.length - 1].msg || "") + chunk;
+        if (!updated[lastIdx] || updated[lastIdx].who !== "bot") { updated.push({ msg: "", who: "bot", streaming: true }); }
+        updated[updated.length - 1].msg = (updated[updated.length - 1].msg || "") + chunk;
         return updated;
       });
       return;
@@ -933,10 +698,7 @@ const Chat = () => {
       setChats((prev) => {
         const updated = [...prev];
         const last = updated[updated.length - 1];
-        if (last) {
-          if (last.streaming) last.streaming = false;
-          last.msg = normalizeMarkdown(last.msg);
-        }
+        if (last) { if (last.streaming) last.streaming = false; last.msg = normalizeMarkdown(last.msg); }
         return updated;
       });
     }
@@ -958,12 +720,7 @@ const Chat = () => {
 
   function wantsLabs(text) {
     const t = (text || "").toLowerCase();
-    return (
-      t.includes("upload lab") ||
-      t.includes("attach lab") ||
-      t.includes("upload the lab") ||
-      t.includes("[request_labs]")
-    );
+    return t.includes("upload lab") || t.includes("attach lab") || t.includes("upload the lab") || t.includes("[request_labs]");
   }
 
   const LABS_TOKEN_RE = /\[request_labs\]/i;
@@ -973,24 +730,16 @@ const Chat = () => {
     setChats((prev) => {
       const arr = [...prev];
       const target = arr[bubbleIdx];
-      if (
-        target &&
-        typeof target.msg === "string" &&
-        LABS_TOKEN_RE.test(target.msg)
-      ) {
+      if (target && typeof target.msg === "string" && LABS_TOKEN_RE.test(target.msg)) {
         target.msg = target.msg.replace(LABS_TOKEN_RE_GLOBAL, "");
       }
       return arr;
     });
   };
 
-  // When parsed labs arrive → show visual card
   const handleParsedLabs = (labs, meta) => {
     if (!Array.isArray(labs) || labs.length === 0) return;
-    setChats((prev) => [
-      ...prev,
-      { who: "bot", type: "labs", labs, meta: meta || null },
-    ]);
+    setChats((prev) => [...prev, { who: "bot", type: "labs", labs, meta: meta || null }]);
   };
 
   /* ===================== Medication checker streaming ===================== */
@@ -1001,32 +750,13 @@ const Chat = () => {
   if (isVoiceMode) {
     return (
       <div className="voice-assistant-wrapper">
-        <audio
-          ref={audioPlayerRef}
-          playsInline
-          style={{ display: "none" }}
-          controls={false}
-          autoPlay
-          onError={(e) => console.error("Audio error:", e.target.error)}
-        />
-        <div className="voice-stage-orb">
-          <BaseOrb audioScale={audioScale} />
-        </div>
+        <audio ref={audioPlayerRef} playsInline style={{ display: "none" }} controls={false} autoPlay onError={(e) => console.error("Audio error:", e.target.error)} />
+        <div className="voice-stage-orb"><BaseOrb audioScale={audioScale} /></div>
         <div className="mic-controls">
-          {connectionStatus === "connecting" && (
-            <div className="connection-status connecting">🔄 Connecting...</div>
-          )}
+          {connectionStatus === "connecting" && (<div className="connection-status connecting">🔄 Connecting...</div>)}
           <div>
-            <button
-              className={`mic-icon-btn ${isMicActive ? "active" : ""}`}
-              onClick={toggleMic}
-              disabled={connectionStatus === "connecting"}
-            >
-              <FaMicrophoneAlt />
-            </button>
-            <button className="closed-btn" onClick={closeVoiceSession}>
-              ✖
-            </button>
+            <button className={`mic-icon-btn ${isMicActive ? "active" : ""}`} onClick={toggleMic} disabled={connectionStatus === "connecting"}><FaMicrophoneAlt /></button>
+            <button className="closed-btn" onClick={closeVoiceSession}>✖</button>
           </div>
         </div>
       </div>
@@ -1042,11 +772,7 @@ const Chat = () => {
 
     const nodes = [];
     pieces.forEach((seg, idx) => {
-      if (seg) {
-        nodes.push(
-          <div key={`seg-${bubbleIdx}-${idx}`}>{renderMessage(seg)}</div>
-        );
-      }
+      if (seg) nodes.push(<div key={`seg-${bubbleIdx}-${idx}`}>{renderMessage(seg)}</div>);
       if (idx < pieces.length - 1) {
         nodes.push(
           <InlineLabsCard
@@ -1055,12 +781,8 @@ const Chat = () => {
             onStreamToken={(chunk) => {
               stripLabsTokenFromBubble(bubbleIdx);
               if (!labsStreamingRef.current) {
-                labsStreamingRef.current = true;
-                labsBufferRef.current = "";
-                setChats((prev) => [
-                  ...prev,
-                  { msg: "", who: "bot", streaming: true },
-                ]);
+                labsStreamingRef.current = true; labsBufferRef.current = "";
+                setChats((prev) => [...prev, { msg: "", who: "bot", streaming: true }]);
               }
               labsBufferRef.current += String(chunk || "");
               setChats((prev) => {
@@ -1077,16 +799,9 @@ const Chat = () => {
                 if (labsStreamingRef.current) {
                   labsStreamingRef.current = false;
                   const last = updated[updated.length - 1];
-                  if (last && last.streaming) {
-                    last.streaming = false;
-                    last.msg = normalizeMarkdown(fullText || "");
-                    return updated;
-                  }
+                  if (last && last.streaming) { last.streaming = false; last.msg = normalizeMarkdown(fullText || ""); return updated; }
                 }
-                return [
-                  ...updated,
-                  { msg: normalizeMarkdown(fullText || ""), who: "bot" },
-                ];
+                return [...updated, { msg: normalizeMarkdown(fullText || ""), who: "bot" }];
               });
             }}
           />
@@ -1105,16 +820,9 @@ const Chat = () => {
           const isLabCard = chat?.type === "labs" && Array.isArray(chat.labs);
           const isSecondOpinion = chat?.type === "secondOpinion" && chat.opinion;
           return (
-            <div
-              key={index}
-              className={`chat-message ${chat.who} ${chat.live ? "live" : ""} ${
-                chat.streaming ? "streaming" : ""
-              }`}
-            >
+            <div key={index} className={`chat-message ${chat.who} ${chat.live ? "live" : ""} ${chat.streaming ? "streaming" : ""}`}>
               {chat.who === "bot" && (
-                <figure className="avatar">
-                  <img src="/av.gif" alt="avatar" />
-                </figure>
+                <figure className="avatar"><img src="/av.gif" alt="avatar" /></figure>
               )}
               <div className="message-text">
                 {isLabCard ? (
@@ -1138,13 +846,10 @@ const Chat = () => {
         <ChatInputWidget onSendMessage={handleNewMessage} />
       </div>
 
-      <button className="voice-toggle-button" onClick={handleEnterVoiceMode}>
-        🎙️
-      </button>
+      <button className="voice-toggle-button" onClick={handleEnterVoiceMode}>🎙️</button>
 
-      {/* Drawer with tools (max 3 per row; 4th wraps) */}
+      {/* Drawer with tools */}
       <DrawComponent>
-        {/* 1) Record case / voice recorder */}
         <div className="tool-wrapper">
           <VoiceRecorderPanel
             transcribeUrl={`${BACKEND_BASE}/transcribe`}
@@ -1155,42 +860,25 @@ const Chat = () => {
           />
         </div>
 
-        {/* 2) Lab results uploader */}
         <div className="tool-wrapper">
           <div className="labs-uploader-fixed">
             {wantsLabs(lastBotText) && (
               <div
                 className="labs-prompt"
                 style={{
-                  display: "flex",
-                  alignItems: "center",
-                  justifyContent: "space-between",
-                  gap: 10,
-                  padding: "10px 12px",
-                  borderRadius: 12,
+                  display: "flex", alignItems: "center", justifyContent: "space-between",
+                  gap: 10, padding: "10px 12px", borderRadius: 12,
                   background: "rgba(255, 235, 59, 0.12)",
-                  border: "1px solid rgba(255, 193, 7, 0.35)",
-                  boxShadow: "0 4px 16px rgba(0,0,0,.06)",
+                  border: "1px solid rgba(255, 193, 7, 0.35)", boxShadow: "0 4px 16px rgba(0,0,0,.06)",
                 }}
               >
                 <div style={{ display: "grid", gap: 2 }}>
-                  <div style={{ fontWeight: 700, fontSize: 13 }}>
-                    Lab results requested
-                  </div>
-                  <div style={{ fontSize: 12, opacity: 0.8 }}>
-                    Attach a PDF/image to interpret instantly.
-                  </div>
+                  <div style={{ fontWeight: 700, fontSize: 13 }}>Lab results requested</div>
+                  <div style={{ fontSize: 12, opacity: 0.8 }}>Attach a PDF/image to interpret instantly.</div>
                 </div>
                 <button
-                  style={{
-                    padding: "8px 12px",
-                    borderRadius: 10,
-                    border: 0,
-                    cursor: "pointer",
-                    background: "#0a66c2",
-                    color: "#fff",
-                    fontWeight: 600,
-                  }}
+                  style={{ padding: "8px 12px", borderRadius: 10, border: 0, cursor: "pointer",
+                    background: "#0a66c2", color: "#fff", fontWeight: 600 }}
                   onClick={() => uploaderRef.current?.open()}
                 >
                   Upload
@@ -1218,12 +906,8 @@ const Chat = () => {
               }
               onAIStreamToken={(chunk) => {
                 if (!labsStreamingRef.current) {
-                  labsStreamingRef.current = true;
-                  labsBufferRef.current = "";
-                  setChats((prev) => [
-                    ...prev,
-                    { msg: "", who: "bot", streaming: true },
-                  ]);
+                  labsStreamingRef.current = true; labsBufferRef.current = "";
+                  setChats((prev) => [...prev, { msg: "", who: "bot", streaming: true }]);
                 }
                 labsBufferRef.current += String(chunk || "");
                 setChats((prev) => {
@@ -1234,33 +918,21 @@ const Chat = () => {
                 });
               }}
               onAIResponse={(payload) => {
-                const full =
-                  payload?.text ??
-                  (typeof payload === "string"
-                    ? payload
-                    : JSON.stringify(payload));
+                const full = payload?.text ?? (typeof payload === "string" ? payload : JSON.stringify(payload));
                 setChats((prev) => {
                   const updated = [...prev];
                   if (labsStreamingRef.current) {
                     labsStreamingRef.current = false;
                     const last = updated[updated.length - 1];
-                    if (last && last.streaming) {
-                      last.streaming = false;
-                      last.msg = normalizeMarkdown(full || "");
-                      return updated;
-                    }
+                    if (last && last.streaming) { last.streaming = false; last.msg = normalizeMarkdown(full || ""); return updated; }
                   }
-                  return [
-                    ...updated,
-                    { msg: normalizeMarkdown(full || ""), who: "bot" },
-                  ];
+                  return [...updated, { msg: normalizeMarkdown(full || ""), who: "bot" }];
                 });
               }}
             />
           </div>
         </div>
 
-        {/* 3) Medication checker uploader */}
         <div className="tool-wrapper">
           <div className="meds-uploader micro dense">
             <MedicationChecker
@@ -1270,12 +942,8 @@ const Chat = () => {
               engine="2"
               onAIStreamToken={(chunk) => {
                 if (!medsStreamingRef.current) {
-                  medsStreamingRef.current = true;
-                  medsBufferRef.current = "";
-                  setChats((prev) => [
-                    ...prev,
-                    { msg: "", who: "bot", streaming: true },
-                  ]);
+                  medsStreamingRef.current = true; medsBufferRef.current = "";
+                  setChats((prev) => [...prev, { msg: "", who: "bot", streaming: true }]);
                 }
                 medsBufferRef.current += String(chunk || "");
                 setChats((prev) => {
@@ -1303,56 +971,32 @@ const Chat = () => {
                 ].join("\n")
               }
               onAIResponse={(payload) => {
-                const full =
-                  payload?.text ??
-                  (typeof payload === "string"
-                    ? payload
-                    : JSON.stringify(payload));
+                const full = payload?.text ?? (typeof payload === "string" ? payload : JSON.stringify(payload));
                 setChats((prev) => {
                   const updated = [...prev];
                   if (medsStreamingRef.current) {
                     medsStreamingRef.current = false;
                     const last = updated[updated.length - 1];
-                    if (last && last.streaming) {
-                      last.streaming = false;
-                      last.msg = normalizeMarkdown(full || "");
-                      return updated;
-                    }
+                    if (last && last.streaming) { last.streaming = false; last.msg = normalizeMarkdown(full || ""); return updated; }
                   }
-                  return [
-                    ...updated,
-                    { msg: normalizeMarkdown(full || ""), who: "bot" },
-                  ];
+                  return [...updated, { msg: normalizeMarkdown(full || ""), who: "bot" }];
                 });
               }}
             />
           </div>
         </div>
 
-        {/* 4) Dosage calculator button (second row) */}
-        <div className="tool-wrapper">
-          <CalculateDosageButton />
-        </div>
+        <div className="tool-wrapper"><CalculateDosageButton /></div>
 
-        {/* 5) Medical image analyzer (Vision) — placed alongside calculator on second row */}
         <div className="tool-wrapper">
           <MedicalImageAnalyzer
             onResult={(text, meta) => {
               setChats((prev) => [
                 ...prev,
-                {
-                  who: "bot",
-                  msg: normalizeMarkdown(
-                    [
-                      "**Medical Image Analysis (Vision)**",
-                      meta?.filename ? `*Source:* ${meta.filename}` : null,
-                      "",
-                      text,
-                    ]
-                      .filter(Boolean)
-                      .join("\n")
-                  ),
-                },
+                { who: "bot", msg: normalizeMarkdown(
+                  ["**Medical Image Analysis (Vision)**", meta?.filename ? `*Source:* ${meta.filename}` : null, "", text]
+                    .filter(Boolean).join("\n")
+                ) }
               ]);
             }}
           />
@@ -1364,14 +1008,12 @@ const Chat = () => {
 
 export default Chat;
 
-// Drawer wrapper
+// Drawer wrapper (unchanged)
 const DrawComponent = ({ children }) => {
   const [isOpen, setIsOpen] = useState(false);
 
   return (
-    <div
-      style={{ position: "fixed", bottom: "25px", left: "25px", zIndex: 100 }}
-    >
+    <div style={{ position: "fixed", bottom: "25px", left: "25px", zIndex: 100 }}>
       <AnimatePresence>
         {isOpen && (
           <motion.div
@@ -1387,7 +1029,6 @@ const DrawComponent = ({ children }) => {
               borderRadius: "16px",
               boxShadow: "0 8px 30px rgba(0,0,0,0.12)",
               border: "1px solid rgba(0,0,0,0.08)",
-
               display: "grid",
               gridTemplateColumns: "repeat(3, minmax(0, 1fr))",
               columnGap: "16px",
@@ -1406,23 +1047,11 @@ const DrawComponent = ({ children }) => {
       <button
         onClick={() => setIsOpen((prev) => !prev)}
         style={{
-          width: "56px",
-          height: "56px",
-          borderRadius: "50%",
-          border: "none",
-          background: "#3750D8",
-          color: "white",
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "center",
-          fontSize: "24px",
-          cursor: "pointer",
-          boxShadow: "0 4px 15px rgba(0,0,0,0.2)",
-          transition: "transform 0.2s, background-color 0.2s",
-          float: "left",
-          position: "relative",
-          bottom: "12px",
-          marginBottom: "8px",
+          width: "56px", height: "56px", borderRadius: "50%", border: "none",
+          background: "#3750D8", color: "white", display: "flex", alignItems: "center",
+          justifyContent: "center", fontSize: "24px", cursor: "pointer",
+          boxShadow: "0 4px 15px rgba(0,0,0,0.2)", transition: "transform 0.2s, background-color 0.2s",
+          float: "left", position: "relative", bottom: "12px", marginBottom: "8px",
         }}
         title="Toggle Tools"
       >
@@ -1432,15 +1061,12 @@ const DrawComponent = ({ children }) => {
   );
 };
 
-// Mermaid collapsible
+// Mermaid collapsible (used for non-SecondOpinion messages; kept as-is)
 const CollapsibleDiagram = ({ chart }) => {
   const [isOpen, setIsOpen] = useState(false);
   return (
     <div className="collapsible-diagram">
-      <div
-        className="collapsible-header"
-        onClick={() => setIsOpen((prev) => !prev)}
-      >
+      <div className="collapsible-header" onClick={() => setIsOpen((prev) => !prev)}>
         <span className="toggle-icon">{isOpen ? "–" : "+"}</span> View Diagram
       </div>
       <AnimatePresence initial={false}>
@@ -1461,18 +1087,12 @@ const CollapsibleDiagram = ({ chart }) => {
   );
 };
 
-/* ===== Visual Labs Panel using AI classification ===== */
+/* ===== Visual Labs Panel using AI classification (unchanged) ===== */
 function LabsPanel({ labs = [], meta }) {
-  // Keep only sensible rows
   const valid = (Array.isArray(labs) ? labs : []).filter((l) => {
     const v = toNum(l?.value);
-    const hasRange =
-      Number.isFinite(toNum(l?.low)) && Number.isFinite(toNum(l?.high));
-    const hasAI =
-      l?.status &&
-      ["normal", "borderline", "abnormal"].includes(
-        String(l.status).toLowerCase()
-      );
+    const hasRange = Number.isFinite(toNum(l?.low)) && Number.isFinite(toNum(l?.high));
+    const hasAI = l?.status && ["normal", "borderline", "abnormal"].includes(String(l.status).toLowerCase());
     return Number.isFinite(v) && (hasRange || hasAI);
   });
 
@@ -1482,15 +1102,11 @@ function LabsPanel({ labs = [], meta }) {
         <div className="labs-panel__header">
           <div>
             <div className="labs-panel__title">Lab Summary</div>
-            {meta?.filename && (
-              <div className="labs-panel__meta">Source: {meta.filename}</div>
-            )}
+            {meta?.filename && <div className="labs-panel__meta">Source: {meta.filename}</div>}
           </div>
         </div>
         <div className="labs-panel__body">
-          <div style={{ opacity: 0.7, fontSize: 13 }}>
-            No parsable lab values were found in this upload.
-          </div>
+          <div style={{ opacity: 0.7, fontSize: 13 }}>No parsable lab values were found in this upload.</div>
         </div>
       </div>
     );
@@ -1501,9 +1117,7 @@ function LabsPanel({ labs = [], meta }) {
       <div className="labs-panel__header">
         <div>
           <div className="labs-panel__title">Lab Summary</div>
-          {meta?.filename && (
-            <div className="labs-panel__meta">Source: {meta.filename}</div>
-          )}
+          {meta?.filename && <div className="labs-panel__meta">Source: {meta.filename}</div>}
         </div>
         <div className="labs-panel__legend">
           <span className="chip chip--green" /> Normal
@@ -1514,9 +1128,7 @@ function LabsPanel({ labs = [], meta }) {
       </div>
 
       <div className="labs-panel__body">
-        {valid.map((lab, idx) => (
-          <LabRow lab={lab} key={idx} />
-        ))}
+        {valid.map((lab, idx) => (<LabRow lab={lab} key={idx} />))}
       </div>
     </div>
   );
@@ -1528,33 +1140,19 @@ function LabRow({ lab }) {
   const value = toNum(lab?.value);
   const low = toNum(lab?.low);
   const high = toNum(lab?.high);
-  const aiStatus = (lab?.status || "").toLowerCase(); // "normal" | "borderline" | "abnormal"
+  const aiStatus = (lab?.status || "").toLowerCase();
 
-  // Build scale
   let min, max, band;
   if (Number.isFinite(low) && Number.isFinite(high) && high > low) {
     const span = high - low;
     min = low - Math.max(0.25 * span, 0.01 * Math.abs(high));
     max = high + Math.max(0.25 * span, 0.01 * Math.abs(high));
     band = Math.max(0.075 * span, 1e-6);
-  } else {
-    // If no range, single-color bar per AI status
-    min = 0;
-    max = 1;
-    band = 0.2;
-  }
+  } else { min = 0; max = 1; band = 0.2; }
   const clamp = (x) => Math.min(Math.max(x, min), max);
-  const posPct = Number.isFinite(value)
-    ? ((clamp(value) - min) / (max - min)) * 100
-    : 50;
+  const posPct = Number.isFinite(value) ? ((clamp(value) - min) / (max - min)) * 100 : 50;
 
-  // Segment widths
-  let redL = 0,
-    yellowL = 0,
-    green = 0,
-    yellowR = 0,
-    redR = 0;
-
+  let redL = 0, yellowL = 0, green = 0, yellowR = 0, redR = 0;
   if (Number.isFinite(low) && Number.isFinite(high) && high > low) {
     const leftRedEnd = Math.max(min, low - band);
     const leftYellowEnd = Math.min(low + band, high);
@@ -1568,11 +1166,8 @@ function LabRow({ lab }) {
     yellowR = ((rightRedStart - rightYellowBeg) / total) * 100;
     redR = ((max - rightRedStart) / total) * 100;
 
-    redL = Math.max(0, redL);
-    yellowL = Math.max(0, yellowL);
-    green = Math.max(0, green);
-    yellowR = Math.max(0, yellowR);
-    redR = Math.max(0, redR);
+    redL = Math.max(0, redL); yellowL = Math.max(0, yellowL); green = Math.max(0, green);
+    yellowR = Math.max(0, yellowR); redR = Math.max(0, redR);
   } else {
     if (aiStatus === "normal") green = 100;
     else if (aiStatus === "borderline") yellowL = 100;
@@ -1580,18 +1175,11 @@ function LabRow({ lab }) {
     else yellowL = 100;
   }
 
-  // Status badge
   let status = "neutral";
-  if (["normal", "borderline", "abnormal"].includes(aiStatus)) {
-    status = aiStatus;
-  } else if (
-    Number.isFinite(low) &&
-    Number.isFinite(high) &&
-    Number.isFinite(value)
-  ) {
+  if (["normal", "borderline", "abnormal"].includes(aiStatus)) status = aiStatus;
+  else if (Number.isFinite(low) && Number.isFinite(high) && Number.isFinite(value)) {
     if (value < low || value > high) status = "abnormal";
-    else if (Math.abs(value - low) <= band || Math.abs(value - high) <= band)
-      status = "borderline";
+    else if (Math.abs(value - low) <= band || Math.abs(value - high) <= band) status = "borderline";
     else status = "normal";
   }
 
@@ -1600,33 +1188,20 @@ function LabRow({ lab }) {
       <div className="lab-row__left">
         <div className="lab-row__name">{name}</div>
         <div className="lab-row__range">
-          {Number.isFinite(low) && Number.isFinite(high) ? (
-            <>Normal range: {low} – {high} {unit}</>
-          ) : (
-            <em>Normal range: unknown</em>
-          )}
+          {Number.isFinite(low) && Number.isFinite(high) ? (<>Normal range: {low} – {high} {unit}</>) : (<em>Normal range: unknown</em>)}
         </div>
       </div>
 
       <div className="lab-row__bar">
         <div className="range-label" aria-hidden>
-          {Number.isFinite(low) && Number.isFinite(high)
-            ? `NORMAL RANGE ${low} – ${high} ${unit}`
-            : ""}
+          {Number.isFinite(low) && Number.isFinite(high) ? `NORMAL RANGE ${low} – ${high} ${unit}` : ""}
         </div>
         <div className="bar">
           {redL > 0 && <div className="seg seg--red" style={{ flexBasis: `${redL}%` }} />}
-          {yellowL > 0 && (
-            <div className="seg seg--yellow" style={{ flexBasis: `${yellowL}%` }} />
-          )}
-          {green > 0 && (
-            <div className="seg seg--green" style={{ flexBasis: `${green}%` }} />
-          )}
-          {yellowR > 0 && (
-            <div className="seg seg--yellow" style={{ flexBasis: `${yellowR}%` }} />
-          )}
+          {yellowL > 0 && <div className="seg seg--yellow" style={{ flexBasis: `${yellowL}%` }} />}
+          {green > 0 && <div className="seg seg--green" style={{ flexBasis: `${green}%` }} />}
+          {yellowR > 0 && <div className="seg seg--yellow" style={{ flexBasis: `${yellowR}%` }} />}
           {redR > 0 && <div className="seg seg--red" style={{ flexBasis: `${redR}%` }} />}
-
           <div className="indicator" style={{ left: `${posPct}%` }} />
         </div>
       </div>
@@ -1642,18 +1217,8 @@ function InlineLabsCard({ onStreamToken, onComplete, onParsedLabs }) {
   const localRef = useRef(null);
 
   return (
-    <div
-      style={{
-        margin: "10px 0",
-        padding: "10px 12px",
-        borderRadius: 12,
-        background: "rgba(10,102,194,0.08)",
-        border: "1px solid rgba(10,102,194,0.25)",
-      }}
-    >
-      <div style={{ fontWeight: 700, fontSize: 13, marginBottom: 6 }}>
-        Please upload the lab results (PDF/Image)
-      </div>
+    <div style={{ margin: "10px 0", padding: "10px 12px", borderRadius: 12, background: "rgba(10,102,194,0.08)", border: "1px solid rgba(10,102,194,0.25)" }}>
+      <div style={{ fontWeight: 700, fontSize: 13, marginBottom: 6 }}>Please upload the lab results (PDF/Image)</div>
       <LabResultsUploader
         ref={localRef}
         autoSend={true}
@@ -1675,9 +1240,7 @@ function InlineLabsCard({ onStreamToken, onComplete, onParsedLabs }) {
         }
         onAIStreamToken={onStreamToken}
         onAIResponse={(payload) => {
-          const full =
-            payload?.text ??
-            (typeof payload === "string" ? payload : JSON.stringify(payload));
+          const full = payload?.text ?? (typeof payload === "string" ? payload : JSON.stringify(payload));
           onComplete(full);
         }}
       />
@@ -1694,3 +1257,4 @@ function toNum(x) {
   }
   return NaN;
 }
+

@@ -560,7 +560,8 @@ const Chat = () => {
     opinionBufferRef.current += chunk;
     setChats((prev) => {
       const updated = [...prev];
-      updated[updated.length - 1].msg = opinionBufferRef.current;
+      const last = updated[updated.length - 1];
+      if (last && last.streaming) last.msg = opinionBufferRef.current;
       return updated;
     });
   };
@@ -745,7 +746,6 @@ const Chat = () => {
           );
         }
       });
-      // If there were only RTCA tokens, we're done; if text remains, labs logic below will render inside seg divs.
       if (nodes.length) return nodes;
     }
 
@@ -1069,8 +1069,7 @@ const Chat = () => {
             }}
           />
         </div>
-
-        {/* 6) NEW — Real-Time Case Analysis trigger (next to Analyze Image) */}
+        {/* 6) NEW — Real-Time Case Analysis trigger */}
         <div className="tool-wrapper">
           <RealTimeCaseAnalysisTrigger
             onInsertBubble={(token) =>
@@ -1078,6 +1077,7 @@ const Chat = () => {
             }
           />
         </div>
+
       </DrawComponent>
     </div>
   );
@@ -1413,7 +1413,8 @@ function toNum(x) {
     const t = x.trim().replace(",", ".");
     const m = t.match(/^[-+]?\d+(?:\.\d+)?$/);
     if (m) return parseFloat(m[0]);
-  }
+    }
   return NaN;
 }
+
 

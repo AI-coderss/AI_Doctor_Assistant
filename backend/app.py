@@ -86,45 +86,60 @@ def _safe_json_dict(text: str):
 app = Flask(__name__)
 from flask_cors import CORS
 
+from flask_cors import CORS
+
 CORS(
     app,
     resources={
-        # Default policy (applies to everything unless a more specific rule below overrides it)
+        # Default policy (applies to everything unless a more specific rule overrides it)
         r"/*": {
             "origins": [
                 "https://ai-doctor-assistant-app-dev.onrender.com",
                 "http://localhost:3000",
             ],
             "methods": ["GET", "POST", "OPTIONS"],
-            "allow_headers": ["Content-Type", "Authorization", "Accept"],
+            "allow_headers": ["Content-Type", "Authorization", "Accept", "X-Requested-With"],
+            "expose_headers": ["Content-Type"],
             "supports_credentials": True,
+            "max_age": 86400,
         },
+
+        # --- Explicit overrides (kept for clarity/consistency) ---
+
         r"/api/rtc-transcribe-connect": {
             "origins": [
                 "https://ai-doctor-assistant-app-dev.onrender.com",
                 "http://localhost:3000",
             ],
             "methods": ["GET", "POST", "OPTIONS"],
-            "allow_headers": ["Content-Type", "Authorization", "Accept"],
+            "allow_headers": ["Content-Type", "Authorization", "Accept", "X-Requested-With"],
+            "expose_headers": ["Content-Type"],
             "supports_credentials": True,
+            "max_age": 86400,
         },
+
         r"/transcribe": {
             "origins": [
                 "https://ai-doctor-assistant-app-dev.onrender.com",
                 "http://localhost:3000",
             ],
             "methods": ["POST", "OPTIONS"],
-            "allow_headers": ["Content-Type", "Authorization", "Accept"],
+            "allow_headers": ["Content-Type", "Authorization", "Accept", "X-Requested-With"],
+            "expose_headers": ["Content-Type"],
             "supports_credentials": True,
+            "max_age": 86400,
         },
+
         r"/case-second-opinion-stream": {
             "origins": [
                 "https://ai-doctor-assistant-app-dev.onrender.com",
                 "http://localhost:3000",
             ],
             "methods": ["POST", "OPTIONS"],
-            "allow_headers": ["Content-Type", "Authorization", "Accept"],
+            "allow_headers": ["Content-Type", "Authorization", "Accept", "X-Requested-With"],
+            "expose_headers": ["Content-Type"],
             "supports_credentials": True,
+            "max_age": 86400,
         },
 
         r"/analyze-form-case-stream": {
@@ -133,8 +148,10 @@ CORS(
                 "http://localhost:3000",
             ],
             "methods": ["POST", "OPTIONS"],
-            "allow_headers": ["Content-Type", "Authorization", "Accept"],
+            "allow_headers": ["Content-Type", "Authorization", "Accept", "X-Requested-With"],
+            "expose_headers": ["Content-Type"],
             "supports_credentials": True,
+            "max_age": 86400,
         },
 
         r"/transcribe_widget": {
@@ -143,17 +160,22 @@ CORS(
                 "http://localhost:3000",
             ],
             "methods": ["POST", "OPTIONS"],
-            "allow_headers": ["Content-Type", "Authorization", "Accept"],
+            "allow_headers": ["Content-Type", "Authorization", "Accept", "X-Requested-With"],
+            "expose_headers": ["Content-Type"],
             "supports_credentials": True,
+            "max_age": 86400,
         },
+
         r"/ocr": {
             "origins": [
                 "https://ai-doctor-assistant-app-dev.onrender.com",
                 "http://localhost:3000",
             ],
             "methods": ["POST", "OPTIONS"],
-            "allow_headers": ["Content-Type", "Authorization", "Accept"],
+            "allow_headers": ["Content-Type", "Authorization", "Accept", "X-Requested-With"],
+            "expose_headers": ["Content-Type"],
             "supports_credentials": True,
+            "max_age": 86400,
         },
 
         r"/api/ocr": {
@@ -162,37 +184,51 @@ CORS(
                 "http://localhost:3000",
             ],
             "methods": ["POST", "OPTIONS"],
-            "allow_headers": ["Content-Type", "Authorization", "Accept"],
+            "allow_headers": ["Content-Type", "Authorization", "Accept", "X-Requested-With"],
+            "expose_headers": ["Content-Type"],
             "supports_credentials": True,
+            "max_age": 86400,
         },
 
-        # --- NEW: Medication checker endpoints (cover all /meds/* routes) ---
+        # --- Medication checker endpoints ---
 
         r"/meds/parse": {
             "origins": [
                 "https://ai-doctor-assistant-app-dev.onrender.com",
                 "http://localhost:3000",
-            ],  "methods": ["POST", "OPTIONS"],       "allow_headers": ["Content-Type", "Authorization", "Accept"],
+            ],
+            "methods": ["POST", "OPTIONS"],
+            "allow_headers": ["Content-Type", "Authorization", "Accept", "X-Requested-With"],
+            "expose_headers": ["Content-Type"],
             "supports_credentials": True,
+            "max_age": 86400,
         },
+
         r"/meds/map": {
-            "origins": ["https://ai-doctor-assistant-app-dev.onrender.com",
+            "origins": [
+                "https://ai-doctor-assistant-app-dev.onrender.com",
                 "http://localhost:3000",
             ],
             "methods": ["POST", "OPTIONS"],
-            "allow_headers": ["Content-Type", "Authorization", "Accept"],
+            "allow_headers": ["Content-Type", "Authorization", "Accept", "X-Requested-With"],
+            "expose_headers": ["Content-Type"],
             "supports_credentials": True,
+            "max_age": 86400,
         },
+
+        # --- Vision (image analysis) ---
         r"/vision/analyze": {
-        "origins": [
-            "https://ai-doctor-assistant-app-dev.onrender.com",
-            "http://localhost:3000",
-        ],
-        "methods": ["POST"],
-        "allow_headers": ["Content-Type", "Authorization"],
-        "supports_credentials": True,
+            "origins": [
+                "https://ai-doctor-assistant-app-dev.onrender.com",
+                "http://localhost:3000",
+            ],
+            "methods": ["POST", "OPTIONS"],  # ensure OPTIONS allowed for preflight
+            "allow_headers": ["Content-Type", "Authorization", "Accept", "X-Requested-With"],
+            "expose_headers": ["Content-Type"],
+            "supports_credentials": True,
+            "max_age": 86400,
+        },
     },
-    }
 )
 
 # Optional: hard cap request size (mirrors OCR_MAX_BYTES)

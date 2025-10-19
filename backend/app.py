@@ -14,6 +14,7 @@ import unicodedata
 from werkzeug.exceptions import HTTPException, RequestEntityTooLarge
 from werkzeug.utils import secure_filename
 from typing import List, Dict, Any
+from urllib.parse import urlencode
 import os.path as osp
 import random
 from dotenv import load_dotenv
@@ -238,8 +239,7 @@ CORS(
             "expose_headers": ["Content-Type"],
             "supports_credentials": True,
             "max_age": 86400,
-        }
-    },
+        }}
 )
 
 # Optional: hard cap request size (mirrors OCR_MAX_BYTES)
@@ -3041,106 +3041,73 @@ def vision_analyze():
 
     except Exception as e:
         return jsonify(error=str(e)), 500
-    
-# ============================================
-# === CORS: ONE SMALL UPDATE (Required) ======
-# ============================================
-# UPDATE in your EXISTING CORS(...) resources (do NOT add a second CORS block):
-#   Add "X-Session-Id" to allow_headers (the Lab Agent RTC handshake uses it).
-#
-# Example (edit your current lists):
-#   "allow_headers": ["Content-Type", "Authorization", "Accept", "X-Requested-With", "X-Session-Id"]
-#
-# If you want explicit per-route control, you can also keep the default "/*"
-# and skip adding a dedicated /lab-agent/* resource — the default already covers it.
-
-
-# ============================================================
-# === BEGIN: Lab Voice Agent backend (append to app.py) ======
-# ============================================================
-
 # Session store for Lab Agent (kept separate from your strict session_context)
 lab_agent_sessions = {}  # { session_id: {"context": str, "approved": [ {name, why?, priority?} ] } }
 
 # Upstream WebRTC endpoint that actually hosts the realtime voice agent (VAD + TTS)
-# You can point this to your own node service or Render URL.
-LAB_AGENT_RTC_UPSTREAM = "https://ai-doctor-assistant-voice-mode-webrtc.onrender.com/api/rtc-connect",
-   
-# ---------- Helpers (namespaced to avoid collisions) ----------
+# ❌ BUG (before): the trailing comma made this a tuple, breaking requests
+# LAB_AGENT_RTC_UPSTREAM = "https://ai-doctor-assistant-voice-mode-webrtc.onrender.com/api/rtc-connect",
+# ✅ FIX: make it a plain string and allow overriding via env var
+LAB_AGENT_RTC_UPSTREAM = "https://ai-doctor-assistant-voice-mode-webrtc.onrender.com/api/rtc-connect"
 
+# ----------------------------- Helpers ---------------------------------------
 def _lab_ensure_session(session_id: str):
-    """Ensure a Lab Agent session record exists."""
-    if session_id not in lab_agent_sessions:
-        lab_agent_sessions[session_id] = {"context": "", "approved": []}
-    return lab_agent_sessions[session_id]
+    st = lab_agent_sessions.get(session_id)
+    if not st:
+        st = {"context": "", "approved": []}
+        lab_agent_sessions[session_id] = st
+    return st
 
 def _lab_normalize_item(raw):
-    """Normalize one suggested/approved lab item."""
-    if not isinstance(raw, dict):
+    if not raw:
         return None
     name = (raw.get("name") or raw.get("test") or "").strip()
     if not name:
         return None
-    # Map priority into canonical bucket
-    pr = (raw.get("priority") or "").strip().upper()
-    if pr in {"STAT", "URGENT"}:
-        pr = "STAT"
-    elif pr in {"HIGH"}:
-        pr = "High"
-    elif pr in {"ROUTINE", "NORMAL", ""}:
-        pr = "Routine"
-    else:
-        pr = "Routine"
-    why = (raw.get("why") or "").strip()
-    out = {"name": name}
-    if why:
-        out["why"] = why
-    if pr:
-        out["priority"] = pr
-    return out
-
-def _lab_json_block(text: str):
-    """Best-effort: pull out a JSON array/object block from streamed LLM text."""
-    if not text:
-        return None
-    m = re.search(r"```json\s*([\s\S]*?)\s*```", text, flags=re.I)
-    if m:
-        return m.group(1).strip()
-    # fallback to first {...} or [...] span
-    s_obj = text.find("{"); s_arr = text.find("[")
-    if s_obj == -1 and s_arr == -1:
-        return None
-    start = min([x for x in (s_obj, s_arr) if x != -1])
-    e_obj = text.rfind("}"); e_arr = text.rfind("]")
-    end = max(e_obj, e_arr)
-    if start != -1 and end != -1 and end > start:
-        return text[start:end+1]
-    return None
-
-def _lab_try_parse_json_loose(raw: str):
-    """Tolerant JSON parse (handles trailing commas, fenced blocks, smart quotes)."""
-    if not raw:
-        return None
-    s = raw.replace("```", "")
-    s = s.replace("\u201C", '"').replace("\u201D", '"').replace("\u2018", "'").replace("\u2019", "'")
-    s = s.replace(",}", "}").replace(",]", "]")
-    try:
-        return json.loads(s)
-    except Exception:
-        return None
+    return {
+        "name": name,
+        "why": (raw.get("why") or "").strip(),
+        "priority": (raw.get("priority") or "").strip(),
+    }
 
 def _lab_dedupe_by_name(items):
     seen = set()
     out = []
     for it in items or []:
-        nm = (it.get("name") or "").strip().lower()
-        if not nm or nm in seen: 
-            continue
-        seen.add(nm); out.append(it)
+        nm = (it.get("name") or "").lower().strip()
+        if nm and nm not in seen:
+            seen.add(nm)
+            out.append(it)
     return out
 
-def _lab_build_suggestion_prompt(context_text: str, approved_items):
-    """Instruction for lab suggestions (JSON-only, compact)."""
+def _lab_json_block(text=""):
+    # Pull a JSON fence block ```json ... ``` or widest braces fallback
+    import re
+    m = re.search(r"```json([\s\S]*?)```", text, flags=re.I)
+    if m and m.group(1):
+        return m.group(1).strip()
+    first = text.find("{")
+    last = text.rfind("}")
+    if first != -1 and last > first:
+        return text[first:last+1]
+    return None
+
+def _lab_try_parse_json_loose(raw):
+    if not raw:
+        return None
+    s = str(raw)
+    s = s.replace("\u201c", '"').replace("\u201d", '"').replace("\u2019", "'")
+    s = s.replace(",}", "}").replace(",]", "]")
+    try:
+        return json.loads(s)
+    except Exception:
+        s = s.replace("```", "")
+        try:
+            return json.loads(s)
+        except Exception:
+            return None
+
+def _lab_build_suggestion_prompt(context_text, approved_items):
     approved_names = sorted({(a.get("name") or "").strip() for a in (approved_items or []) if a.get("name")})
     return (
         "You are a clinical lab-test recommender assisting a physician in active voice conversation.\n"
@@ -3154,14 +3121,10 @@ def _lab_build_suggestion_prompt(context_text: str, approved_items):
         f"{', '.join(approved_names) if approved_names else '(none)'}\n"
     )
 
-# ---------- Endpoints ----------
+# ----------------------------- Endpoints -------------------------------------
 
 @app.post("/lab-agent/context")
 def lab_agent_set_context():
-    """
-    Body: { session_id?: str, context: str }
-    Saves/overwrites the Lab Agent's working context for this session.
-    """
     data = request.get_json(silent=True) or {}
     session_id = data.get("session_id") or str(uuid4())
     context = (data.get("context") or "").strip()
@@ -3169,23 +3132,19 @@ def lab_agent_set_context():
     st = _lab_ensure_session(session_id)
     st["context"] = context
 
-    # Optional: also mirror into your general chat history for retrieval
-    chat_sessions.setdefault(session_id, [])
-    if context:
-        chat_sessions[session_id].append({"role": "user", "content": f"[LabAgent Context]\n{context}"})
+    # Optionally mirror into your global chat store
+    try:
+        chat_sessions.setdefault(session_id, [])
+        if context:
+            chat_sessions[session_id].append({"role": "user", "content": f"[LabAgent Context]\n{context}"})
+    except Exception:
+        pass
 
     return jsonify({"ok": True, "session_id": session_id, "approved_count": len(st["approved"])}), 200
 
 
 @app.post("/lab-agent/suggest-stream")
 def lab_agent_suggest_stream():
-    """
-    Body: { session_id: str }
-    Streams suggested labs as NDJSON/SSE lines so the FE can render incrementally.
-      data: {"type":"delta","content":"..."}        # raw model deltas (optional)
-      data: {"type":"suggestion","item":{...}}      # structured item
-      data: {"type":"end"}
-    """
     data = request.get_json(silent=True) or {}
     session_id = data.get("session_id") or str(uuid4())
     st = _lab_ensure_session(session_id)
@@ -3196,13 +3155,13 @@ def lab_agent_suggest_stream():
         return "data: " + json.dumps(obj, ensure_ascii=False) + "\n\n"
 
     def generate():
-        # Small intro (text event)
         yield emit({"type": "text", "content": "Analyzing case context…\n"})
 
         prompt = _lab_build_suggestion_prompt(context_text, approved)
 
         full = ""
         try:
+            # Use your existing LangChain/RAG chain (already in your app)
             for chunk in conversation_rag_chain.stream({"chat_history": [], "input": prompt}):
                 token = chunk.get("answer", "")
                 full += token
@@ -3217,20 +3176,19 @@ def lab_agent_suggest_stream():
         parsed = _lab_try_parse_json_loose(raw_json)
 
         if not isinstance(parsed, list):
-            yield emit({"type": "text", "content": "(no machine-readable lab suggestions parsed)"})
+            yield emit({"type": "text", "content": "\n\n(No structured suggestions detected.)"})
             yield emit({"type": "end"})
             return
 
-        # Drop items already approved; normalize & dedupe
-        existing = {(a.get("name") or "").lower().strip() for a in approved}
         cleaned = []
-        for item in parsed:
-            norm = _lab_normalize_item(item)
-            if not norm:
+        existing = { (x.get("name") or "").lower().strip() for x in approved }
+        for row in parsed:
+            it = _lab_normalize_item(row)
+            if not it:
                 continue
-            if norm["name"].lower().strip() in existing:
+            if (it["name"] or "").lower().strip() in existing:
                 continue
-            cleaned.append(norm)
+            cleaned.append(it)
 
         for it in _lab_dedupe_by_name(cleaned):
             yield emit({"type": "suggestion", "item": it})
@@ -3248,14 +3206,9 @@ def lab_agent_suggest_stream():
 
 @app.post("/lab-agent/approve")
 def lab_agent_approve():
-    """
-    Body: { session_id: str, item: {name, why?, priority?} }
-    Adds an item to the approved list for this session (idempotent by name).
-    """
     data = request.get_json(silent=True) or {}
     session_id = data.get("session_id") or str(uuid4())
     item = _lab_normalize_item(data.get("item"))
-
     if not item:
         return jsonify({"ok": False, "error": "Invalid item"}), 400
 
@@ -3269,10 +3222,6 @@ def lab_agent_approve():
 
 @app.get("/lab-agent/list")
 def lab_agent_list():
-    """
-    Query: ?session_id=...
-    Returns approved items and a small context summary.
-    """
     session_id = request.args.get("session_id") or ""
     if not session_id:
         return jsonify({"ok": False, "error": "Missing session_id"}), 400
@@ -3287,7 +3236,7 @@ def lab_agent_list():
 
 
 @app.post("/lab-agent/rtc-connect")
-@cross_origin(  # Explicit CORS for SDP exchange; mirrors your pattern
+@cross_origin(
     origins=[
         "https://ai-doctor-assistant-app-dev.onrender.com",
         "http://localhost:3000",
@@ -3304,20 +3253,18 @@ def lab_agent_rtc_connect():
       - Header (optional): X-Session-Id
       - Query (optional):  ?session_id=...
     Returns: application/sdp (answer) from upstream.
-
-    Set LAB_AGENT_RTC_UPSTREAM to your deployed VAD+TTS agent URL
-    (e.g., https://<your-host>/api/rtc-connect).
     """
     session_id = request.args.get("session_id") or request.headers.get("X-Session-Id") or str(uuid4())
     offer_sdp = request.get_data()  # raw bytes
     if not offer_sdp:
         return Response(b"No SDP provided", status=400, mimetype="text/plain")
 
-    upstream = f"{LAB_AGENT_RTC_UPSTREAM}?session_id={session_id}"
+    # ✅ Robust URL build
+    upstream_url = f"{LAB_AGENT_RTC_UPSTREAM}?{urlencode({'session_id': session_id})}"
 
     try:
         up = requests.post(
-            upstream,
+            upstream_url,
             data=offer_sdp,  # send exact bytes
             headers={"Content-Type": "application/sdp", "X-Session-Id": session_id},
             timeout=60,
@@ -3333,10 +3280,5 @@ def lab_agent_rtc_connect():
     resp.headers["Access-Control-Allow-Credentials"] = "true"
     resp.headers["Cache-Control"] = "no-store"
     return resp
-
-# ==========================================================
-# === END: Lab Voice Agent backend (append to app.py) ======
-# ==========================================================
-
 if __name__ == "__main__":
     app.run(host="127.0.0.1", port=5050, debug=True)

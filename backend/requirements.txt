@@ -1,5 +1,5 @@
 # LangChain and LLMs
-langchain
+langchain=0.3.25
 langchain-community
 langchain-core
 langchain-qdrant

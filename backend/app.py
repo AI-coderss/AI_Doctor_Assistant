@@ -91,28 +91,24 @@ from flask_cors import CORS
 CORS(
     app,
     resources={
-        # Default policy (applies to everything unless a more specific rule overrides it)
         r"/*": {
             "origins": [
                 "https://ai-doctor-assistant-app-dev.onrender.com",
                 "http://localhost:3000",
             ],
             "methods": ["GET", "POST", "OPTIONS"],
-            "allow_headers": ["Content-Type", "Authorization", "Accept", "X-Requested-With"],
+            "allow_headers": ["Content-Type", "Authorization", "Accept", "X-Requested-With", "X-Session-Id"],
             "expose_headers": ["Content-Type"],
             "supports_credentials": True,
             "max_age": 86400,
         },
-
-        # --- Explicit overrides (kept for clarity/consistency) ---
-
         r"/api/rtc-transcribe-connect": {
             "origins": [
                 "https://ai-doctor-assistant-app-dev.onrender.com",
                 "http://localhost:3000",
             ],
             "methods": ["GET", "POST", "OPTIONS"],
-            "allow_headers": ["Content-Type", "Authorization", "Accept", "X-Requested-With"],
+            "allow_headers": ["Content-Type", "Authorization", "Accept", "X-Requested-With", "X-Session-Id"],
             "expose_headers": ["Content-Type"],
             "supports_credentials": True,
             "max_age": 86400,
@@ -124,7 +120,7 @@ CORS(
                 "http://localhost:3000",
             ],
             "methods": ["POST", "OPTIONS"],
-            "allow_headers": ["Content-Type", "Authorization", "Accept", "X-Requested-With"],
+            "allow_headers": ["Content-Type", "Authorization", "Accept", "X-Requested-With", "X-Session-Id"],
             "expose_headers": ["Content-Type"],
             "supports_credentials": True,
             "max_age": 86400,
@@ -136,7 +132,7 @@ CORS(
                 "http://localhost:3000",
             ],
             "methods": ["POST", "OPTIONS"],
-            "allow_headers": ["Content-Type", "Authorization", "Accept", "X-Requested-With"],
+            "allow_headers": ["Content-Type", "Authorization", "Accept", "X-Requested-With", "X-Session-Id"],
             "expose_headers": ["Content-Type"],
             "supports_credentials": True,
             "max_age": 86400,
@@ -148,7 +144,7 @@ CORS(
                 "http://localhost:3000",
             ],
             "methods": ["POST", "OPTIONS"],
-            "allow_headers": ["Content-Type", "Authorization", "Accept", "X-Requested-With"],
+            "allow_headers": ["Content-Type", "Authorization", "Accept", "X-Requested-With", "X-Session-Id"],
             "expose_headers": ["Content-Type"],
             "supports_credentials": True,
             "max_age": 86400,
@@ -160,7 +156,7 @@ CORS(
                 "http://localhost:3000",
             ],
             "methods": ["POST", "OPTIONS"],
-            "allow_headers": ["Content-Type", "Authorization", "Accept", "X-Requested-With"],
+            "allow_headers": ["Content-Type", "Authorization", "Accept", "X-Requested-With", "X-Session-Id"],
             "expose_headers": ["Content-Type"],
             "supports_credentials": True,
             "max_age": 86400,
@@ -172,7 +168,7 @@ CORS(
                 "http://localhost:3000",
             ],
             "methods": ["POST", "OPTIONS"],
-            "allow_headers": ["Content-Type", "Authorization", "Accept", "X-Requested-With"],
+            "allow_headers": ["Content-Type", "Authorization", "Accept", "X-Requested-With", "X-Session-Id"],
             "expose_headers": ["Content-Type"],
             "supports_credentials": True,
             "max_age": 86400,
@@ -184,7 +180,7 @@ CORS(
                 "http://localhost:3000",
             ],
             "methods": ["POST", "OPTIONS"],
-            "allow_headers": ["Content-Type", "Authorization", "Accept", "X-Requested-With"],
+            "allow_headers": ["Content-Type", "Authorization", "Accept", "X-Requested-With", "X-Session-Id"],
             "expose_headers": ["Content-Type"],
             "supports_credentials": True,
             "max_age": 86400,
@@ -198,7 +194,7 @@ CORS(
                 "http://localhost:3000",
             ],
             "methods": ["POST", "OPTIONS"],
-            "allow_headers": ["Content-Type", "Authorization", "Accept", "X-Requested-With"],
+            "allow_headers": ["Content-Type", "Authorization", "Accept", "X-Requested-With", "X-Session-Id"],
             "expose_headers": ["Content-Type"],
             "supports_credentials": True,
             "max_age": 86400,
@@ -210,7 +206,7 @@ CORS(
                 "http://localhost:3000",
             ],
             "methods": ["POST", "OPTIONS"],
-            "allow_headers": ["Content-Type", "Authorization", "Accept", "X-Requested-With"],
+            "allow_headers": ["Content-Type", "Authorization", "Accept", "X-Requested-With", "X-Session-Id"],
             "expose_headers": ["Content-Type"],
             "supports_credentials": True,
             "max_age": 86400,
@@ -223,34 +219,36 @@ CORS(
                 "http://localhost:3000",
             ],
             "methods": ["POST", "OPTIONS"],  # ensure OPTIONS allowed for preflight
-            "allow_headers": ["Content-Type", "Authorization", "Accept", "X-Requested-With"],
+            "allow_headers": ["Content-Type", "Authorization", "Accept", "X-Requested-With", "X-Session-Id"],
             "expose_headers": ["Content-Type"],
             "supports_credentials": True,
             "max_age": 86400,
         },
-        r"/lab-agent/rtc-connect": {    
+
+        r"/lab-agent/rtc-connect": {
             "origins": [
                 "https://ai-doctor-assistant-app-dev.onrender.com",
                 "http://localhost:3000",
             ],
             "methods": ["POST", "OPTIONS"],
-            "allow_headers": ["Content-Type", "Authorization", "Accept", "X-Requested-With"],
+            "allow_headers": ["Content-Type", "Authorization", "Accept", "X-Requested-With", "X-Session-Id"],
             "expose_headers": ["Content-Type"],
             "supports_credentials": True,
             "max_age": 86400,
         },
+
         r"/lab-agent/suggest-stream": {
             "origins": [
                 "https://ai-doctor-assistant-app-dev.onrender.com",
                 "http://localhost:3000",
             ],
             "methods": ["POST", "OPTIONS"],
-            "allow_headers": ["Content-Type", "Authorization", "Accept", "X-Requested-With"],
+            "allow_headers": ["Content-Type", "Authorization", "Accept", "X-Requested-With", "X-Session-Id"],
             "expose_headers": ["Content-Type"],
             "supports_credentials": True,
             "max_age": 86400,
-        }},
-
+        },
+    },
 )
 
 # Optional: hard cap request size (mirrors OCR_MAX_BYTES)

@@ -4,7 +4,7 @@
 import React, { useEffect, useRef, useState } from "react";
 import "../styles/lab-voice-agent.css";
 import BaseOrb from "./BaseOrb.jsx";
-import { FaMicrophoneAlt, FaCheck, FaFlask, FaTimes, FaListUl } from "react-icons/fa";
+import { FaMicrophoneAlt, FaCheck, FaFlask, FaTimes } from "react-icons/fa";
 
 /**
  * LabVoiceAgent
@@ -16,7 +16,7 @@ import { FaMicrophoneAlt, FaCheck, FaFlask, FaTimes, FaListUl } from "react-icon
  *  - context: string  (combined transcript + narrative + prior approved labs)
  *  - onApproveLab: (item: {name, why?, priority?}) => void
  *
- * Backend (to be added next step):
+ * Backend:
  *  POST /lab-agent/context         { session_id, context }
  *  POST /lab-agent/suggest-stream  { session_id }            -> text/event-like stream via fetch body
  *  POST /lab-agent/approve         { session_id, item }

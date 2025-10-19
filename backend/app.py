@@ -3172,6 +3172,7 @@ def _build_context_instructions(transcript: str, approved):
 # ----------------------------- Endpoints -------------------------------------
 
 # Set/replace context for a session
+# ---------- Lab Agent: set session context ----------
 @app.post("/lab-agent/context")
 def lab_agent_set_context():
     data = request.get_json(silent=True) or {}
@@ -3181,58 +3182,110 @@ def lab_agent_set_context():
     st["context"] = context
     return jsonify({"ok": True, "session_id": session_id, "approved_count": len(st["approved"])}), 200
 
+
 # Approve a single suggestion
+# ---------- Lab Agent: approve a suggested test ----------
 @app.post("/lab-agent/approve")
 def lab_agent_approve():
     data = request.get_json(silent=True) or {}
     session_id = data.get("session_id") or ""
     if not session_id:
         return jsonify({"ok": False, "error": "Missing session_id"}), 400
+
     item = _normalize_row(data.get("item"))
     if not item:
         return jsonify({"ok": False, "error": "Invalid item"}), 400
+
     st = _sess(session_id)
-    # de-dup by name
+    # de-dup by case-insensitive name
     if all((x.get("name") or "").strip().lower() != item["name"].strip().lower() for x in st["approved"]):
         st["approved"].append(item)
-    return jsonify({"ok": True, "session_id": session_id, "item": item, "approved_count": len(st["approved"])}), 200
+
+    return jsonify({
+        "ok": True,
+        "session_id": session_id,
+        "item": item,
+        "approved_count": len(st["approved"]),
+    }), 200
+
 
 # List current approvals
+# ---------- Lab Agent: list current approvals ----------
 @app.get("/lab-agent/list")
 def lab_agent_list():
     session_id = request.args.get("session_id") or ""
     if not session_id:
         return jsonify({"ok": False, "error": "Missing session_id"}), 400
     st = _sess(session_id)
+
+    # IMPORTANT: return "labs" (for the front-end) and keep "approved" for backward compatibility
+    approved = st.get("approved", []) or []
     return jsonify({
         "ok": True,
         "session_id": session_id,
-        "approved": st.get("approved", []),
+        "labs": approved,                # <— new alias expected by Chat.jsx
+        "approved": approved,            # <— keep existing key (non-breaking)
         "context_len": len(st.get("context") or ""),
     }), 200
 
 # Suggest stream (server-sent style over a fetch/read loop) — no conversation_rag_chain required
+# ---------- Lab Agent: stream suggestions (SSE-ish over fetch/read) ----------
 @app.post("/lab-agent/suggest-stream")
 def lab_agent_suggest_stream():
     data = request.get_json(silent=True) or {}
     session_id = data.get("session_id") or ""
     if not session_id:
+        # send a small SSE line the client can parse
         return Response("data: " + json.dumps({"type": "text", "content": "Missing session_id"}) + "\n\n",
                         mimetype="text/event-stream")
+
     st = _sess(session_id)
-    # Build a JSON-only instruction to get a small set of candidates (frontend still approves one-by-one)
+
+    # Build a JSON-only instruction (frontend still approves one-by-one)
     prompt = (
         "Return STRICT JSON ONLY (no prose): an array of up to 8 objects with EXACT keys "
         'name, why, priority. Example: '
-        '[{"name":"Serum cortisol (AM)","why":"rule-out adrenal insufficiency","priority":"High"}].\n\n'
+        '[{\"name\":\"Serum cortisol (AM)\",\"why\":\"rule-out adrenal insufficiency\",\"priority\":\"High\"}].\n\n'
         "Use the case below; avoid duplicates of already-approved.\n"
     )
     prompt += _build_context_instructions(st.get("context"), st.get("approved"))
 
-    def emit(obj): return "data: " + json.dumps(obj, ensure_ascii=False) + "\n\n"
+    def emit(obj):
+        return "data: " + json.dumps(obj, ensure_ascii=False) + "\n\n"
+
+    def _dedupe(items):
+        seen = set()
+        out = []
+        for it in items:
+            key = (it.get("name") or "").strip().lower()
+            if key and key not in seen:
+                seen.add(key)
+                out.append(it)
+        return out
+
+    def _json_from_text(s):
+        import re, json as _json
+        if not s:
+            return []
+        m = re.search(r"```json([\s\S]*?)```", s)
+        if m:
+            s = m.group(1)
+        # try to find a top-level array/object
+        first, last = s.find("["), s.rfind("]")
+        if first != -1 and last > first:
+            s = s[first:last+1]
+        else:
+            first, last = s.find("{"), s.rfind("}")
+            if first != -1 and last > first:
+                s = s[first:last+1]
+        try:
+            obj = _json.loads(s)
+            return obj if isinstance(obj, list) else [obj]
+        except Exception:
+            return []
 
     def generate():
-        # Try OpenAI small chat completion (non-stream) and then emit items
+        # 1) call LLM (non-stream)
         try:
             from openai import OpenAI
             client = OpenAI(api_key=OPENAI_API_KEY)
@@ -3248,26 +3301,22 @@ def lab_agent_suggest_stream():
             yield emit({"type": "end"})
             return
 
-        # Extract JSON
-        def _json_from_text(s):
-            import re, json as _json
-            m = re.search(r"```json([\s\S]*?)```", s)
-            if m: s = m.group(1)
-            first, last = s.find("{"), s.rfind("}")
-            if first == -1:
-                first, last = s.find("["), s.rfind("]")
-            s = s if first == -1 else s[first:last+1]
-            try:
-                return _json.loads(s)
-            except Exception:
-                return []
+        # 2) parse & normalize
+        raw_items = _json_from_text(txt)
+        norm = []
+        for x in (raw_items or [])[:8]:
+            name = (x.get("name") or x.get("test") or "").strip()
+            if not name:
+                continue
+            norm.append({
+                "name": name,
+                "why": (x.get("why") or "").strip(),
+                "priority": (x.get("priority") or "").strip(),  # STAT | High | Routine
+            })
 
-        parsed = _json_from_text(txt)
+        # 3) filter out already-approved, dedupe
         items = []
-        for row in parsed or []:
-            it = _normalize_row(row)
-            if not it: continue
-            # exclude already-approved
+        for it in norm:
             if any((a.get("name") or "").strip().lower() == it["name"].strip().lower() for a in st["approved"]):
                 continue
             items.append(it)
@@ -3278,6 +3327,7 @@ def lab_agent_suggest_stream():
             yield emit({"type": "end"})
             return
 
+        # 4) emit suggestions one-by-one
         for it in items:
             yield emit({"type": "suggestion", "item": it})
         yield emit({"type": "end"})
@@ -3290,9 +3340,9 @@ def lab_agent_suggest_stream():
     }
     return Response(stream_with_context(generate()), headers=headers)
 
-# WebRTC SDP exchange -> direct OpenAI Realtime (no upstream proxy)
-@app.post("/lab-agent/rtc-connect")
 
+# ---------- Lab Agent: WebRTC (browser offer -> OpenAI Realtime -> answer) ----------
+@app.post("/lab-agent/rtc-connect")
 def lab_agent_rtc_connect():
     # Browser sends an SDP offer body with Content-Type: application/sdp
     offer_sdp = request.get_data(as_text=True)
@@ -3331,15 +3381,12 @@ def lab_agent_rtc_connect():
             return Response("SDP exchange error", status=502, mimetype="text/plain")
         answer = r.content
     except Exception as e:
-        app.logger.exception("RTC exchange error")
+        app.logger.exception("RTC upstream error")
         return Response(f"RTC upstream error: {e}", status=502, mimetype="text/plain")
 
-    # Return the SDP answer to the browser
-    resp = Response(answer, status=200)
-    resp.headers["Content-Type"] = "application/sdp"
-    resp.headers["Access-Control-Allow-Origin"] = request.headers.get("Origin", "*")
-    resp.headers["Access-Control-Allow-Credentials"] = "true"
-    resp.headers["Cache-Control"] = "no-store"
+    # 3) Return the SDP answer to the browser
+    resp = Response(answer, status=200, mimetype="application/sdp")
+    resp.headers["Cache-Control"] = "no-cache"
     return resp
 
 if __name__ == "__main__":

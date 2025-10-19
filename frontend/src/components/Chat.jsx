@@ -32,6 +32,9 @@ import LabVoiceAgent from "./LabVoiceAgent.jsx";
 let localStream;
 const BACKEND_BASE = "https://ai-doctor-assistant-backend-server.onrender.com";
 
+// 🧪 NEW: manual “add lab” chat command (very small, additive)
+const ADD_LAB_CMD_RE = /^(?:add|order)\s+(?:lab|test)s?\s*[:\-]\s*(.+)$/i;
+
 // Force fixed-position pieces to play nicely in the drawer + Second Opinion styling (no accordions).
 const drawerComponentOverrides = `
   /* Drawer grid + spacing */
@@ -610,9 +613,51 @@ const Chat = () => {
     try { if (toggleSfxRef.current) { toggleSfxRef.current.stop(); toggleSfxRef.current.play(); } } catch {}
   };
 
-  // Text chat → /stream
+  // 🧪 NEW: helper to approve a lab through backend (used by chat command)
+  const approveLabViaAPI = async (item) => {
+    try {
+      await fetch(`${BACKEND_BASE}/lab-agent/approve`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ session_id: sessionId, item }),
+      });
+    } catch (e) {
+      console.error("approveLabViaAPI failed:", e);
+    }
+  };
+
+  // Text chat → /stream (+ NEW: intercept “add lab:” command)
   const handleNewMessage = async ({ text, skipEcho = false }) => {
     if (!text || !text.trim()) return;
+
+    // 🧪 NEW: manual "add lab/test" command (no other behavior changed)
+    const cmd = text.match(ADD_LAB_CMD_RE);
+    if (cmd && cmd[1]) {
+      const raw = cmd[1].trim();
+      const item = {
+        name: raw.replace(/\s{2,}/g, " "),
+        why: "(user requested via chat)",
+        priority: "", // optional: parse [STAT] or similar if you decide later
+      };
+
+      // optimistic UI update (preserve your render shape)
+      setRequiredLabs((prev) => {
+        const exists = prev.some((x) => x.name.toLowerCase() === item.name.toLowerCase());
+        const next = exists ? prev : [...prev, item];
+        // also drop a “Required Labs” bubble to reflect new state
+        setChats((p) => [...p, { who: "bot", type: "requiredLabs", labs: next }]);
+        // confirmation message
+        setChats((p) => [...p, { who: "bot", msg: `Added to Required Labs: **${item.name}**.` }]);
+        return next;
+      });
+
+      // hit backend (non-blocking)
+      approveLabViaAPI(item);
+      // we handled it; no need to forward this text to /stream
+      if (!skipEcho) setChats((prev) => [...prev, { msg: text, who: "me" }]);
+      return;
+    }
+
     if (!skipEcho) setChats((prev) => [...prev, { msg: text, who: "me" }]);
 
     const res = await fetch(`${BACKEND_BASE}/stream`, {

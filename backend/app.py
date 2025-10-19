@@ -3294,13 +3294,7 @@ def lab_agent_suggest_stream():
 
 # WebRTC SDP exchange -> direct OpenAI Realtime (no upstream proxy)
 @app.post("/lab-agent/rtc-connect")
-@cross_origin(
-    origins=["https://ai-doctor-assistant-app-dev.onrender.com", "http://localhost:3000"],
-    methods=["POST", "OPTIONS"],
-    allow_headers=["Content-Type", "Authorization", "Accept", "X-Requested-With", "X-Session-Id"],
-    supports_credentials=True,
-    max_age=86400,
-)
+
 def lab_agent_rtc_connect():
     # Browser sends an SDP offer body with Content-Type: application/sdp
     offer_sdp = request.get_data(as_text=True)

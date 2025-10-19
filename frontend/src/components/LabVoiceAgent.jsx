@@ -4,7 +4,7 @@
 import React, { useEffect, useRef, useState } from "react";
 import "../styles/lab-voice-agent.css";
 import BaseOrb from "./BaseOrb.jsx";
-import { FaMicrophoneAlt, FaCheck, FaFlask, FaTimes } from "react-icons/fa";
+import { FaMicrophoneAlt, FaCheck, FaFlask, FaTimes, FaListUl } from "react-icons/fa";
 
 /**
  * LabVoiceAgent
@@ -16,16 +16,12 @@ import { FaMicrophoneAlt, FaCheck, FaFlask, FaTimes } from "react-icons/fa";
  *  - context: string  (combined transcript + narrative + prior approved labs)
  *  - onApproveLab: (item: {name, why?, priority?}) => void
  *
- * Backend (updated below):
- *  POST /lab-agent/context                 JSON: { session_id, context }
- *  POST /lab-agent/suggest-stream          JSON: { session_id }  -> line/ndjson or "data: ..." streaming
- *  POST /lab-agent/approve                 JSON: { session_id, item }
+ * Backend (to be added next step):
+ *  POST /lab-agent/context         { session_id, context }
+ *  POST /lab-agent/suggest-stream  { session_id }            -> text/event-like stream via fetch body
+ *  POST /lab-agent/approve         { session_id, item }
  *  GET  /lab-agent/list?session_id=...
- *
- *  NEW no-preflight SDP exchange:
- *  POST /lab-agent/rtc-connect             Content-Type: application/x-www-form-urlencoded
- *      body: session_id=<id>&sdp=<offer_sdp>
- *      returns: answer SDP as text/plain (or application/sdp)
+ *  POST /lab-agent/rtc-connect?session_id=...   (Content-Type: application/sdp, body: offer.sdp)
  */
 
 export default function LabVoiceAgent({
@@ -38,9 +34,9 @@ export default function LabVoiceAgent({
 }) {
   const [status, setStatus] = useState("idle"); // idle | prepping | connected | error
   const [micActive, setMicActive] = useState(false);
-  const [streamingText, setStreamingText] = useState("");
-  const [suggestions, setSuggestions] = useState([]);
-  const [approvedLocal, setApprovedLocal] = useState([]);
+  const [streamingText, setStreamingText] = useState(""); // running narrative from agent
+  const [suggestions, setSuggestions] = useState([]); // [{name, why?, priority?}]
+  const [approvedLocal, setApprovedLocal] = useState([]); // shows in-panel approvals
 
   const pcRef = useRef(null);
   const localStreamRef = useRef(null);
@@ -67,13 +63,14 @@ export default function LabVoiceAgent({
       stopAll();
       return;
     }
+    // When opening: send context, start voice, start suggestion stream
     (async () => {
       try {
         setStatus("prepping");
         resetAll();
         await sendContext();
         await startVoice();
-        startSuggestStream(); // run concurrently
+        startSuggestStream(); // don't await; keep running in background
       } catch (e) {
         console.error("Agent init failed:", e);
         setStatus("error");
@@ -83,7 +80,6 @@ export default function LabVoiceAgent({
     return () => {
       stopAll();
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isVisible]);
 
   const sendContext = async () => {
@@ -96,10 +92,12 @@ export default function LabVoiceAgent({
       if (!res.ok) throw new Error(`/lab-agent/context ${res.status}`);
     } catch (e) {
       console.error("Failed to send context:", e);
+      // don't hard-fail; the RTC may still work
     }
   };
 
   const startVoice = async () => {
+    // WebRTC with VAD handled server-side
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       localStreamRef.current = stream;
@@ -137,7 +135,7 @@ export default function LabVoiceAgent({
         offerToReceiveVideo: false,
       });
 
-      // Tweak Opus (optional)
+      // Slightly optimized Opus params
       const modifiedOffer = {
         ...offer,
         sdp: offer.sdp.replace(
@@ -145,21 +143,17 @@ export default function LabVoiceAgent({
           "a=rtpmap:111 opus/48000/2\r\n" + "a=fmtp:111 minptime=10;useinbandfec=1"
         ),
       };
+
       await pc.setLocalDescription(modifiedOffer);
 
-      // === IMPORTANT: no querystring, no custom headers, simple form POST ===
-      const form = new URLSearchParams();
-      form.set("session_id", sessionId);
-      form.set("sdp", modifiedOffer.sdp);
-
-      const res = await fetch(`${backendBase}/lab-agent/rtc-connect`, {
-        method: "POST",
-        headers: {
-          // simple content-type => no preflight
-          "Content-Type": "application/x-www-form-urlencoded;charset=UTF-8",
-        },
-        body: form.toString(),
-      });
+      const res = await fetch(
+        `${backendBase}/lab-agent/rtc-connect?session_id=${encodeURIComponent(sessionId)}`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/sdp", "X-Session-Id": sessionId },
+          body: modifiedOffer.sdp,
+        }
+      );
 
       if (!res.ok) throw new Error(`/lab-agent/rtc-connect ${res.status}`);
       const answer = await res.text();
@@ -174,6 +168,7 @@ export default function LabVoiceAgent({
 
   const stopAll = () => {
     try {
+      // stop stream reader
       streamAbortRef.current?.abort();
       streamAbortRef.current = null;
     } catch {}
@@ -199,7 +194,7 @@ export default function LabVoiceAgent({
     setStatus("idle");
   };
 
-  // Toggle mic (enable/disable outbound tracks). VAD still applies server-side.
+  // Toggle mic (enable/disable outbound tracks). VAD still applies on server.
   const toggleMic = () => {
     if (!localStreamRef.current) return;
     const enabled = !micActive;
@@ -219,18 +214,22 @@ export default function LabVoiceAgent({
         body: JSON.stringify({ session_id: sessionId }),
         signal: ctrl.signal,
       });
-      if (!res.ok || !res.body) throw new Error(`/lab-agent/suggest-stream ${res.status}`);
+      if (!res.ok || !res.body) {
+        throw new Error(`/lab-agent/suggest-stream ${res.status}`);
+      }
 
       const reader = res.body.getReader();
       const decoder = new TextDecoder("utf-8");
       let buffer = "";
 
+      // Expect lines of JSON or SSE-ish `data: {...}`
       while (true) {
         const { value, done } = await reader.read();
         if (done) break;
         const chunk = decoder.decode(value, { stream: true });
         buffer += chunk;
 
+        // Split by newline; keep the last partial in buffer
         const lines = buffer.split(/\r?\n/);
         buffer = lines.pop() || "";
 
@@ -238,27 +237,36 @@ export default function LabVoiceAgent({
           const trimmed = line.trim();
           if (!trimmed) continue;
 
-          let jsonStr = trimmed.startsWith("data:") ? trimmed.replace(/^data:\s*/, "") : trimmed;
+          let jsonStr = trimmed;
+          if (trimmed.startsWith("data:")) {
+            jsonStr = trimmed.replace(/^data:\s*/, "");
+          }
+
           try {
             const msg = JSON.parse(jsonStr);
+            // { type: 'text' | 'delta' | 'suggestion' | 'end', ... }
             if (msg.type === "text" || msg.type === "delta") {
               appendText(String(msg.content || ""));
             } else if (msg.type === "suggestion") {
               const itm = normalizeLabItem(msg.item || msg);
               if (itm?.name) {
                 setSuggestions((prev) => {
+                  // de-dup by name
                   if (prev.some((p) => p.name.toLowerCase() === itm.name.toLowerCase())) return prev;
                   return [...prev, itm];
                 });
               }
+            } else if (msg.type === "end") {
+              // stream finished; do nothing or break
             }
-          } catch {
+          } catch (e) {
+            // Not JSON; treat as plain text chunk
             appendText(trimmed + "\n");
           }
         }
       }
     } catch (e) {
-      if (ctrl.signal.aborted) return;
+      if (ctrl.signal.aborted) return; // closed intentionally
       console.error("suggest-stream error:", e);
       appendText("\n\n[stream ended]");
     }
@@ -268,11 +276,12 @@ export default function LabVoiceAgent({
     if (!raw) return null;
     const name = (raw.name || raw.test || "").toString().trim();
     if (!name) return null;
-    return {
+    const out = {
       name,
       why: raw.why ? String(raw.why).trim() : "",
       priority: raw.priority ? String(raw.priority).trim() : "",
     };
+    return out;
   };
 
   // ========== Approvals ==========
@@ -285,12 +294,16 @@ export default function LabVoiceAgent({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ session_id: sessionId, item: norm }),
       });
-      if (!res.ok) console.error("approve failed", res.status);
+      if (!res.ok) {
+        console.error("approve failed", res.status);
+      }
     } catch (e) {
       console.error("approve error:", e);
     }
+    // optimistic UI
     setApprovedLocal((p) => [...p, norm]);
     setSuggestions((p) => p.filter((s) => s.name.toLowerCase() !== norm.name.toLowerCase()));
+    // bubble up so Chat.jsx updates required labs list live
     try {
       onApproveLab?.(norm);
     } catch {}
@@ -304,14 +317,25 @@ export default function LabVoiceAgent({
     }
   };
 
+  // ========== UI ==========
   if (!isVisible) return null;
 
   return (
     <div className="voice-assistant">
+      {/* hidden audio for agent voice */}
       <audio ref={remoteAudioRef} playsInline style={{ display: "none" }} />
-      <div className="assistant-orb"><BaseOrb className="base-orb" /></div>
-      <button className="close-btn" onClick={() => { onClose?.(); }}><FaTimes /></button>
 
+      {/* ORB */}
+      <div className="assistant-orb">
+        <BaseOrb className="base-orb" />
+      </div>
+
+      {/* Close */}
+      <button className="close-btn" onClick={() => { onClose?.(); }}>
+        <FaTimes />
+      </button>
+
+      {/* Content */}
       <div className="assistant-content">
         <div className="va-header">
           <div className="va-title"><FaFlask style={{ marginRight: 8 }} /> Lab Agent</div>
@@ -372,6 +396,7 @@ export default function LabVoiceAgent({
         )}
       </div>
 
+      {/* Mic (VAD server-side; this toggles outbound track enabled) */}
       <button
         className={`mic-btn ${micActive ? "mic-active" : ""}`}
         onClick={toggleMic}
@@ -390,5 +415,4 @@ function renderStatus(status, micActive) {
   if (status === "error") return "Error • check connection";
   return "Idle";
 }
-
 

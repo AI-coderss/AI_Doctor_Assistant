@@ -3048,7 +3048,10 @@ lab_agent_sessions = {}  # { session_id: {"context": str, "approved": [ {name, w
 # ❌ BUG (before): the trailing comma made this a tuple, breaking requests
 # LAB_AGENT_RTC_UPSTREAM = "https://ai-doctor-assistant-voice-mode-webrtc.onrender.com/api/rtc-connect",
 # ✅ FIX: make it a plain string and allow overriding via env var
-LAB_AGENT_RTC_UPSTREAM = "https://ai-doctor-assistant-voice-mode-webrtc.onrender.com/api/rtc-connect"
+LAB_AGENT_RTC_UPSTREAM = os.getenv(
+    "LAB_AGENT_RTC_UPSTREAM",
+    "https://ai-doctor-assistant-voice-mode-webrtc.onrender.com/api/rtc-connect",
+)
 
 # ----------------------------- Helpers ---------------------------------------
 def _lab_ensure_session(session_id: str):

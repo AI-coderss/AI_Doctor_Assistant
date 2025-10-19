@@ -97,7 +97,14 @@ CORS(
         # Default policy (applies to everything unless a more specific rule overrides it)
      
         # --- Explicit overrides (kept for clarity/consistency) ---
-
+        r"/stream": {
+            "origins": ALLOWED_ORIGINS,
+            "methods": ["POST", "OPTIONS"],
+            "allow_headers": ["Content-Type", "Authorization", "Accept", "X-Requested-With"],
+            "expose_headers": ["Content-Type"],
+            "supports_credentials": True,
+            "max_age": 86400,
+        },
         r"/api/rtc-transcribe-connect": {
             "origins": ALLOWED_ORIGINS,
             "methods": ["GET", "POST", "OPTIONS"],

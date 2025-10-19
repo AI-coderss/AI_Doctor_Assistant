@@ -87,7 +87,10 @@ app = Flask(__name__)
 from flask_cors import CORS
 
 from flask_cors import CORS
-CLIENTSIDE_ORIGINS ="https://ai-doctor-assistant-app-dev.onrender.com"
+ALLOWED_ORIGINS = [
+    "https://ai-doctor-assistant-app-dev.onrender.com",
+    "http://localhost:3000",
+]
 CORS(
     app,
     resources={
@@ -96,10 +99,7 @@ CORS(
         # --- Explicit overrides (kept for clarity/consistency) ---
 
         r"/api/rtc-transcribe-connect": {
-            "origins": [
-                CLIENTSIDE_ORIGINS,
-                "http://localhost:3000",
-            ],
+            "origins": ALLOWED_ORIGINS,
             "methods": ["GET", "POST", "OPTIONS"],
             "allow_headers": ["Content-Type", "Authorization", "Accept", "X-Requested-With"],
             "expose_headers": ["Content-Type"],
@@ -108,22 +108,15 @@ CORS(
         },
 
         r"/transcribe": {
-            "origins": [
-                CLIENTSIDE_ORIGINS,
-                "http://localhost:3000",
-            ],
+            "origins": ALLOWED_ORIGINS,
             "methods": ["POST", "OPTIONS"],
             "allow_headers": ["Content-Type", "Authorization", "Accept", "X-Requested-With"],
             "expose_headers": ["Content-Type"],
             "supports_credentials": True,
             "max_age": 86400,
         },
-
         r"/case-second-opinion-stream": {
-            "origins": [
-                CLIENTSIDE_ORIGINS,
-                "http://localhost:3000",
-            ],
+            "origins": ALLOWED_ORIGINS,
             "methods": ["POST", "OPTIONS"],
             "allow_headers": ["Content-Type", "Authorization", "Accept", "X-Requested-With"],
             "expose_headers": ["Content-Type"],
@@ -132,10 +125,7 @@ CORS(
         },
 
         r"/analyze-form-case-stream": {
-            "origins": [
-                CLIENTSIDE_ORIGINS,
-                "http://localhost:3000",
-            ],
+            "origins": ALLOWED_ORIGINS,
             "methods": ["POST", "OPTIONS"],
             "allow_headers": ["Content-Type", "Authorization", "Accept", "X-Requested-With"],
             "expose_headers": ["Content-Type"],
@@ -144,10 +134,7 @@ CORS(
         },
 
         r"/transcribe_widget": {
-            "origins": [
-                CLIENTSIDE_ORIGINS,
-                "http://localhost:3000",
-            ],
+            "origins": ALLOWED_ORIGINS,
             "methods": ["POST", "OPTIONS"],
             "allow_headers": ["Content-Type", "Authorization", "Accept", "X-Requested-With"],
             "expose_headers": ["Content-Type"],
@@ -156,10 +143,7 @@ CORS(
         },
 
         r"/ocr": {
-            "origins": [
-                CLIENTSIDE_ORIGINS,
-                "http://localhost:3000",
-            ],
+            "origins": ALLOWED_ORIGINS,
             "methods": ["POST", "OPTIONS"],
             "allow_headers": ["Content-Type", "Authorization", "Accept", "X-Requested-With"],
             "expose_headers": ["Content-Type"],
@@ -168,10 +152,7 @@ CORS(
         },
 
         r"/api/ocr": {
-            "origins": [
-                CLIENTSIDE_ORIGINS,
-                "http://localhost:3000",
-            ],
+            "origins": ALLOWED_ORIGINS,
             "methods": ["POST", "OPTIONS"],
             "allow_headers": ["Content-Type", "Authorization", "Accept", "X-Requested-With"],
             "expose_headers": ["Content-Type"],
@@ -182,10 +163,7 @@ CORS(
         # --- Medication checker endpoints ---
 
         r"/meds/parse": {
-            "origins": [
-                CLIENTSIDE_ORIGINS,
-                "http://localhost:3000",
-            ],
+            "origins": ALLOWED_ORIGINS,
             "methods": ["POST", "OPTIONS"],
             "allow_headers": ["Content-Type", "Authorization", "Accept", "X-Requested-With"],
             "expose_headers": ["Content-Type"],
@@ -194,10 +172,7 @@ CORS(
         },
 
         r"/meds/map": {
-            "origins": [
-                CLIENTSIDE_ORIGINS,
-                "http://localhost:3000",
-            ],
+            "origins": ALLOWED_ORIGINS,
             "methods": ["POST", "OPTIONS"],
             "allow_headers": ["Content-Type", "Authorization", "Accept", "X-Requested-With"],
             "expose_headers": ["Content-Type"],
@@ -207,21 +182,15 @@ CORS(
 
         # --- Vision (image analysis) ---
         r"/vision/analyze": {
-            "origins": [
-                CLIENTSIDE_ORIGINS,
-                "http://localhost:3000",
-            ],
+            "origins": ALLOWED_ORIGINS,
             "methods": ["POST", "OPTIONS"],  # ensure OPTIONS allowed for preflight
             "allow_headers": ["Content-Type", "Authorization", "Accept", "X-Requested-With"],
             "expose_headers": ["Content-Type"],
             "supports_credentials": True,
             "max_age": 86400,
         },
-        r"/lab-agent/rtc-connect": {    
-            "origins": [
-                CLIENTSIDE_ORIGINS,
-                "http://localhost:3000",
-            ],
+        r"/lab-agent/rtc-connect": {
+            "origins": ALLOWED_ORIGINS,
             "methods": ["POST", "OPTIONS"],
             "allow_headers": ["Content-Type", "Authorization", "Accept", "X-Requested-With"],
             "expose_headers": ["Content-Type"],
@@ -229,10 +198,7 @@ CORS(
             "max_age": 86400,
         },
         r"/lab-agent/suggest-stream": {
-            "origins": [
-                CLIENTSIDE_ORIGINS,
-                "http://localhost:3000",
-            ],
+            "origins": ALLOWED_ORIGINS,
             "methods": ["POST", "OPTIONS"],
             "allow_headers": ["Content-Type", "Authorization", "Accept", "X-Requested-With"],
             "expose_headers": ["Content-Type"],

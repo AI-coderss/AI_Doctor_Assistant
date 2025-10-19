@@ -1,0 +1,648 @@
+:root {
+    /* Component sizing */
+    --fab-size: 64px;
+    /* mic diameter */
+    --fab-bottom: 20px;
+    /* mic distance from bottom */
+    --ring-size: 102px;
+    /* mic ring size */
+
+    /* Accents */
+    --accent-blue-1: #007BFF;
+    /* idle blue */
+    --accent-blue-2: #007BFF;
+
+    /* 🔆 BRIGHT neon green for ACTIVE */
+    --accent-green-1: #32ff7e;
+    --accent-green-2: #00d27f;
+    --accent-green-ring: rgba(50, 255, 126, 0.85);
+
+    /* Card tokens */
+    --card-bg: #ffffff;
+    --card-ink: #0f172a;
+    --card-border: rgba(15, 23, 42, 0.08);
+    --card-shadow: 0 22px 60px rgba(0, 0, 0, 0.08);
+}
+
+.voice-assistant {
+    position: fixed;
+    right: 0;
+    top: 80px;
+    /* Positioned below the assumed 80px header */
+    width: 28%;
+    /* Slightly increased width for better content display */
+    max-width: 450px;
+    /* Set a max-width */
+    height: calc(80vh - 80px);
+    /* Fill remaining viewport height */
+    padding: 20px;
+    /* General padding */
+    background: rgba(255, 255, 255, 0.3);
+    /* Slightly more opaque for better visibility */
+    backdrop-filter: blur(0.5px);
+    /* Increased blur for stronger visual separation */
+    -webkit-backdrop-filter: blur(0.5px);
+    border-left: 1px solid rgba(255, 255, 255, 0.4);
+    /* Stronger border for clarity */
+    color: #ffffff;
+    box-shadow: -6px 0 16px rgba(0, 0, 0, 0.2);
+    /* Deeper shadow */
+    z-index: 1000;
+    display: flex;
+    flex-direction: column;
+    box-sizing: border-box;
+    margin-top: 0;
+    padding-top: 70px;
+    /* Increased to make space for close button + orb considerations */
+    padding-bottom: 80px;
+    /* Ensure content doesn't go under the mic button */
+
+    /* ✅ Orb sizing variables so the outer ring has room */
+    --orb-size: 240px;
+    /* canvas diameter */
+    --orb-ring-size: calc(var(--orb-size) + 36px);
+    /* outer ring diameter */
+}
+
+/* Orb container (now holds <BaseOrb /> canvas) */
+.assistant-orb {
+    position: absolute;
+    top: 30%;
+    /* Center vertically */
+    left: 50%;
+    transform: translate(-50%, -50%);
+    /* Center horizontally and pull half its height up */
+    width: var(--orb-size);
+    height: var(--orb-size);
+    border-radius: 50%;
+    object-fit: cover;
+    /* harmless with canvas; kept to preserve original intent */
+    z-index: 1001;
+    /* Ensure it's above other elements in the assistant */
+    overflow: visible;
+    /* ✅ allow the outer ring to extend beyond the orb */
+    pointer-events: none;
+    /* orb & ring visuals shouldn't block clicks below */
+}
+
+/* Ensure BaseOrb canvas fills the container perfectly */
+.assistant-orb .base-orb {
+    width: 100%;
+    height: 100%;
+    display: block;
+}
+
+/* ✅ Outer ring around the orb — lightened blue */
+.assistant-orb::before {
+    content: "";
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    width: var(--orb-ring-size);
+    height: var(--orb-ring-size);
+    transform: translate(-50%, -50%);
+    border-radius: 50%;
+    box-sizing: border-box;
+    border: 2px solid rgba(0, 123, 255, 0.28);
+    /* lighter, less concentrated */
+    filter: drop-shadow(0 0 12px rgba(0, 123, 255, 0.20));
+    /* lighter glow */
+    pointer-events: none;
+}
+
+/* Subtle animated halo glow — lightened */
+.assistant-orb::after {
+    content: "";
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    width: var(--orb-ring-size);
+    height: var(--orb-ring-size);
+    transform: translate(-50%, -50%);
+    border-radius: 50%;
+    pointer-events: none;
+    background: radial-gradient(circle,
+            rgba(0, 123, 255, 0.06) 0%,
+            rgba(0, 123, 255, 0.04) 40%,
+            rgba(0, 123, 255, 0.01) 70%,
+            transparent 80%);
+    animation: orb-halo 2.8s ease-in-out infinite;
+}
+
+@keyframes orb-halo {
+    0% {
+        transform: translate(-50%, -50%) scale(0.98);
+        opacity: 0.7;
+    }
+
+    50% {
+        transform: translate(-50%, -50%) scale(1.02);
+        opacity: 1;
+    }
+
+    100% {
+        transform: translate(-50%, -50%) scale(0.98);
+        opacity: 0.7;
+    }
+}
+
+/* Give content enough top margin to clear the larger orb + ring */
+.assistant-content {
+    margin-top: calc(var(--orb-ring-size) + 24px);
+    flex: 1;
+    /* Enable scrolling for content if it overflows */
+    padding-right: 10px;
+    /* Add some padding for scrollbar */
+    color: #333;
+    /* Ensure content is visible */
+}
+
+/* ===== Mic FAB (centered) ===== */
+.mic-btn {
+    position: absolute;
+    left: 50%;
+    bottom: var(--fab-bottom);
+    transform: translateX(-50%);
+    z-index: 1005;
+
+    width: var(--fab-size);
+    height: var(--fab-size);
+    border-radius: 50%;
+    border: none;
+    cursor: pointer;
+    isolation: isolate;
+
+    /* 3D blue idle */
+    background:
+        radial-gradient(120% 120% at 30% 20%, rgba(255, 255, 255, 0.45), transparent 40%),
+        linear-gradient(180deg, var(--accent-blue-1), var(--accent-blue-2));
+    box-shadow:
+        0 14px 26px rgba(23, 70, 197, 0.28),
+        0 6px 10px rgba(23, 70, 197, 0.22),
+        inset 0 -6px 10px rgba(0, 0, 0, 0.20),
+        inset 0 2px 3px rgba(255, 255, 255, 0.45);
+
+    /* Icon/text always WHITE */
+    color: #ffffff !important;
+    font-size: 1.65rem;
+    line-height: 1;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+
+    transition: transform .15s ease, box-shadow .22s ease;
+}
+
+/* Force mic icon to white across libs */
+.mic-btn,
+.mic-btn * {
+    color: #ffffff !important;
+}
+
+.mic-btn svg,
+.mic-btn svg *,
+.mic-btn i,
+.mic-btn .fa,
+.mic-btn .icon,
+.mic-btn [class*="icon"],
+.mic-btn .lucide {
+    fill: #ffffff !important;
+    stroke: #ffffff !important;
+    color: #ffffff !important;
+    opacity: 1 !important;
+}
+
+.mic-btn img,
+.mic-btn .icon-img {
+    filter: brightness(0) invert(1) !important;
+}
+
+/* top glossy streak */
+.mic-btn::before {
+    content: "";
+    position: absolute;
+    left: 20%;
+    top: 10%;
+    width: 60%;
+    height: 38%;
+    background: linear-gradient(180deg, rgba(255, 255, 255, 0.35), rgba(255, 255, 255, 0.05));
+    filter: blur(6px);
+    border-radius: 80% 80% 50% 50%;
+    pointer-events: none;
+    mix-blend-mode: screen;
+    z-index: 0;
+}
+
+/* Radiating ring — BLUE while idle */
+.mic-btn::after {
+    content: "";
+    position: absolute;
+    left: 50%;
+    top: 50%;
+    width: var(--ring-size);
+    height: var(--ring-size);
+    transform: translate(-50%, -50%);
+    border-radius: 50%;
+    border: 2px solid rgba(42, 108, 244, 0.45);
+    box-shadow: 0 0 10px rgba(42, 108, 244, 0.22);
+    pointer-events: none;
+    animation: mic-ring 1.25s ease-out infinite;
+    z-index: 0;
+}
+
+.mic-btn>* {
+    position: relative;
+    z-index: 1;
+}
+
+@keyframes mic-ring {
+    0% {
+        opacity: .55;
+        transform: translate(-50%, -50%) scale(1);
+    }
+
+    70% {
+        opacity: .18;
+        transform: translate(-50%, -50%) scale(1.35);
+    }
+
+    100% {
+        opacity: 0;
+        transform: translate(-50%, -50%) scale(1.65);
+    }
+}
+
+.mic-btn:hover {
+    transform: translateX(-50%) translateY(-2px);
+    box-shadow:
+        0 18px 36px rgba(23, 70, 197, 0.34),
+        0 8px 14px rgba(23, 70, 197, 0.26),
+        inset 0 -7px 12px rgba(0, 0, 0, 0.22),
+        inset 0 3px 4px rgba(255, 255, 255, 0.5);
+}
+
+/* ===== Active (recording) — BRIGHT GREEN; icon stays WHITE ===== */
+.mic-btn.mic-active {
+    background:
+        radial-gradient(120% 120% at 30% 20%, rgba(255, 255, 255, 0.55), transparent 42%),
+        linear-gradient(180deg, var(--accent-green-1), var(--accent-green-2));
+    box-shadow:
+        0 0 22px rgba(50, 255, 126, 0.55),
+        0 18px 36px rgba(0, 210, 127, 0.38),
+        0 8px 14px rgba(0, 210, 127, 0.30),
+        inset 0 -7px 12px rgba(0, 0, 0, 0.18),
+        inset 0 3px 5px rgba(255, 255, 255, 0.60);
+    color: #ffffff !important;
+}
+
+.mic-btn.mic-active::after {
+    border-color: var(--accent-green-ring);
+    box-shadow:
+        0 0 16px rgba(50, 255, 126, 0.55),
+        0 0 30px rgba(50, 255, 126, 0.35);
+    animation: mic-ring-green 1.05s ease-out infinite;
+}
+
+@keyframes mic-ring-green {
+    0% {
+        opacity: .55;
+        transform: translate(-50%, -50%) scale(0.98);
+    }
+
+    70% {
+        opacity: .18;
+        transform: translate(-50%, -50%) scale(1.40);
+    }
+
+    100% {
+        opacity: 0;
+        transform: translate(-50%, -50%) scale(1.70);
+    }
+}
+
+.close-btn {
+    color: white;
+    background-color: #ffa3a3;
+    width: 40px;
+    /* Adjusted size */
+    height: 40px;
+    /* Adjusted size */
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border: none;
+    border-radius: 50%;
+    cursor: pointer;
+    transition: background 0.3s ease, transform 0.2s ease;
+    font-size: 1rem;
+    position: absolute;
+    bottom: 105px;
+    right: 15px;
+    z-index: 1005;
+}
+
+.close-btn:hover {
+    background-color: #dc2626;
+    transform: translateY(-2px);
+}
+
+/* 📱 Responsive */
+@media (max-width: 1024px) {
+    .voice-assistant {
+        position: absolute;
+        width: 100%;
+        max-width: none;
+        height: auto;
+        padding: 16px;
+        margin-top: 160px;
+        /* Adjusted for mobile header */
+        padding-top: 60px;
+        /* Re-evaluate this based on mobile layout */
+        padding-bottom: 70px;
+        /* Re-evaluate for mic button */
+        border-left: none;
+        border-top: 1px solid rgba(255, 255, 255, 0.2);
+        box-shadow: 0 -4px 12px rgba(0, 0, 0, 0.1);
+        backdrop-filter: none;
+        -webkit-backdrop-filter: none;
+    }
+
+    .assistant-orb {
+        display: none;
+    }
+
+    .close-btn {
+        position: fixed;
+        bottom: 175px;
+        /* Above mic button */
+        right: 15px;
+        z-index: 1005;
+    }
+}
+
+.waveform-container {
+    width: 100%;
+    max-width: 100%;
+    margin-top: 2px;
+}
+
+.waveform-container canvas {
+    width: 100% !important;
+    display: block;
+    border-radius: 10px;
+}
+
+.assistant-loader-overlay {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    backdrop-filter: blur(8px);
+    background: rgba(255, 255, 255, 0.2);
+    z-index: 10000;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    pointer-events: none;
+}
+
+.assistant-loader {
+    text-align: center;
+    color: #000;
+    font-weight: 500;
+    backdrop-filter: none;
+}
+
+.assistant-loader .spinner {
+    margin-top: 10px;
+    width: 30px;
+    height: 30px;
+    border: 4px solid #ccc;
+    border-top-color: #0a66c2;
+    border-radius: 50%;
+    animation: spin 0.8s linear infinite;
+}
+
+.mic-btn.mic-active {
+    background-color: #10b981;
+    box-shadow: 0 0 0 4px rgba(16, 185, 129, 0.3);
+}
+
+@media (min-width: 1025px) {
+    .mic-btn.mic-active {
+        transform: translateX(-50%) scale(1.05);
+    }
+}
+
+.mic-btn.mic-active::after {
+    border-color: #10b981;
+    animation: mic-radiate-green 1.2s infinite;
+}
+
+@keyframes mic-radiate-green {
+    0% {
+        opacity: 0.4;
+        transform: translate(-50%, -50%) scale(1);
+    }
+
+    70% {
+        opacity: 0.15;
+        transform: translate(-50%, -50%) scale(1.4);
+    }
+
+    100% {
+        opacity: 0;
+        transform: translate(-50%, -50%) scale(1.7);
+    }
+}
+
+/* Responsive layout for mobile */
+@media (max-width: 768px) {
+    .mic-btn {
+        position: fixed;
+        bottom: 80px;
+        /* Float above other UI (e.g., menu or chat input) */
+        left: 50%;
+        transform: translateX(-50%);
+        width: auto;
+        max-width: 90%;
+        padding: 12px 20px;
+        font-size: 18px;
+    }
+}
+
+/* ====== Small additions for panel content ====== */
+.va-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 10px;
+}
+
+.va-title {
+    font-weight: 800;
+    font-size: 16px;
+    color: #0f172a;
+}
+
+.va-status {
+    font-size: 12.5px;
+    padding: 6px 10px;
+    border-radius: 999px;
+    background: #f1f5f9;
+    color: #0f172a;
+    border: 1px solid rgba(0, 0, 0, 0.08);
+}
+
+.va-status.connected {
+    background: #e8fff3;
+    border-color: #b7f7cf;
+}
+
+.va-status.error {
+    background: #fff1f2;
+    border-color: #fecaca;
+}
+
+.va-section {
+    border: 1px solid rgba(0, 0, 0, 0.06);
+    background: #fff;
+    border-radius: 12px;
+    padding: 12px;
+    margin-bottom: 12px;
+    box-shadow: 0 4px 14px rgba(0, 0, 0, 0.04);
+}
+
+.va-subtitle {
+    font-weight: 800;
+    font-size: 14px;
+    margin-bottom: 8px;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+.pill {
+    display: inline-flex;
+    align-items: center;
+    padding: 2px 8px;
+    background: #eef2ff;
+    border: 1px solid #c7d2fe;
+    border-radius: 999px;
+    font-size: 12px;
+}
+
+.va-stream {
+    white-space: pre-wrap;
+    font-size: 13.5px;
+    color: #0f172a;
+    min-height: 64px;
+}
+
+.lab-suggestions {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 10px;
+}
+
+.sug-card {
+    border: 1px solid rgba(0, 0, 0, 0.06);
+    border-radius: 12px;
+    background: #fff;
+    padding: 10px;
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 10px;
+}
+
+.sug-title {
+    font-weight: 800;
+    font-size: 14px;
+    color: #0f172a;
+}
+
+.sug-meta {
+    font-size: 12px;
+    color: #475569;
+}
+
+.badge {
+    display: inline-flex;
+    align-items: center;
+    padding: 2px 6px;
+    background: #f1f5f9;
+    border-radius: 8px;
+    margin-right: 6px;
+    border: 1px solid rgba(0, 0, 0, 0.06);
+}
+
+.why {
+    opacity: .85;
+}
+
+.sug-actions {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.approve-btn {
+    border: none;
+    background: #0ea5e9;
+    color: #fff;
+    border-radius: 8px;
+    padding: 8px 10px;
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    font-weight: 700;
+    font-size: 12.5px;
+}
+
+.approve-btn:hover {
+    filter: brightness(0.96);
+}
+
+.approve-all-btn {
+    margin-left: auto;
+    border: none;
+    background: #10b981;
+    color: #fff;
+    border-radius: 8px;
+    padding: 6px 10px;
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    font-weight: 700;
+    font-size: 12px;
+}
+
+.approve-all-btn:hover {
+    filter: brightness(0.96);
+}
+
+.approved-list {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+}
+
+.chip-approved {
+    display: inline-flex;
+    align-items: center;
+    padding: 6px 10px;
+    background: #ecfeff;
+    border: 1px solid #a5f3fc;
+    color: #0f172a;
+    border-radius: 12px;
+    font-size: 12.5px;
+}
+
+.empty-hint {
+    font-size: 12.5px;
+    color: #64748b;
+}

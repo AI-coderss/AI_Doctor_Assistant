@@ -9,7 +9,7 @@ import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import Mermaid from "./Mermaid.jsx";
 import BaseOrb from "./BaseOrb.jsx";
-import { FaMicrophoneAlt } from "react-icons/fa";
+import { FaMicrophoneAlt, FaFlask } from "react-icons/fa";
 import { motion, AnimatePresence } from "framer-motion";
 import useAudioForVisualizerStore from "../store/useAudioForVisualizerStore.js";
 import "../styles/chat.css";
@@ -25,6 +25,9 @@ import useDosageStore from "../store/dosageStore";
 import CalculateDosageButton from "./CalculateDosageButton"; // ✅
 import MedicalImageAnalyzer from "./MedicalImageAnalyzer"; // ✅ NEW (Vision)
 import { Howl } from "howler";
+
+// 🧪 NEW: Lab Voice Agent (VAD, suggestions + approve)
+import LabVoiceAgent from "./LabVoiceAgent.jsx";
 
 let localStream;
 const BACKEND_BASE = "https://ai-doctor-assistant-backend-server.onrender.com";
@@ -128,6 +131,15 @@ const drawerComponentOverrides = `
     --donut-text: #111827;
     --donut-subtext: #6B7280;
   }
+
+  /* Required labs bubble */
+  .req-labs { border: 1px solid rgba(0,0,0,0.08); border-radius: 14px; background: #fff; padding: 12px; }
+  .req-labs .title { font-weight: 800; margin-bottom: 8px; }
+  .req-chip {
+    display:inline-flex; align-items:center; gap:8px; padding:6px 10px; border-radius:12px;
+    border:1px solid rgba(0,0,0,0.08); margin: 4px 6px 0 0; background: #f8fafc; font-size: 12.5px;
+  }
+  .req-chip .why { opacity: .7; font-size: 11.5px; }
 `;
 
 /** Normalize bot markdown a bit */
@@ -356,6 +368,24 @@ function SecondOpinionPanel({ data, narrative }) {
   );
 }
 
+function RequiredLabsBubble({ items = [] }) {
+  if (!items.length) return null;
+  return (
+    <div className="req-labs">
+      <div className="title">Required Labs (approved)</div>
+      <div>
+        {items.map((it, idx) => (
+          <span key={idx} className="req-chip">
+            <strong>{it.name}</strong>
+            {it.priority && <span> • {it.priority}</span>}
+            {it.why && <span className="why"> ({it.why})</span>}
+          </span>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 const Chat = () => {
   const [chats, setChats] = useState([
     {
@@ -363,6 +393,11 @@ const Chat = () => {
       who: "bot",
     },
   ]);
+
+  // 🧪 NEW — Required labs (approved) & Lab Agent visibility
+  const [requiredLabs, setRequiredLabs] = useState([]);
+  const [showLabAgent, setShowLabAgent] = useState(false);
+
   const [isVoiceMode, setIsVoiceMode] = useState(false);
   const [micStream, setMicStream] = useState(null);
   const [isMicActive, setIsMicActive] = useState(false);
@@ -415,6 +450,25 @@ const Chat = () => {
       setIsMicActive(false);
     };
   }, [dataChannel, micStream, peerConnection]);
+
+  // Load current required labs on mount
+  useEffect(() => {
+    (async () => {
+      try {
+        const res = await fetch(`${BACKEND_BASE}/lab-agent/list?session_id=${encodeURIComponent(sessionId)}`);
+        if (res.ok) {
+          const data = await res.json();
+          if (Array.isArray(data?.labs)) {
+            setRequiredLabs(data.labs);
+            if (data.labs.length) {
+              setChats((prev) => [...prev, { who: "bot", type: "requiredLabs", labs: data.labs }]);
+            }
+          }
+        }
+      } catch {}
+    })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // Live transcript bubble lifecycle
   useEffect(() => {
@@ -632,12 +686,20 @@ const Chat = () => {
       const last = updated[updated.length - 1];
       if (last && last.streaming) { updated.pop(); }
       if (shaped) {
+        // Keep narrative = prose after JSON block
+        const prose = full.replace(jsonRaw || "", "").replace(/```json[\s\S]*?```/i, "").trim();
         updated.push({
           who: "bot",
           type: "secondOpinion",
           opinion: shaped,
-          narrative: normalizeMarkdown(full.replace(jsonRaw || "", "").replace(/```json[\s\S]*?```/i, "").trim())
+          narrative: normalizeMarkdown(prose)
         });
+        // Prompt for labs upload explicitly
+        const needsLabs = Array.isArray(shaped.recommended_labs) ? shaped.recommended_labs.length > 0 : false;
+        const labsPrompt = needsLabs
+          ? "I can interpret recent lab reports to refine the differential. Please upload them here: [request_labs]"
+          : "If you have recent lab results, upload them and I’ll integrate them: [request_labs]";
+        updated.push({ who: "bot", msg: labsPrompt });
       } else {
         updated.push({ who: "bot", msg: normalizeMarkdown(full) });
       }
@@ -747,6 +809,49 @@ const Chat = () => {
   const medsStreamingRef = useRef(false);
   const medsBufferRef = useRef("");
 
+  // Build a single “context” string for the Lab Agent
+  const buildAgentContext = () => {
+    const transcript = useDosageStore.getState()?.transcript || "";
+    const lastNarrative = (() => {
+      for (let i = chats.length - 1; i >= 0; i--) {
+        if (chats[i]?.type === "secondOpinion" && typeof chats[i].narrative === "string") {
+          return chats[i].narrative;
+        }
+      }
+      return "";
+    })();
+
+    return [
+      "### Patient Consultation Transcript",
+      transcript,
+      "",
+      "### Latest Second-Opinion Narrative",
+      lastNarrative,
+      "",
+      "### Approved Required Labs so far",
+      requiredLabs.map((l, i) => `${i + 1}. ${l.name}${l.priority ? ` [${l.priority}]` : ""}${l.why ? ` — ${l.why}` : ""}`).join("\n") || "None"
+    ].join("\n");
+  };
+
+  // When a lab is approved inside LabVoiceAgent
+  const handleApproveLab = async (item) => {
+    const normalized = {
+      name: String(item?.name || "").trim(),
+      why: item?.why ? String(item.why).trim() : "",
+      priority: item?.priority ? String(item.priority).trim() : "",
+    };
+    if (!normalized.name) return;
+
+    // optimistic update
+    setRequiredLabs((prev) => {
+      const exists = prev.some((x) => x.name.toLowerCase() === normalized.name.toLowerCase());
+      return exists ? prev : [...prev, normalized];
+    });
+
+    // render/update bubble in chat
+    setChats((prev) => [...prev, { who: "bot", type: "requiredLabs", labs: [...requiredLabs, normalized] }]);
+  };
+
   if (isVoiceMode) {
     return (
       <div className="voice-assistant-wrapper">
@@ -819,6 +924,7 @@ const Chat = () => {
         {chats.map((chat, index) => {
           const isLabCard = chat?.type === "labs" && Array.isArray(chat.labs);
           const isSecondOpinion = chat?.type === "secondOpinion" && chat.opinion;
+          const isReqLabs = chat?.type === "requiredLabs" && Array.isArray(chat.labs);
           return (
             <div key={index} className={`chat-message ${chat.who} ${chat.live ? "live" : ""} ${chat.streaming ? "streaming" : ""}`}>
               {chat.who === "bot" && (
@@ -829,6 +935,8 @@ const Chat = () => {
                   <LabsPanel labs={chat.labs} meta={chat.meta} />
                 ) : isSecondOpinion ? (
                   <SecondOpinionPanel data={chat.opinion} narrative={chat.narrative} />
+                ) : isReqLabs ? (
+                  <RequiredLabsBubble items={chat.labs} />
                 ) : (
                   <>
                     {renderMessageRich(chat.msg, index)}
@@ -1001,7 +1109,34 @@ const Chat = () => {
             }}
           />
         </div>
+
+        {/* 6) NEW — Lab Agent (voice + VAD + suggestions/approve) */}
+        <div className="tool-wrapper">
+          <button
+            style={{
+              padding: "10px 12px", borderRadius: 12, background: "#1f2937", color: "#fff",
+              border: "1px solid rgba(0,0,0,0.1)", cursor: "pointer", fontWeight: 700, width: "100%", maxWidth: 160
+            }}
+            title="Open Lab Agent"
+            onClick={() => setShowLabAgent(true)}
+          >
+            <FaFlask style={{ marginRight: 6 }} />
+            Lab Agent
+          </button>
+        </div>
       </DrawComponent>
+
+      {/* Overlay: LabVoiceAgent */}
+      {showLabAgent && (
+        <LabVoiceAgent
+          isVisible={showLabAgent}
+          onClose={() => setShowLabAgent(false)}
+          sessionId={sessionId}
+          backendBase={BACKEND_BASE}
+          context={buildAgentContext()}
+          onApproveLab={handleApproveLab}
+        />
+      )}
     </div>
   );
 };

@@ -87,28 +87,17 @@ app = Flask(__name__)
 from flask_cors import CORS
 
 from flask_cors import CORS
-
+CLIENTSIDE_ORIGINS ="https://ai-doctor-assistant-app-dev.onrender.com"
 CORS(
     app,
     resources={
         # Default policy (applies to everything unless a more specific rule overrides it)
-        r"/*": {
-            "origins": [
-                "https://ai-doctor-assistant-app-dev.onrender.com",
-                "http://localhost:3000",
-            ],
-            "methods": ["GET", "POST", "OPTIONS"],
-            "allow_headers": ["Content-Type", "Authorization", "Accept", "X-Requested-With"],
-            "expose_headers": ["Content-Type"],
-            "supports_credentials": True,
-            "max_age": 86400,
-        },
-
+     
         # --- Explicit overrides (kept for clarity/consistency) ---
 
         r"/api/rtc-transcribe-connect": {
             "origins": [
-                "https://ai-doctor-assistant-app-dev.onrender.com",
+                CLIENTSIDE_ORIGINS,
                 "http://localhost:3000",
             ],
             "methods": ["GET", "POST", "OPTIONS"],
@@ -120,7 +109,7 @@ CORS(
 
         r"/transcribe": {
             "origins": [
-                "https://ai-doctor-assistant-app-dev.onrender.com",
+                CLIENTSIDE_ORIGINS,
                 "http://localhost:3000",
             ],
             "methods": ["POST", "OPTIONS"],
@@ -132,7 +121,7 @@ CORS(
 
         r"/case-second-opinion-stream": {
             "origins": [
-                "https://ai-doctor-assistant-app-dev.onrender.com",
+                CLIENTSIDE_ORIGINS,
                 "http://localhost:3000",
             ],
             "methods": ["POST", "OPTIONS"],
@@ -144,7 +133,7 @@ CORS(
 
         r"/analyze-form-case-stream": {
             "origins": [
-                "https://ai-doctor-assistant-app-dev.onrender.com",
+                CLIENTSIDE_ORIGINS,
                 "http://localhost:3000",
             ],
             "methods": ["POST", "OPTIONS"],
@@ -156,7 +145,7 @@ CORS(
 
         r"/transcribe_widget": {
             "origins": [
-                "https://ai-doctor-assistant-app-dev.onrender.com",
+                CLIENTSIDE_ORIGINS,
                 "http://localhost:3000",
             ],
             "methods": ["POST", "OPTIONS"],
@@ -168,7 +157,7 @@ CORS(
 
         r"/ocr": {
             "origins": [
-                "https://ai-doctor-assistant-app-dev.onrender.com",
+                CLIENTSIDE_ORIGINS,
                 "http://localhost:3000",
             ],
             "methods": ["POST", "OPTIONS"],
@@ -180,7 +169,7 @@ CORS(
 
         r"/api/ocr": {
             "origins": [
-                "https://ai-doctor-assistant-app-dev.onrender.com",
+                CLIENTSIDE_ORIGINS,
                 "http://localhost:3000",
             ],
             "methods": ["POST", "OPTIONS"],
@@ -194,7 +183,7 @@ CORS(
 
         r"/meds/parse": {
             "origins": [
-                "https://ai-doctor-assistant-app-dev.onrender.com",
+                CLIENTSIDE_ORIGINS,
                 "http://localhost:3000",
             ],
             "methods": ["POST", "OPTIONS"],
@@ -206,7 +195,7 @@ CORS(
 
         r"/meds/map": {
             "origins": [
-                "https://ai-doctor-assistant-app-dev.onrender.com",
+                CLIENTSIDE_ORIGINS,
                 "http://localhost:3000",
             ],
             "methods": ["POST", "OPTIONS"],
@@ -219,7 +208,7 @@ CORS(
         # --- Vision (image analysis) ---
         r"/vision/analyze": {
             "origins": [
-                "https://ai-doctor-assistant-app-dev.onrender.com",
+                CLIENTSIDE_ORIGINS,
                 "http://localhost:3000",
             ],
             "methods": ["POST", "OPTIONS"],  # ensure OPTIONS allowed for preflight
@@ -230,7 +219,7 @@ CORS(
         },
         r"/lab-agent/rtc-connect": {    
             "origins": [
-                "https://ai-doctor-assistant-app-dev.onrender.com",
+                CLIENTSIDE_ORIGINS,
                 "http://localhost:3000",
             ],
             "methods": ["POST", "OPTIONS"],
@@ -241,7 +230,7 @@ CORS(
         },
         r"/lab-agent/suggest-stream": {
             "origins": [
-                "https://ai-doctor-assistant-app-dev.onrender.com",
+                CLIENTSIDE_ORIGINS,
                 "http://localhost:3000",
             ],
             "methods": ["POST", "OPTIONS"],

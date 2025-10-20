@@ -126,7 +126,7 @@ CORS(
             "max_age": 86400,
         },
 
-        r"/case-second-opinion-stream": {
+        r"/case_second_opinion_stream": {
             "origins": [
                 "https://ai-doctor-assistant-app-dev.onrender.com",
                 "http://localhost:3000",
@@ -399,7 +399,7 @@ def transcribe():
 
 
 # Mount BOTH spellings to avoid client/server mismatch
-@app.route("/case-second-opinion-stream", methods=["POST", "OPTIONS"])
+@app.route("/case_second_opinion_stream", methods=["POST", "OPTIONS"])
 @cross_origin(  # works with your CORS(app, resources=...) too
     origins=[
         "https://ai-doctor-assistant-app-dev.onrender.com",

@@ -25,7 +25,7 @@ import "../styles/VoiceRecorderPanel.css";
  */
 const VoiceRecorderPanel = ({
   transcribeUrl = "/transcribe",
-  opinionUrl = "/case-second-opinion-stream",
+  opinionUrl = "/case_second_opinion_stream",
   fileFieldName = "audio_data",
   anchorLeft = 120,
   anchorBottom = 140,

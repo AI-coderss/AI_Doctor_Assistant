@@ -1006,7 +1006,7 @@ const Chat = () => {
         <div className="tool-wrapper">
           <VoiceRecorderPanel
             transcribeUrl={`https://test-medic-transcriber-latest.onrender.com/transcribe`}
-            opinionUrl={`${BACKEND_BASE}/case-second-opinion-stream`}
+            opinionUrl={`${BACKEND_BASE}/case_second_opinion_stream`}
             fileFieldName="audio_data"
             onOpinion={handleOpinionStream}
             onTranscriptReady={handleAssistantContextTranscript}

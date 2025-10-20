@@ -4,7 +4,7 @@ langchain-community
 langchain-core
 langchain-qdrant
 langchain-openai
-openai>=1.14.0
+openai
 tiktoken
 google-cloud-aiplatform
 protobuf

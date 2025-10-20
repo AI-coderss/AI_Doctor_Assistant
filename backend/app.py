@@ -400,17 +400,6 @@ def transcribe():
 
 # Mount BOTH spellings to avoid client/server mismatch
 @app.route("/case_second_opinion_stream", methods=["POST", "OPTIONS"])
-@cross_origin(  # works with your CORS(app, resources=...) too
-    origins=[
-        "https://ai-doctor-assistant-app-dev.onrender.com",
-        "http://localhost:3000",
-    ],
-    methods=["POST", "OPTIONS"],
-    allow_headers=["Content-Type", "Authorization", "Accept", "X-Requested-With"],
-    expose_headers=["Content-Type"],
-    supports_credentials=True,
-    max_age=86400,
-)
 def case_second_opinion_stream():
     """
     Streams a SECOND OPINION analysis. The model MUST start with a fenced JSON block

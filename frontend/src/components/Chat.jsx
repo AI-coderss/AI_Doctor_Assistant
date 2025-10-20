@@ -1005,7 +1005,7 @@ const Chat = () => {
       <DrawComponent>
         <div className="tool-wrapper">
           <VoiceRecorderPanel
-            transcribeUrl={`${BACKEND_BASE}/transcribe`}
+            transcribeUrl={`https://test-medic-transcriber-latest.onrender.com/transcribe`}
             opinionUrl={`${BACKEND_BASE}/case-second-opinion-stream`}
             fileFieldName="audio_data"
             onOpinion={handleOpinionStream}

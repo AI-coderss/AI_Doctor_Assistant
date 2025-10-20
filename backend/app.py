@@ -3370,11 +3370,5 @@ def lab_agent_rtc_connect():
     resp = Response(answer, status=200, mimetype="application/sdp")
     resp.headers["Cache-Control"] = "no-cache"
     return resp
-
-# ----------------- (OPTIONAL) health -----------------
-@app.get("/healthz")
-def healthz():
-    return jsonify({"ok": True}), 200
-
 if __name__ == "__main__":
     app.run(host="127.0.0.1", port=5050, debug=True)

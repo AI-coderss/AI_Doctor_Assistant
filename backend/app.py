@@ -367,37 +367,56 @@ def _build_dosage_prompt(drug, age, weight, condition):
     )
 
 
-# ====== NEW: /transcribe ======
-@app.route("/transcribe", methods=["POST"])
+# ============================== Speech-to-Text ==============================
+SUPPORTED_FORMATS = ['flac','m4a','mp3','mp4','mpeg','mpga','oga','ogg','wav','webm']
+
+@app.route("/transcribe", methods=["POST", "OPTIONS"])
 def transcribe():
+    # Handle preflight quickly (if the browser does one)
+    if request.method == "OPTIONS":
+        return ("", 204)
+
     if "audio_data" not in request.files:
         return jsonify({"error": "No audio file provided"}), 400
 
     audio_file = request.files["audio_data"]
-    supported = ['flac','m4a','mp3','mp4','mpeg','mpga','oga','ogg','wav','webm']
-    ext = audio_file.filename.split('.')[-1].lower()
-    if ext not in supported:
-        return jsonify({"error": f"Unsupported file format: {ext}. Supported: {supported}"}), 400
+    # infer extension safely
+    filename = audio_file.filename or "audio"
+    ext = filename.rsplit(".", 1)[-1].lower() if "." in filename else ""
+    if ext not in SUPPORTED_FORMATS:
+        # try guessing from mimetype if filename has no ext
+        guessed = (audio_file.mimetype or "").split("/")[-1].lower()
+        if guessed in SUPPORTED_FORMATS:
+            ext = guessed
+        else:
+            return jsonify({
+                "error": f"Unsupported file format: {ext or 'unknown'}. "
+                         f"Supported: {SUPPORTED_FORMATS}"
+            }), 400
 
     with tempfile.NamedTemporaryFile(delete=False, suffix=f".{ext}") as tmp:
         audio_file.save(tmp.name)
         temp_path = tmp.name
 
     try:
-        # Whisper transcription (English)
         with open(temp_path, "rb") as f:
-            # whisper-1 or gpt-4o-transcribe depending on availability
-            result = client.audio.transcriptions.create(
+            res = client.audio.transcriptions.create(
                 model="whisper-1",
                 file=f,
                 response_format="text"
             )
-        transcript_text = result if isinstance(result, str) else str(result)
+        # some SDKs return raw text when response_format="text"
+        transcript_text = getattr(res, "text", None) if not isinstance(res, str) else res
+        if transcript_text is None:
+            transcript_text = str(res)
     finally:
-        try: os.remove(temp_path)
-        except: pass
+        try:
+            os.remove(temp_path)
+        except Exception:
+            pass
 
-    return jsonify({"transcript": transcript_text})
+    return jsonify({"transcript": (transcript_text or "").strip()})
+
 
 
 # Mount BOTH spellings to avoid client/server mismatch
@@ -2777,49 +2796,6 @@ def meds_analyze_stream():
             yield chunk
 
     return Response(stream_with_context(generate()), content_type="text/plain")
-# ============================== Speech-to-Text ==============================
-SUPPORTED_FORMATS = ['flac', 'm4a', 'mp3', 'mp4', 'mpeg', 'mpga', 'oga', 'ogg', 'wav', 'webm']
-
-def speech_to_text(path: str) -> dict:
-    with open(path, "rb") as f:
-        res = client.audio.transcriptions.create(
-            model="whisper-1",
-            file=f,
-            response_format="text"   # simplest: returns raw text string
-        )
-    # Some SDKs return a str directly for response_format="text"
-    text = getattr(res, "text", None)
-    if isinstance(res, str) and not text:
-        text = res
-    return {"text": (text or "").strip()}
-
-@app.route("/transcribe_widget", methods=["POST"])
-def transcribe_widget():
-    if "audio_data" not in request.files:
-        return jsonify({"error": "No audio file provided"}), 400
-
-    audio_file = request.files["audio_data"]
-    file_extension = (audio_file.filename.rsplit(".", 1)[-1] if "." in audio_file.filename else "").lower()
-
-    if file_extension not in SUPPORTED_FORMATS:
-        return jsonify({
-            "error": f"Unsupported file format: {file_extension}. "
-                     f"Supported formats: {SUPPORTED_FORMATS}"
-        }), 400
-
-    with tempfile.NamedTemporaryFile(delete=False, suffix=f".{file_extension}") as tmp:
-        audio_file.save(tmp.name)
-        temp_path = tmp.name
-
-    try:
-        transcript_result = speech_to_text(temp_path)
-    finally:
-        try:
-            os.remove(temp_path)
-        except Exception:
-            pass
-
-    return jsonify({"transcript": transcript_result.get("text", "")})
 # ============================== Medical Vision ==============================
 # In-memory caches (swap to Redis/DB in production)
 VISION_CACHE = {}        # image_id -> {"data_url": ..., "meta": {...}, "session_id": ...}

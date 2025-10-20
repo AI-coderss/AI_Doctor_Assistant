@@ -3011,9 +3011,7 @@ REALTIME_VOICE     = os.getenv("OPENAI_REALTIME_VOICE", "ballad")
 
 LIST_MODEL         = os.getenv("OPENAI_LIST_MODEL", "gpt-4o-mini")
 
-# ---------- Flask ----------
-app = Flask(__name__)
-CORS(app, supports_credentials=True)
+
 
 # ---------- Optional RAG (Qdrant) ----------
 vector_store = None

@@ -1,12 +1,13 @@
 /* eslint-disable no-useless-concat */
 /* eslint-disable react-hooks/exhaustive-deps */
+/* eslint-disable no-unused-vars */
 import React, { useEffect, useRef, useState } from "react";
 import "../styles/lab-voice-agent.css";
 import BaseOrb from "./BaseOrb.jsx";
 import { FaMicrophoneAlt, FaFlask, FaTimes } from "react-icons/fa";
 import { motion, AnimatePresence, Reorder } from "framer-motion";
 
-/* 🔊 Visualizer + audio store (adjust paths if different in your app) */
+/* 🔊 Visualizer + audio store (adjust paths if your app differs) */
 import useAudioForVisualizerStore from "../store/useAudioForVisualizerStore.js";
 import useAudioStore from "../store/audioStore.js";
 import { startVolumeMonitoring } from "./audioLevelAnalyzer";
@@ -22,19 +23,13 @@ import { startVolumeMonitoring } from "./audioLevelAnalyzer";
  *  - sessionId: string
  *  - backendBase: string
  *  - context: string
- *  - onApproveLab: (item: {name, why?, priority?}) => void
+ *  - onApproveLab: (item: {id, name, why?, priority?}) => void
  *
  * Backend endpoints:
  *  POST /lab-agent/context        { session_id, context }
  *  POST /lab-agent/suggest-stream { session_id }  SSE "data: {json}\n\n"
- *      {type:"text"|"delta", content:"..."}
- *      {type:"suggestion", item:{name, why?, priority?}}
- *      {type:"ask", prompt:"Approve CBC?"}
- *      {type:"approved", item:{...}}
- *      {type:"rejected", item:{...}}
- *      {type:"end"}
  *  POST /lab-agent/rtc-connect?session_id=...  (Content-Type: application/sdp)
- *  POST /lab-agent/tool-bridge  { session_id, tool, args }
+ *  POST /lab-agent/tool-bridge    { session_id, tool, args }
  */
 
 export default function LabVoiceAgent({
@@ -48,11 +43,11 @@ export default function LabVoiceAgent({
   const [status, setStatus] = useState("idle");      // idle | prepping | connected | error
   const [micActive, setMicActive] = useState(false);
   const [streamingText, setStreamingText] = useState("");
-  const [pendingQueue, setPendingQueue] = useState([]);   // suggestions awaiting approval
-  const [approvedLocal, setApprovedLocal] = useState([]); // session-only display
+  const [pendingQueue, setPendingQueue] = useState([]);   // [{id, name, why, priority}]
+  const [approvedLocal, setApprovedLocal] = useState([]); // [{id, name, why, priority}]
   const [askingText, setAskingText] = useState("");
 
-  // Reorder state for framer-motion
+  // Reorder state for framer-motion (must share the same objects)
   const [reorderList, setReorderList] = useState([]);
 
   // WebRTC
@@ -60,7 +55,7 @@ export default function LabVoiceAgent({
   const localStreamRef = useRef(null);
   const remoteAudioRef = useRef(null);
 
-  // Streams
+  // SSE
   const sseAbortRef = useRef(null);
   const sseReaderRef = useRef(null);
 
@@ -73,6 +68,9 @@ export default function LabVoiceAgent({
   // Visualizer stores
   const { setAudioScale } = useAudioForVisualizerStore.getState();
   const { setAudioUrl } = useAudioStore();
+
+  // Local monotonic id counter (stable keys)
+  const seqRef = useRef(0);
 
   const appendText = (s) => {
     textBufRef.current += s;
@@ -152,25 +150,28 @@ export default function LabVoiceAgent({
         try { startVolumeMonitoring(remoteStream, setAudioScale); } catch {}
       };
 
-      // Server-created (or model-created) data channel — accept ANY label
+      // Accept any DataChannel label; wire for LLM tool-calls + JSON events
       pc.ondatachannel = (e) => {
         const ch = e.channel;
         if (!ch) return;
         wireDataChannel(ch);
       };
 
-      // Connection state
       pc.onconnectionstatechange = () => {
         if (pc.connectionState === "connected") {
           setStatus("connected");
           setMicActive(true);
-        } else if (pc.connectionState === "failed" || pc.connectionState === "closed" || pc.connectionState === "disconnected") {
+        } else if (
+          pc.connectionState === "failed" ||
+          pc.connectionState === "closed" ||
+          pc.connectionState === "disconnected"
+        ) {
           setStatus("error");
           setMicActive(false);
         }
       };
 
-      // Offer/Answer via Flask
+      // SDP Offer/Answer
       const offer = await pc.createOffer({ offerToReceiveAudio: true, offerToReceiveVideo: false });
       const patchedOffer = {
         ...offer,
@@ -202,7 +203,7 @@ export default function LabVoiceAgent({
       let msg = null;
       try { msg = JSON.parse(raw); } catch {}
 
-      // 1) Tool-calling deltas (new style)
+      // 1) Realtime tool-calling deltas
       if (msg && (msg.type === "response.function_call.arguments.delta" || msg.type === "tool_call.delta")) {
         const id = msg.call_id || msg.id || "default";
         const name = msg.name || msg.function_name || "";
@@ -214,7 +215,7 @@ export default function LabVoiceAgent({
         return;
       }
 
-      // 2) Tool call completed
+      // 2) Realtime tool-calling completed
       if (msg && (msg.type === "response.function_call.completed" || msg.type === "tool_call.completed")) {
         const id = msg.call_id || msg.id || "default";
         const buf = toolBuffersRef.current.get(id);
@@ -230,20 +231,19 @@ export default function LabVoiceAgent({
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ session_id: sessionId, tool, args }),
         })
-        .then((r) => r.json())
-        .then((data) => {
-          // reflect instantly in the UI if the backend applied it
-          if (data?.applied && (tool === "approve_lab" || tool === "add_lab_manual")) {
-            const item = normalizeItem(data.item || args);
-            if (!item) return;
-            applyApproved(item);
-          }
-        })
-        .catch((e) => console.error("tool-bridge failed:", e));
+          .then((r) => r.json())
+          .then((data) => {
+            if (data?.applied && (tool === "approve_lab" || tool === "add_lab_manual")) {
+              const item = normalizeItem(data.item || args, true);
+              if (!item) return;
+              applyApproved(item);
+            }
+          })
+          .catch((e) => console.error("tool-bridge failed:", e));
         return;
       }
 
-      // 3) If JSON event frame (e.g., {type:"approved",...})
+      // 3) Structured JSON event
       if (msg && msg.type) {
         handleStreamEvent(msg);
         return;
@@ -317,13 +317,13 @@ export default function LabVoiceAgent({
         if (done) break;
         buf += decoder.decode(value, { stream: true });
 
-        // split by SSE frames
+        // split by SSE frames (prevents partial dupes)
         const frames = buf.split("\n\n");
         buf = frames.pop() ?? "";
-        for (const f of frames) {
-          const line = f.trim();
+
+        for (const frame of frames) {
+          const line = frame.trim();
           if (!line) continue;
-          // Support both "data: {...}" and raw JSON
           const payload = line.startsWith("data:") ? line.slice(5).trim() : line;
           if (!payload) continue;
           try {
@@ -343,20 +343,33 @@ export default function LabVoiceAgent({
   };
 
   // === Helpers ===
-  const normalizeItem = (raw) => {
+  const makeId = (name) => {
+    // stable-enough unique key for this session render
+    const seq = ++seqRef.current;
+    const slug = String(name || "").toLowerCase().replace(/\s+/g, "-").replace(/[^a-z0-9\-().+/]/g, "");
+    return `${slug}::${Date.now()}::${seq}`;
+  };
+
+  const normalizeItem = (raw, forceId = false) => {
     if (!raw) return null;
     const name = ((raw.name || raw.test || "") + "").trim();
     if (!name) return null;
-    return {
+    const base = {
+      id: raw.id && !forceId ? String(raw.id) : makeId(name),
       name,
       why: raw.why ? String(raw.why).trim() : "",
       priority: raw.priority ? String(raw.priority).trim() : "",
     };
+    return base;
   };
 
+  const hasByName = (arr, nm) =>
+    (arr || []).some((x) => String(x.name || "").trim().toLowerCase() === String(nm || "").trim().toLowerCase());
+
   const removePendingByName = (nm) => {
-    setPendingQueue((prev) => prev.filter((x) => x.name.toLowerCase() !== nm.toLowerCase()));
-    setReorderList((prev) => prev.filter((x) => x.name.toLowerCase() !== nm.toLowerCase()));
+    const low = String(nm || "").toLowerCase();
+    setPendingQueue((prev) => prev.filter((x) => (x.name || "").toLowerCase() !== low));
+    setReorderList((prev) => prev.filter((x) => (x.name || "").toLowerCase() !== low));
   };
 
   // Fallback: approve from plain text like "Approved CBC" / "yes add CMP"
@@ -367,10 +380,9 @@ export default function LabVoiceAgent({
     const name = (m[2] || "").trim();
     if (!name) return;
 
-    const exists = approvedLocal.some((x) => x.name.toLowerCase() === name.toLowerCase());
-    if (exists) return;
+    if (hasByName(approvedLocal, name)) return;
 
-    const item = { name };
+    const item = normalizeItem({ name }, true);
     applyApproved(item);
   };
 
@@ -379,7 +391,8 @@ export default function LabVoiceAgent({
     if (!nm) return;
 
     removePendingByName(nm);
-    setApprovedLocal((prev) => (prev.some((x) => x.name.toLowerCase() === nm.toLowerCase()) ? prev : [...prev, item]));
+
+    setApprovedLocal((prev) => (hasByName(prev, nm) ? prev : [...prev, item]));
     try { onApproveLab?.(item); } catch {}
     if (askingText && askingText.toLowerCase().includes(nm.toLowerCase())) setAskingText("");
   };
@@ -398,11 +411,12 @@ export default function LabVoiceAgent({
     }
 
     if (t === "suggestion" || t === "pending" || t === "proposed") {
-      const itm = normalizeItem(msg.item || msg);
+      const itm = normalizeItem(msg.item || msg, true);
       if (!itm) return;
-      // de-dupe against approved/pending
-      if (approvedLocal.some((x) => x.name.toLowerCase() === itm.name.toLowerCase())) return;
-      if (pendingQueue.some((x) => x.name.toLowerCase() === itm.name.toLowerCase())) return;
+
+      // De-dupe by NAME against both pending & approved
+      if (hasByName(approvedLocal, itm.name)) return;
+      if (hasByName(pendingQueue, itm.name)) return;
 
       setPendingQueue((prev) => {
         const next = [...prev, itm];
@@ -418,14 +432,14 @@ export default function LabVoiceAgent({
     }
 
     if (t === "approved" || t === "approval" || t === "lab_approved") {
-      const itm = normalizeItem(msg.item || msg);
+      const itm = normalizeItem(msg.item || msg, true);
       if (!itm) return;
       applyApproved(itm);
       return;
     }
 
     if (t === "rejected" || t === "lab_rejected") {
-      const itm = normalizeItem(msg.item || msg);
+      const itm = normalizeItem(msg.item || msg, true);
       if (!itm) return;
       removePendingByName(itm.name);
       if (askingText && itm.name && askingText.toLowerCase().includes(itm.name.toLowerCase())) {
@@ -490,8 +504,8 @@ export default function LabVoiceAgent({
               Approved in this session <span className="pill">{approvedLocal.length}</span>
             </div>
             <div className="approved-list">
-              {approvedLocal.map((a, i) => (
-                <span key={`${a.name}-${i}`} className="chip-approved">
+              {approvedLocal.map((a) => (
+                <span key={a.id} className="chip-approved">
                   {a.name}{a.priority ? ` • ${a.priority}` : ""}{a.why ? ` — ${a.why}` : ""}
                 </span>
               ))}
@@ -515,9 +529,9 @@ export default function LabVoiceAgent({
         <FaMicrophoneAlt />
       </button>
 
-      {/* === DRAGGABLE PENDING SUGGESTIONS === */}
+      {/* === DRAGGABLE PENDING SUGGESTIONS (unique keys!) === */}
       <AnimatePresence>
-        {pendingQueue.length > 0 && (
+        {reorderList.length > 0 && (
           <motion.div
             key="pending-dock"
             className="pending-dock"
@@ -539,7 +553,7 @@ export default function LabVoiceAgent({
             >
               {reorderList.map((s) => (
                 <Reorder.Item
-                  key={s.name}
+                  key={s.id}          
                   value={s}
                   className="pending-item"
                   whileDrag={{ scale: 1.02 }}
@@ -564,3 +578,4 @@ export default function LabVoiceAgent({
     </div>
   );
 }
+

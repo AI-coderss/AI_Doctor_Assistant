@@ -7,7 +7,7 @@ from datetime import datetime
 import json
 import logging
 import requests
-import re
+import os, re, json, time, queue, threading
 import base64
 import hashlib
 import unicodedata
@@ -31,7 +31,7 @@ from langchain.chains.combine_documents import create_stuff_documents_chain
 # Load env vars
 load_dotenv()
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
-
+oai = OpenAI(api_key=OPENAI_API_KEY)
 if not OPENAI_API_KEY:
     raise RuntimeError("Missing OPENAI_API_KEY")
 # ===== Adaptive Specialty Templates (session-scoped) =====
@@ -3052,26 +3052,27 @@ def vision_analyze():
         return jsonify(error=str(e)), 500
 # Try to use your project's prompt; fall back if not present
 
-
 SYSTEM_PROMPT = (
-        "You are a clinical lab-test recommender assisting a physician.\n"
-        "- Speak concisely.\n"
-        "- Suggest high-yield diagnostic/staging lab tests ONE AT A TIME.\n"
-        "- After each suggestion, WAIT for the doctor to approve or skip.\n"
-        "- If approved, briefly confirm and move to the next.\n"
-        "- Avoid duplicates and low-yield screening tests.\n"
-        "- If context indicates a clear workflow (rule-out/in, staging, monitoring), say that first."
-    )
-
-OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
-if not OPENAI_API_KEY:
-    raise EnvironmentError("OPENAI_API_KEY is required")
+    "You are a clinical lab-test recommender assisting a physician.\n"
+    "- Speak concisely.\n"
+    "- Suggest high-yield diagnostic/staging lab tests ONE AT A TIME.\n"
+    "- After each suggestion, WAIT for the doctor to approve or skip.\n"
+    "- If approved, briefly confirm and move to the next.\n"
+    "- Avoid duplicates and low-yield screening tests.\n"
+    "- If context indicates a clear workflow (rule-out/in, staging, monitoring), say that first."
+)
 
 # Realtime API endpoints / model
 OPENAI_SESSION_URL = "https://api.openai.com/v1/realtime/sessions"
 OPENAI_RTC_URL     = "https://api.openai.com/v1/realtime"
 REALTIME_MODEL     = os.getenv("OPENAI_REALTIME_MODEL", "gpt-4o-realtime-preview-2024-12-17")
 REALTIME_VOICE     = os.getenv("OPENAI_REALTIME_VOICE", "ballad")
+
+LIST_MODEL         = os.getenv("OPENAI_LIST_MODEL", "gpt-4o-mini")
+
+# ---------- Flask ----------
+app = Flask(__name__)
+CORS(app, supports_credentials=True)
 
 # ---------- Optional RAG (Qdrant) ----------
 vector_store = None
@@ -3083,28 +3084,21 @@ def _maybe_init_vector_store():
         import qdrant_client
         from langchain_openai import OpenAIEmbeddings
         from langchain_qdrant import Qdrant
-
         qdrant_url = os.getenv("QDRANT_HOST")
         qdrant_key = os.getenv("QDRANT_API_KEY")
         qdrant_col = os.getenv("QDRANT_COLLECTION_NAME")
         if not (qdrant_url and qdrant_col):
             return
-
         client = qdrant_client.QdrantClient(url=qdrant_url, api_key=qdrant_key)
         embeddings = OpenAIEmbeddings()
         vector_store = Qdrant(client=client, collection_name=qdrant_col, embeddings=embeddings)
-    except Exception as e:
-        # RAG is optional; keep running without it
-        try:
-            app.logger.warning(f"RAG init skipped: {e}")
-        except Exception:
-            pass
+    except Exception:
+        vector_store = None
 
 _maybe_init_vector_store()
 
 # ---------- Session-scoped storage ----------
-# Tracks case context and approved tests for each session
-LAB_SESS = {}  # { session_id: { "context": str, "approved": [ {name, why?, priority?} ] } }
+LAB_SESS: Dict[str, Dict[str, Any]] = {}  # { session_id: { "context": str, "approved": [ {name, why?, priority?} ] } }
 
 def _sess(session_id: str):
     st = LAB_SESS.get(session_id)
@@ -3113,16 +3107,7 @@ def _sess(session_id: str):
         LAB_SESS[session_id] = st
     return st
 
-def _dedupe(items):
-    seen, out = set(), []
-    for it in items or []:
-        nm = (it.get("name") or "").strip().lower()
-        if nm and nm not in seen:
-            seen.add(nm)
-            out.append(it)
-    return out
-
-def _normalize_row(x):
+def _normalize_row(x: Any):
     if not isinstance(x, dict):
         return None
     name = (x.get("name") or x.get("test") or "").strip()
@@ -3169,47 +3154,48 @@ def _build_context_instructions(transcript: str, approved):
         "---\n"
     )
 
+# ---------- Simple per-session event bus for SSE ----------
+EVENTS: Dict[str, "queue.Queue[dict]"] = {}  # session_id -> Queue
+
+def _events_q(session_id: str) -> "queue.Queue":
+    q = EVENTS.get(session_id)
+    if q is None:
+        q = queue.Queue()
+        EVENTS[session_id] = q
+    return q
+
+def _emit(session_id: str, obj: dict):
+    try:
+        _events_q(session_id).put(obj)
+    except Exception:
+        pass
+
+def _sse(obj: dict) -> str:
+    return "data: " + json.dumps(obj, ensure_ascii=False) + "\n\n"
+
 # ----------------------------- Endpoints -------------------------------------
 
-# Set/replace context for a session
+# (Compatibility) set general context used elsewhere
+@app.post("/set-context")
+def set_context():
+    data = request.get_json(silent=True) or {}
+    session_id = data.get("session_id") or str(uuid4())
+    transcript = (data.get("transcript") or "").strip()
+    st = _sess(session_id)
+    # Merge with existing:
+    st["context"] = transcript if transcript else st.get("context", "")
+    return jsonify({"ok": True, "session_id": session_id, "context_len": len(st["context"])}), 200
+
 # ---------- Lab Agent: set session context ----------
 @app.post("/lab-agent/context")
 def lab_agent_set_context():
     data = request.get_json(silent=True) or {}
     session_id = data.get("session_id") or str(uuid4())
-    context = (data.get("context") or "").strip()
+    context = (data.get("context") or "").trim() if hasattr(str, "trim") else (data.get("context") or "").strip()
     st = _sess(session_id)
     st["context"] = context
     return jsonify({"ok": True, "session_id": session_id, "approved_count": len(st["approved"])}), 200
 
-
-# Approve a single suggestion
-# ---------- Lab Agent: approve a suggested test ----------
-@app.post("/lab-agent/approve")
-def lab_agent_approve():
-    data = request.get_json(silent=True) or {}
-    session_id = data.get("session_id") or ""
-    if not session_id:
-        return jsonify({"ok": False, "error": "Missing session_id"}), 400
-
-    item = _normalize_row(data.get("item"))
-    if not item:
-        return jsonify({"ok": False, "error": "Invalid item"}), 400
-
-    st = _sess(session_id)
-    # de-dup by case-insensitive name
-    if all((x.get("name") or "").strip().lower() != item["name"].strip().lower() for x in st["approved"]):
-        st["approved"].append(item)
-
-    return jsonify({
-        "ok": True,
-        "session_id": session_id,
-        "item": item,
-        "approved_count": len(st["approved"]),
-    }), 200
-
-
-# List current approvals
 # ---------- Lab Agent: list current approvals ----------
 @app.get("/lab-agent/list")
 def lab_agent_list():
@@ -3217,31 +3203,82 @@ def lab_agent_list():
     if not session_id:
         return jsonify({"ok": False, "error": "Missing session_id"}), 400
     st = _sess(session_id)
-
-    # IMPORTANT: return "labs" (for the front-end) and keep "approved" for backward compatibility
     approved = st.get("approved", []) or []
     return jsonify({
         "ok": True,
         "session_id": session_id,
-        "labs": approved,                # <— new alias expected by Chat.jsx
-        "approved": approved,            # <— keep existing key (non-breaking)
+        "labs": approved,     # alias expected by frontend
+        "approved": approved,
         "context_len": len(st.get("context") or ""),
     }), 200
 
-# Suggest stream (server-sent style over a fetch/read loop) — no conversation_rag_chain required
-# ---------- Lab Agent: stream suggestions (SSE-ish over fetch/read) ----------
+# ---------- Lab Agent: realtime tool bridge (from front-end DC tool calls) ----------
+@app.post("/lab-agent/tool-bridge")
+def lab_agent_tool_bridge():
+    data = request.get_json(silent=True) or {}
+    session_id = data.get("session_id") or ""
+    tool = (data.get("tool") or "").strip()
+    args = data.get("args") or {}
+    if not session_id or not tool:
+        return jsonify({"ok": False, "error": "Missing session_id or tool"}), 400
+    st = _sess(session_id)
+
+    if tool in ("approve_lab", "add_lab_manual"):
+        item = _normalize_row(args) or {}
+        if item.get("name"):
+            if all((x.get("name") or "").strip().lower() != item["name"].strip().lower() for x in st["approved"]):
+                st["approved"].append(item)
+            # push SSE event so any subscriber can reflect instantly
+            _emit(session_id, {"type": "approved", "item": item})
+            return jsonify({"ok": True, "applied": True, "item": item, "approved_count": len(st["approved"])}), 200
+        return jsonify({"ok": False, "error": "Invalid item"}), 400
+
+    elif tool == "reject_lab":
+        item = _normalize_row(args) or {}
+        # For now we just emit rejection info
+        _emit(session_id, {"type": "rejected", "item": item})
+        return jsonify({"ok": True, "applied": True}), 200
+
+    return jsonify({"ok": False, "error": f"Unknown tool '{tool}'"}), 400
+
+# ---------- Lab Agent: SSE events channel (optional) ----------
+@app.get("/lab-agent/events")
+def lab_agent_events():
+    session_id = request.args.get("session_id") or ""
+    if not session_id:
+        return Response(_sse({"type": "error", "content": "Missing session_id"}), mimetype="text/event-stream")
+    q = _events_q(session_id)
+
+    def gen():
+        # Send hello
+        yield _sse({"type": "hello", "ts": time.time()})
+        while True:
+            try:
+                obj = q.get(timeout=60)
+            except Exception:
+                # keep-alive
+                yield _sse({"type": "ping", "ts": time.time()})
+                continue
+            yield _sse(obj)
+
+    headers = {
+        "Content-Type": "text/event-stream; charset=utf-8",
+        "Cache-Control": "no-cache, no-transform",
+        "X-Accel-Buffering": "no",
+        "Connection": "keep-alive",
+    }
+    return Response(stream_with_context(gen()), headers=headers)
+
+# ---------- Lab Agent: LLM suggestions stream (context-driven JSON; NO defaults) ----------
 @app.post("/lab-agent/suggest-stream")
 def lab_agent_suggest_stream():
     data = request.get_json(silent=True) or {}
     session_id = data.get("session_id") or ""
     if not session_id:
-        # send a small SSE line the client can parse
-        return Response("data: " + json.dumps({"type": "text", "content": "Missing session_id"}) + "\n\n",
-                        mimetype="text/event-stream")
+        return Response(_sse({"type": "text", "content": "Missing session_id"}), mimetype="text/event-stream")
 
     st = _sess(session_id)
 
-    # Build a JSON-only instruction (frontend still approves one-by-one)
     prompt = (
         "Return STRICT JSON ONLY (no prose): an array of up to 8 objects with EXACT keys "
         'name, why, priority. Example: '
@@ -3250,52 +3287,38 @@ def lab_agent_suggest_stream():
     )
     prompt += _build_context_instructions(st.get("context"), st.get("approved"))
 
-    def emit(obj):
-        return "data: " + json.dumps(obj, ensure_ascii=False) + "\n\n"
-
-    def _dedupe(items):
-        seen = set()
-        out = []
-        for it in items:
-            key = (it.get("name") or "").strip().lower()
-            if key and key not in seen:
-                seen.add(key)
-                out.append(it)
-        return out
-
-    def _json_from_text(s):
-        import re, json as _json
+    def _json_from_text(s: str) -> List[dict]:
         if not s:
             return []
+        # prefer fenced json
         m = re.search(r"```json([\s\S]*?)```", s)
         if m:
             s = m.group(1)
-        # try to find a top-level array/object
+        # grab top-level array if present
         first, last = s.find("["), s.rfind("]")
         if first != -1 and last > first:
             s = s[first:last+1]
-        else:
-            first, last = s.find("{"), s.rfind("}")
-            if first != -1 and last > first:
-                s = s[first:last+1]
         try:
-            obj = _json.loads(s)
+            obj = json.loads(s)
             return obj if isinstance(obj, list) else [obj]
         except Exception:
             return []
 
+    def emit(obj):
+        return _sse(obj)
+
     def generate():
-        # 1) call LLM (non-stream)
+        # 1) call LLM (non-stream) to fetch list
         try:
-            from openai import OpenAI
-            client = OpenAI(api_key=OPENAI_API_KEY)
-            resp = client.chat.completions.create(
-                model=os.getenv("OPENAI_LIST_MODEL", "gpt-4o-mini"),
-                messages=[{"role": "system", "content": "Return JSON only."},
-                          {"role": "user", "content": prompt}],
+            resp = oai.chat.completions.create(
+                model=LIST_MODEL,
+                messages=[
+                    {"role": "system", "content": "Return JSON only."},
+                    {"role": "user", "content": prompt}
+                ],
                 temperature=0.2,
             )
-            txt = resp.choices[0].message.content or "[]"
+            txt = (resp.choices[0].message.content or "[]").strip()
         except Exception as e:
             yield emit({"type": "text", "content": f"[LLM error: {e}]"})
             yield emit({"type": "end"})
@@ -3305,30 +3328,21 @@ def lab_agent_suggest_stream():
         raw_items = _json_from_text(txt)
         norm = []
         for x in (raw_items or [])[:8]:
-            name = (x.get("name") or x.get("test") or "").strip()
-            if not name:
+            item = _normalize_row(x)
+            if not item:
                 continue
-            norm.append({
-                "name": name,
-                "why": (x.get("why") or "").strip(),
-                "priority": (x.get("priority") or "").strip(),  # STAT | High | Routine
-            })
-
-        # 3) filter out already-approved, dedupe
-        items = []
-        for it in norm:
-            if any((a.get("name") or "").strip().lower() == it["name"].strip().lower() for a in st["approved"]):
+            # filter already-approved
+            if any((a.get("name") or "").strip().lower() == item["name"].strip().lower() for a in st["approved"]):
                 continue
-            items.append(it)
-        items = _dedupe(items)
+            norm.append(item)
 
-        if not items:
+        if not norm:
             yield emit({"type": "text", "content": "No new structured suggestions."})
             yield emit({"type": "end"})
             return
 
-        # 4) emit suggestions one-by-one
-        for it in items:
+        # 3) emit suggestions one-by-one as SSE frames
+        for it in norm:
             yield emit({"type": "suggestion", "item": it})
         yield emit({"type": "end"})
 
@@ -3340,25 +3354,66 @@ def lab_agent_suggest_stream():
     }
     return Response(stream_with_context(generate()), headers=headers)
 
-
 # ---------- Lab Agent: WebRTC (browser offer -> OpenAI Realtime -> answer) ----------
 @app.post("/lab-agent/rtc-connect")
 def lab_agent_rtc_connect():
-    # Browser sends an SDP offer body with Content-Type: application/sdp
     offer_sdp = request.get_data(as_text=True)
     if not offer_sdp:
         return Response("No SDP provided", status=400, mimetype="text/plain")
 
     session_id = request.args.get("session_id") or request.headers.get("X-Session-Id") or str(uuid4())
     st = _sess(session_id)
-
-    # Merge your system prompt with session context (and optional RAG)
     merged_instructions = SYSTEM_PROMPT + _build_context_instructions(st.get("context"), st.get("approved"))
 
-    # 1) Create ephemeral Realtime session
+    # Define Realtime tools for function calling
+    tools = [
+        {
+            "type": "function",
+            "name": "approve_lab",
+            "description": "Approve the suggested lab test and add it to the plan.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "name": {"type": "string", "description": "Lab test name"},
+                    "why": {"type": "string", "description": "Rationale for ordering"},
+                    "priority": {"type": "string", "enum": ["STAT", "High", "Routine"]}
+                },
+                "required": ["name"]
+            }
+        },
+        {
+            "type": "function",
+            "name": "reject_lab",
+            "description": "Reject the suggested lab test.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "name": {"type": "string"},
+                    "reason": {"type": "string"}
+                },
+                "required": ["name"]
+            }
+        },
+        {
+            "type": "function",
+            "name": "add_lab_manual",
+            "description": "Add a lab explicitly requested by the doctor.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "name": {"type": "string"},
+                    "why": {"type": "string"},
+                    "priority": {"type": "string", "enum": ["STAT", "High", "Routine"]}
+                },
+                "required": ["name"]
+            }
+        }
+    ]
+
+    # 1) Create ephemeral Realtime session (with tools)
     try:
         headers = {"Authorization": f"Bearer {OPENAI_API_KEY}", "Content-Type": "application/json"}
-        payload = {"model": REALTIME_MODEL, "voice": REALTIME_VOICE, "instructions": merged_instructions}
+        payload = {"model": REALTIME_MODEL, "voice": REALTIME_VOICE, "instructions": merged_instructions, "tools": tools}
         sess = requests.post(OPENAI_SESSION_URL, headers=headers, json=payload, timeout=30)
         if not sess.ok:
             app.logger.error(f"Realtime session create failed: {sess.status_code} {sess.text}")
@@ -3384,10 +3439,14 @@ def lab_agent_rtc_connect():
         app.logger.exception("RTC upstream error")
         return Response(f"RTC upstream error: {e}", status=502, mimetype="text/plain")
 
-    # 3) Return the SDP answer to the browser
     resp = Response(answer, status=200, mimetype="application/sdp")
     resp.headers["Cache-Control"] = "no-cache"
     return resp
+
+# ----------------- (OPTIONAL) health -----------------
+@app.get("/healthz")
+def healthz():
+    return jsonify({"ok": True}), 200
 
 if __name__ == "__main__":
     app.run(host="127.0.0.1", port=5050, debug=True)

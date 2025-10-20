@@ -32,9 +32,6 @@ import LabVoiceAgent from "./LabVoiceAgent.jsx";
 let localStream;
 const BACKEND_BASE = "https://ai-doctor-assistant-backend-server.onrender.com";
 
-// 🧪 NEW: manual “add lab” chat command (very small, additive)
-const ADD_LAB_CMD_RE = /^(?:add|order)\s+(?:lab|test)s?\s*[:\-]\s*(.+)$/i;
-
 // Force fixed-position pieces to play nicely in the drawer + Second Opinion styling (no accordions).
 const drawerComponentOverrides = `
   /* Drawer grid + spacing */
@@ -135,14 +132,11 @@ const drawerComponentOverrides = `
     --donut-subtext: #6B7280;
   }
 
-  /* Required labs bubble */
+  /* Approved labs bubble (TABLE) */
   .req-labs { border: 1px solid rgba(0,0,0,0.08); border-radius: 14px; background: #fff; padding: 12px; }
   .req-labs .title { font-weight: 800; margin-bottom: 8px; }
-  .req-chip {
-    display:inline-flex; align-items:center; gap:8px; padding:6px 10px; border-radius:12px;
-    border:1px solid rgba(0,0,0,0.08); margin: 4px 6px 0 0; background: #f8fafc; font-size: 12.5px;
-  }
-  .req-chip .why { opacity: .7; font-size: 11.5px; }
+  .req-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  .req-table th, .req-table td { border-bottom: 1px solid rgba(0,0,0,0.06); padding: 8px 6px; text-align: left; }
 `;
 
 /** Normalize bot markdown a bit */
@@ -375,16 +369,19 @@ function RequiredLabsBubble({ items = [] }) {
   if (!items.length) return null;
   return (
     <div className="req-labs">
-      <div className="title">Required Labs (approved)</div>
-      <div>
-        {items.map((it, idx) => (
-          <span key={idx} className="req-chip">
-            <strong>{it.name}</strong>
-            {it.priority && <span> • {it.priority}</span>}
-            {it.why && <span className="why"> ({it.why})</span>}
-          </span>
-        ))}
-      </div>
+      <div className="title">Approved Lab Plan</div>
+      <table className="req-table" role="table" aria-label="Approved labs">
+        <thead><tr><th>Test</th><th>Why</th><th>Priority</th></tr></thead>
+        <tbody>
+          {items.map((it, idx) => (
+            <tr key={idx}>
+              <td><strong>{it.name}</strong></td>
+              <td>{it.why || "—"}</td>
+              <td>{it.priority || "—"}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
     </div>
   );
 }
@@ -418,17 +415,16 @@ const Chat = () => {
   const audioPlayerRef = useRef(null);
   const toggleSfxRef = useRef(null);
 
-  const [sessionId] = useState(() => {
-    const id = localStorage.getItem("sessionId") || crypto.randomUUID();
-    localStorage.setItem("sessionId", id);
-    return id;
-  });
+  const [sessionId] = useState(() => crypto.randomUUID()); // ✅ no localStorage
 
   const liveText = useLiveTranscriptStore((s) => s.text);
   const isStreaming = useLiveTranscriptStore((s) => s.isStreaming);
 
   const liveIdxRef = useRef(null);
   const finalizeTimerRef = useRef(null);
+
+  // Track the single, growing "approved labs table" bubble index
+  const reqBubbleIdxRef = useRef(null);
 
   useEffect(() => {
     toggleSfxRef.current = new Howl({
@@ -464,7 +460,7 @@ const Chat = () => {
           if (Array.isArray(data?.labs)) {
             setRequiredLabs(data.labs);
             if (data.labs.length) {
-              setChats((prev) => [...prev, { who: "bot", type: "requiredLabs", labs: data.labs }]);
+              injectOrUpdateApprovedBubble(data.labs);
             }
           }
         }
@@ -613,51 +609,9 @@ const Chat = () => {
     try { if (toggleSfxRef.current) { toggleSfxRef.current.stop(); toggleSfxRef.current.play(); } } catch {}
   };
 
-  // 🧪 NEW: helper to approve a lab through backend (used by chat command)
-  const approveLabViaAPI = async (item) => {
-    try {
-      await fetch(`${BACKEND_BASE}/lab-agent/approve`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ session_id: sessionId, item }),
-      });
-    } catch (e) {
-      console.error("approveLabViaAPI failed:", e);
-    }
-  };
-
-  // Text chat → /stream (+ NEW: intercept “add lab:” command)
+  // Text chat → /stream
   const handleNewMessage = async ({ text, skipEcho = false }) => {
     if (!text || !text.trim()) return;
-
-    // 🧪 NEW: manual "add lab/test" command (no other behavior changed)
-    const cmd = text.match(ADD_LAB_CMD_RE);
-    if (cmd && cmd[1]) {
-      const raw = cmd[1].trim();
-      const item = {
-        name: raw.replace(/\s{2,}/g, " "),
-        why: "(user requested via chat)",
-        priority: "", // optional: parse [STAT] or similar if you decide later
-      };
-
-      // optimistic UI update (preserve your render shape)
-      setRequiredLabs((prev) => {
-        const exists = prev.some((x) => x.name.toLowerCase() === item.name.toLowerCase());
-        const next = exists ? prev : [...prev, item];
-        // also drop a “Required Labs” bubble to reflect new state
-        setChats((p) => [...p, { who: "bot", type: "requiredLabs", labs: next }]);
-        // confirmation message
-        setChats((p) => [...p, { who: "bot", msg: `Added to Required Labs: **${item.name}**.` }]);
-        return next;
-      });
-
-      // hit backend (non-blocking)
-      approveLabViaAPI(item);
-      // we handled it; no need to forward this text to /stream
-      if (!skipEcho) setChats((prev) => [...prev, { msg: text, who: "me" }]);
-      return;
-    }
-
     if (!skipEcho) setChats((prev) => [...prev, { msg: text, who: "me" }]);
 
     const res = await fetch(`${BACKEND_BASE}/stream`, {
@@ -878,6 +832,22 @@ const Chat = () => {
     ].join("\n");
   };
 
+  // === APPROVAL -> grow/update single table bubble ===
+  const injectOrUpdateApprovedBubble = (labsArr) => {
+    setChats((prev) => {
+      const arr = [...prev];
+      const idx = reqBubbleIdxRef.current;
+      if (idx == null || !arr[idx] || arr[idx].type !== "requiredLabs") {
+        arr.push({ who: "bot", type: "requiredLabs", labs: labsArr });
+        reqBubbleIdxRef.current = arr.length - 1;
+        return arr;
+      } else {
+        arr[idx] = { ...arr[idx], labs: labsArr };
+        return arr;
+      }
+    });
+  };
+
   // When a lab is approved inside LabVoiceAgent
   const handleApproveLab = async (item) => {
     const normalized = {
@@ -887,14 +857,12 @@ const Chat = () => {
     };
     if (!normalized.name) return;
 
-    // optimistic update
     setRequiredLabs((prev) => {
       const exists = prev.some((x) => x.name.toLowerCase() === normalized.name.toLowerCase());
-      return exists ? prev : [...prev, normalized];
+      const next = exists ? prev : [...prev, normalized];
+      injectOrUpdateApprovedBubble(next);
+      return next;
     });
-
-    // render/update bubble in chat
-    setChats((prev) => [...prev, { who: "bot", type: "requiredLabs", labs: [...requiredLabs, normalized] }]);
   };
 
   if (isVoiceMode) {
@@ -1437,3 +1405,4 @@ function toNum(x) {
   }
   return NaN;
 }
+

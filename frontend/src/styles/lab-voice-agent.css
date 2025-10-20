@@ -1,15 +1,11 @@
 :root {
     /* Component sizing */
-    --fab-size: 64px;
-    /* mic diameter */
-    --fab-bottom: 20px;
-    /* mic distance from bottom */
-    --ring-size: 102px;
-    /* mic ring size */
+    --fab-size: 64px;            /* mic diameter */
+    --fab-bottom: 20px;          /* mic distance from bottom */
+    --ring-size: 102px;          /* mic ring size */
 
     /* Accents */
-    --accent-blue-1: #007BFF;
-    /* idle blue */
+    --accent-blue-1: #007BFF;    /* idle blue */
     --accent-blue-2: #007BFF;
 
     /* 🔆 BRIGHT neon green for ACTIVE */
@@ -22,77 +18,61 @@
     --card-ink: #0f172a;
     --card-border: rgba(15, 23, 42, 0.08);
     --card-shadow: 0 22px 60px rgba(0, 0, 0, 0.08);
+
+    /* ✅ Unified width so dock matches the assistant */
+    --va-width: clamp(360px, 28vw, 450px);
 }
 
 .voice-assistant {
     position: fixed;
     right: 0;
-    top: 80px;
-    /* Positioned below the assumed 80px header */
-    width: 28%;
-    /* Slightly increased width for better content display */
-    max-width: 450px;
-    /* Set a max-width */
-    height: calc(80vh - 80px);
-    /* Fill remaining viewport height */
-    padding: 20px;
-    /* General padding */
+    top: 80px;                   /* Positioned below the assumed 80px header */
+    width: var(--va-width);      /* unified width */
+    max-width: var(--va-width);  /* unified width */
+    height: calc(80vh - 80px);   /* Fill remaining viewport height */
+    padding: 20px;               /* General padding */
     background: rgba(255, 255, 255, 0.3);
-    /* Slightly more opaque for better visibility */
     backdrop-filter: blur(0.5px);
-    /* Increased blur for stronger visual separation */
     -webkit-backdrop-filter: blur(0.5px);
     border-left: 1px solid rgba(255, 255, 255, 0.4);
-    /* Stronger border for clarity */
-    color: #ffffff;
+    color: #0f172a;              /* dark text by default */
     box-shadow: -6px 0 16px rgba(0, 0, 0, 0.2);
-    /* Deeper shadow */
     z-index: 1000;
     display: flex;
     flex-direction: column;
     box-sizing: border-box;
     margin-top: 0;
-    padding-top: 70px;
-    /* Increased to make space for close button + orb considerations */
-    padding-bottom: 80px;
-    /* Ensure content doesn't go under the mic button */
+    padding-top: 70px;           /* space for close button + orb */
+    padding-bottom: 80px;        /* ensure content doesn't go under the mic button */
 
     /* ✅ Orb sizing variables so the outer ring has room */
-    --orb-size: 240px;
-    /* canvas diameter */
-    --orb-ring-size: calc(var(--orb-size) + 36px);
-    /* outer ring diameter */
+    --orb-size: 240px;           /* canvas diameter */
+    --orb-ring-size: calc(var(--orb-size) + 36px); /* outer ring diameter */
 }
 
 /* Orb container (now holds <BaseOrb /> canvas) */
 .assistant-orb {
     position: absolute;
-    top: 30%;
-    /* Center vertically */
+    top: 30%;                    /* roughly center vertically */
     left: 50%;
     transform: translate(-50%, -50%);
-    /* Center horizontally and pull half its height up */
     width: var(--orb-size);
     height: var(--orb-size);
     border-radius: 50%;
-    object-fit: cover;
-    /* harmless with canvas; kept to preserve original intent */
+    object-fit: cover;           /* harmless with canvas; preserved */
     z-index: 1001;
-    /* Ensure it's above other elements in the assistant */
-    overflow: visible;
-    /* ✅ allow the outer ring to extend beyond the orb */
-    pointer-events: none;
-    /* orb & ring visuals shouldn't block clicks below */
+    overflow: visible;           /* allow outer ring to extend beyond */
+    pointer-events: none;        /* visuals shouldn't block clicks */
 }
 
-/* Ensure BaseOrb canvas fills the container perfectly */
+/* Ensure BaseOrb canvas fills */
 .assistant-orb .base-orb {
     width: 100%;
     height: 100%;
     display: block;
 }
 
-/* ✅ Outer ring around the orb — lightened blue */
+/* Outer ring around the orb — lightened blue */
 .assistant-orb::before {
     content: "";
     position: absolute;
@@ -104,9 +84,7 @@
     border-radius: 50%;
     box-sizing: border-box;
     border: 2px solid rgba(0, 123, 255, 0.28);
-    /* lighter, less concentrated */
     filter: drop-shadow(0 0 12px rgba(0, 123, 255, 0.20));
-    /* lighter glow */
     pointer-events: none;
 }
 
@@ -134,27 +112,22 @@
         transform: translate(-50%, -50%) scale(0.98);
         opacity: 0.7;
     }
-
     50% {
         transform: translate(-50%, -50%) scale(1.02);
         opacity: 1;
     }
-
     100% {
         transform: translate(-50%, -50%) scale(0.98);
         opacity: 0.7;
     }
 }
 
-/* Give content enough top margin to clear the larger orb + ring */
+/* Content area below the orb */
 .assistant-content {
     margin-top: calc(var(--orb-ring-size) + 24px);
     flex: 1;
-    /* Enable scrolling for content if it overflows */
     padding-right: 10px;
-    /* Add some padding for scrollbar */
-    color: #333;
-    /* Ensure content is visible */
+    color: #0f172a; /* ensure readable text */
 }
 
 /* ===== Mic FAB (centered) ===== */
@@ -182,7 +155,6 @@
         inset 0 -6px 10px rgba(0, 0, 0, 0.20),
         inset 0 2px 3px rgba(255, 255, 255, 0.45);
 
-    /* Icon/text always WHITE */
     color: #ffffff !important;
     font-size: 1.65rem;
     line-height: 1;
@@ -250,26 +222,12 @@
     z-index: 0;
 }
 
-.mic-btn>* {
-    position: relative;
-    z-index: 1;
-}
+.mic-btn > * { position: relative; z-index: 1; }
 
 @keyframes mic-ring {
-    0% {
-        opacity: .55;
-        transform: translate(-50%, -50%) scale(1);
-    }
-
-    70% {
-        opacity: .18;
-        transform: translate(-50%, -50%) scale(1.35);
-    }
-
-    100% {
-        opacity: 0;
-        transform: translate(-50%, -50%) scale(1.65);
-    }
+    0%   { opacity: .55; transform: translate(-50%, -50%) scale(1); }
+    70%  { opacity: .18; transform: translate(-50%, -50%) scale(1.35); }
+    100% { opacity: 0;   transform: translate(-50%, -50%) scale(1.65); }
 }
 
 .mic-btn:hover {
@@ -281,7 +239,7 @@
         inset 0 3px 4px rgba(255, 255, 255, 0.5);
 }
 
-/* ===== Active (recording) — BRIGHT GREEN; icon stays WHITE ===== */
+/* Active (recording) — BRIGHT GREEN; icon stays WHITE */
 .mic-btn.mic-active {
     background:
         radial-gradient(120% 120% at 30% 20%, rgba(255, 255, 255, 0.55), transparent 42%),
@@ -295,6 +253,10 @@
     color: #ffffff !important;
 }
 
+@media (min-width: 1025px) {
+    .mic-btn.mic-active { transform: translateX(-50%) scale(1.05); }
+}
+
 .mic-btn.mic-active::after {
     border-color: var(--accent-green-ring);
     box-shadow:
@@ -304,29 +266,16 @@
 }
 
 @keyframes mic-ring-green {
-    0% {
-        opacity: .55;
-        transform: translate(-50%, -50%) scale(0.98);
-    }
-
-    70% {
-        opacity: .18;
-        transform: translate(-50%, -50%) scale(1.40);
-    }
-
-    100% {
-        opacity: 0;
-        transform: translate(-50%, -50%) scale(1.70);
-    }
+    0%   { opacity: .55; transform: translate(-50%, -50%) scale(0.98); }
+    70%  { opacity: .18; transform: translate(-50%, -50%) scale(1.40); }
+    100% { opacity: 0;   transform: translate(-50%, -50%) scale(1.70); }
 }
 
 .close-btn {
     color: white;
     background-color: #ffa3a3;
     width: 40px;
-    /* Adjusted size */
     height: 40px;
-    /* Adjusted size */
     display: flex;
     align-items: center;
     justify-content: center;
@@ -354,27 +303,19 @@
         max-width: none;
         height: auto;
         padding: 16px;
-        margin-top: 160px;
-        /* Adjusted for mobile header */
+        margin-top: 160px;       /* Adjusted for mobile header */
         padding-top: 60px;
-        /* Re-evaluate this based on mobile layout */
         padding-bottom: 70px;
-        /* Re-evaluate for mic button */
         border-left: none;
         border-top: 1px solid rgba(255, 255, 255, 0.2);
         box-shadow: 0 -4px 12px rgba(0, 0, 0, 0.1);
         backdrop-filter: none;
         -webkit-backdrop-filter: none;
     }
-
-    .assistant-orb {
-        display: none;
-    }
-
+    .assistant-orb { display: none; }
     .close-btn {
         position: fixed;
-        bottom: 175px;
-        /* Above mic button */
+        bottom: 175px;            /* Above mic button */
         right: 15px;
         z-index: 1005;
     }
@@ -385,7 +326,6 @@
     max-width: 100%;
     margin-top: 2px;
 }
-
 .waveform-container canvas {
     width: 100% !important;
     display: block;
@@ -394,10 +334,8 @@
 
 .assistant-loader-overlay {
     position: absolute;
-    top: 0;
-    left: 0;
-    width: 100%;
-    height: 100%;
+    top: 0; left: 0;
+    width: 100%; height: 100%;
     backdrop-filter: blur(8px);
     background: rgba(255, 255, 255, 0.2);
     z-index: 10000;
@@ -406,18 +344,15 @@
     justify-content: center;
     pointer-events: none;
 }
-
 .assistant-loader {
     text-align: center;
     color: #000;
     font-weight: 500;
     backdrop-filter: none;
 }
-
 .assistant-loader .spinner {
     margin-top: 10px;
-    width: 30px;
-    height: 30px;
+    width: 30px; height: 30px;
     border: 4px solid #ccc;
     border-top-color: #0a66c2;
     border-radius: 50%;
@@ -428,33 +363,14 @@
     background-color: #10b981;
     box-shadow: 0 0 0 4px rgba(16, 185, 129, 0.3);
 }
-
-@media (min-width: 1025px) {
-    .mic-btn.mic-active {
-        transform: translateX(-50%) scale(1.05);
-    }
-}
-
 .mic-btn.mic-active::after {
     border-color: #10b981;
     animation: mic-radiate-green 1.2s infinite;
 }
-
 @keyframes mic-radiate-green {
-    0% {
-        opacity: 0.4;
-        transform: translate(-50%, -50%) scale(1);
-    }
-
-    70% {
-        opacity: 0.15;
-        transform: translate(-50%, -50%) scale(1.4);
-    }
-
-    100% {
-        opacity: 0;
-        transform: translate(-50%, -50%) scale(1.7);
-    }
+    0%   { opacity: 0.4; transform: translate(-50%, -50%) scale(1); }
+    70%  { opacity: 0.15; transform: translate(-50%, -50%) scale(1.4); }
+    100% { opacity: 0;    transform: translate(-50%, -50%) scale(1.7); }
 }
 
 /* Responsive layout for mobile */
@@ -462,7 +378,6 @@
     .mic-btn {
         position: fixed;
         bottom: 80px;
-        /* Float above other UI (e.g., menu or chat input) */
         left: 50%;
         transform: translateX(-50%);
         width: auto;
@@ -479,13 +394,11 @@
     justify-content: space-between;
     margin-bottom: 10px;
 }
-
 .va-title {
     font-weight: 800;
     font-size: 16px;
     color: #0f172a;
 }
-
 .va-status {
     font-size: 12.5px;
     padding: 6px 10px;
@@ -494,17 +407,14 @@
     color: #0f172a;
     border: 1px solid rgba(0, 0, 0, 0.08);
 }
-
 .va-status.connected {
     background: #e8fff3;
     border-color: #b7f7cf;
 }
-
 .va-status.error {
     background: #fff1f2;
     border-color: #fecaca;
 }
-
 .va-section {
     border: 1px solid rgba(0, 0, 0, 0.06);
     background: #fff;
@@ -513,7 +423,6 @@
     margin-bottom: 12px;
     box-shadow: 0 4px 14px rgba(0, 0, 0, 0.04);
 }
-
 .va-subtitle {
     font-weight: 800;
     font-size: 14px;
@@ -522,7 +431,6 @@
     align-items: center;
     gap: 10px;
 }
-
 .pill {
     display: inline-flex;
     align-items: center;
@@ -532,7 +440,6 @@
     border-radius: 999px;
     font-size: 12px;
 }
-
 .va-stream {
     white-space: pre-wrap;
     font-size: 13.5px;
@@ -545,7 +452,6 @@
     grid-template-columns: 1fr;
     gap: 10px;
 }
-
 .sug-card {
     border: 1px solid rgba(0, 0, 0, 0.06);
     border-radius: 12px;
@@ -556,18 +462,15 @@
     justify-content: space-between;
     gap: 10px;
 }
-
 .sug-title {
     font-weight: 800;
     font-size: 14px;
     color: #0f172a;
 }
-
 .sug-meta {
     font-size: 12px;
     color: #475569;
 }
-
 .badge {
     display: inline-flex;
     align-items: center;
@@ -577,17 +480,12 @@
     margin-right: 6px;
     border: 1px solid rgba(0, 0, 0, 0.06);
 }
-
-.why {
-    opacity: .85;
-}
-
+.why { opacity: .85; }
 .sug-actions {
     display: flex;
     align-items: center;
     gap: 8px;
 }
-
 .approve-btn {
     border: none;
     background: #0ea5e9;
@@ -601,11 +499,7 @@
     font-weight: 700;
     font-size: 12.5px;
 }
-
-.approve-btn:hover {
-    filter: brightness(0.96);
-}
-
+.approve-btn:hover { filter: brightness(0.96); }
 .approve-all-btn {
     margin-left: auto;
     border: none;
@@ -620,17 +514,13 @@
     font-weight: 700;
     font-size: 12px;
 }
-
-.approve-all-btn:hover {
-    filter: brightness(0.96);
-}
+.approve-all-btn:hover { filter: brightness(0.96); }
 
 .approved-list {
     display: flex;
     flex-wrap: wrap;
     gap: 6px;
 }
-
 .chip-approved {
     display: inline-flex;
     align-items: center;
@@ -641,8 +531,83 @@
     border-radius: 12px;
     font-size: 12.5px;
 }
-
 .empty-hint {
     font-size: 12.5px;
     color: #64748b;
+}
+
+/* === New: Pending Suggestions Dock (draggable, same width, dark text) === */
+.pending-dock {
+    position: fixed;
+    right: 24px;
+    bottom: 24px;
+    width: var(--va-width);
+    max-width: var(--va-width);
+    background: var(--card-bg, #fff);
+    color: var(--card-ink, #0f172a);
+    border: 1px solid var(--card-border, rgba(15,23,42,0.08));
+    border-radius: 14px;
+    box-shadow: 0 10px 30px rgba(0,0,0,0.15);
+    padding: 12px;
+    cursor: grab;
+    z-index: 1100;
+}
+.pending-dock .dock-title {
+    font-weight: 800;
+    font-size: 14px;
+    margin-bottom: 8px;
+    color: var(--card-ink, #0f172a);
+}
+.pending-list {
+    display: grid;
+    gap: 10px;
+    max-height: calc(80vh - 220px); /* tall & responsive */
+    overflow: auto;
+
+    /* hide scrollbars, keep scrollability */
+    scrollbar-width: none;              /* Firefox */
+    -ms-overflow-style: none;           /* IE/Edge Legacy */
+}
+.pending-list::-webkit-scrollbar { display: none; } /* WebKit */
+
+.pending-item {
+    background: #ffffff;
+    border: 1px solid rgba(15,23,42,0.08);
+    border-radius: 10px;
+    padding: 10px;
+    color: #0f172a;
+}
+.pending-item .sug-title {
+    font-weight: 800;
+    font-size: 14px;
+    color: #0f172a;
+}
+.pending-item .sug-meta {
+    font-size: 12px;
+    color: #475569;
+}
+.pending-item .badge {
+    display: inline-flex;
+    align-items: center;
+    padding: 2px 6px;
+    background: #f1f5f9;
+    border-radius: 8px;
+    margin-right: 6px;
+    border: 1px solid rgba(0,0,0,0.06);
+}
+.pending-item .why { opacity: .85; }
+
+/* extra feedback when dragging */
+.pending-item[style*="transform"] {
+    box-shadow: 0 8px 28px rgba(0,0,0,0.12);
+}
+
+/* small screens: dock spans full width (still draggable) */
+@media (max-width: 768px) {
+    .pending-dock {
+        left: 12px;
+        right: 12px;
+        width: auto;
+        max-width: none;
+    }
 }

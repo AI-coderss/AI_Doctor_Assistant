@@ -400,7 +400,6 @@ def transcribe():
 
 # Mount BOTH spellings to avoid client/server mismatch
 @app.route("/case-second-opinion-stream", methods=["POST", "OPTIONS"])
-@app.route("/case-second_opinion_stream", methods=["POST", "OPTIONS"])
 @cross_origin(  # works with your CORS(app, resources=...) too
     origins=[
         "https://ai-doctor-assistant-app-dev.onrender.com",

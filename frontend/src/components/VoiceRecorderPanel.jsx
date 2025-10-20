@@ -1,3 +1,5 @@
+/* eslint-disable no-unused-vars */
+// VoiceRecorderPanel.jsx
 import React, { useRef, useState, useEffect } from "react";
 import { ReactMic } from "react-mic";
 import { motion } from "framer-motion";
@@ -6,26 +8,95 @@ import "../styles/VoiceRecorderPanel.css";
 
 /**
  * VoiceRecorderPanel
- * - Uses react-mic with your EXACT hard-coded props.
+ * - Uses react-mic with your EXACT props.
  * - Draggable glass panel (no resize while dragging).
  * - "Record The Case" launcher fixed bottom-left, turns into a timer while recording.
  * - On Stop => POST audio to transcribeUrl (multipart, {fileFieldName}).
  * - When transcript ready => calls onTranscriptReady(transcript) + shows "Analyze Case".
  * - "Analyze Case" streams from opinionUrl and forwards chunks to onOpinion.
- * - Now passes session_id to backend (aligned with chat.jsx).
+ * - Sends session_id to backend.
  *
  * Props:
- *   transcribeUrl      : string
- *   opinionUrl         : string
- *   fileFieldName      : string   (e.g., "audio_data")
- *   anchorLeft         : number   initial X for the overlay (px)
- *   anchorBottom       : number   initial Y-from-bottom for the overlay (px)
+ *   transcribeUrl      : string  (absolute or relative; default points to Flask /transcribe)
+ *   opinionUrl         : string  (absolute or relative; default points to Flask /case-second-opinion-stream)
+ *   fileFieldName      : string  (e.g., "audio_data")
+ *   anchorLeft         : number
+ *   anchorBottom       : number
  *   onOpinion          : (chunk: string, done?: boolean) => void
  *   onTranscriptReady  : (transcript: string) => void
  */
+
+// ---- Backend base fallback (env → prop → hardcoded) ----
+const ENV_BASE =
+  (typeof import.meta !== "undefined" && import.meta.env?.VITE_BACKEND_BASE) ||
+  (typeof process !== "undefined" && process.env?.REACT_APP_BACKEND_BASE) ||
+  "";
+
+const DEFAULT_BACKEND_BASE =
+  ENV_BASE?.trim() ||
+  "https://ai-doctor-assistant-backend-server.onrender.com";
+
+const isAbsolute = (u) => /^https?:\/\//i.test(u || "");
+
+const joinUrl = (base, path) =>
+  `${base.replace(/\/+$/, "")}/${String(path || "").replace(/^\/+/, "")}`;
+
+const mimeToExt = (mime = "") => {
+  const m = mime.toLowerCase();
+  if (m.includes("wav")) return "wav";
+  if (m.includes("webm")) return "webm";
+  if (m.includes("ogg")) return "ogg";
+  if (m.includes("mpeg")) return "mp3"; // covers audio/mpeg
+  if (m.includes("mp4")) return "mp4";
+  return "wav"; // safest default for ReactMic
+};
+
+const looksLikeHtml404 = (axErr) => {
+  const status = axErr?.response?.status;
+  const data = axErr?.response?.data;
+  return (
+    status === 404 &&
+    typeof data === "string" &&
+    data.trim().toLowerCase().startsWith("<!doctype html")
+  );
+};
+
+const friendlyAxiosError = (axErr) => {
+  const st = axErr?.response?.status;
+  const raw = axErr?.response?.data;
+
+  let j;
+  try {
+    j = typeof raw === "string" ? JSON.parse(raw) : raw;
+  } catch {
+    j = null;
+  }
+
+  if (st === 413) {
+    const lim =
+      j?.limit_mb || j?.provider_limit_mb
+        ? ` (limit ${j.limit_mb || j.provider_limit_mb} MB)`
+        : "";
+    return `Upload too large${lim}. Try a shorter recording.`;
+  }
+  if (st === 400) {
+    const detail =
+      j?.error ||
+      j?.message ||
+      (typeof raw === "string" ? raw.slice(0, 160) : "Bad request");
+    return `Bad request: ${detail}`;
+  }
+  if (st && st >= 500) return `Server error (${st}). Please retry.`;
+  if (axErr?.code === "ERR_NETWORK") return "Network error to API. Check URL/CORS.";
+  if (axErr?.code === "ECONNABORTED") return "Request timed out. Please try again.";
+  if (looksLikeHtml404(axErr))
+    return "Endpoint hit a static host (HTML 404). Check backend base/route.";
+  return axErr?.message || "Unexpected error while uploading audio.";
+};
+
 const VoiceRecorderPanel = ({
-  transcribeUrl = "/transcribe",
-  opinionUrl = "/case-second-opinion-stream",
+  transcribeUrl = joinUrl(DEFAULT_BACKEND_BASE, "/transcribe"),
+  opinionUrl = joinUrl(DEFAULT_BACKEND_BASE, "/case-second-opinion-stream"),
   fileFieldName = "audio_data",
   anchorLeft = 120,
   anchorBottom = 140,
@@ -41,6 +112,7 @@ const VoiceRecorderPanel = ({
   // flow state
   const [loading, setLoading] = useState(false);
   const [isTranscriptReady, setIsTranscriptReady] = useState(false);
+  const [status, setStatus] = useState("");
 
   // keep transcript in memory (not rendered)
   const transcriptRef = useRef("");
@@ -76,7 +148,6 @@ const VoiceRecorderPanel = ({
     }
   };
 
-  // manage timer lifecyle when recording/pause changes
   useEffect(() => {
     // recording started
     if (isRecording && !wasRecordingRef.current) {
@@ -116,6 +187,7 @@ const VoiceRecorderPanel = ({
     setIsPaused(false);
     setIsRecording(true);
     setIsTranscriptReady(false);
+    setStatus("");
   };
 
   const stopRecording = () => {
@@ -135,42 +207,113 @@ const VoiceRecorderPanel = ({
     transcriptRef.current = "";
     setElapsedMs(0);
     pausedAccumRef.current = 0;
+    setStatus("");
   };
 
-  // transcription (fires when recording stops)
+  // ---- POST helper with path fallback (/transcribe → /api/transcribe) ----
+  const postTranscribeWithFallback = async (form) => {
+    const makeCandidates = (u) => {
+      // If absolute, keep host; else apply backend base.
+      const resolved = isAbsolute(u) ? u : joinUrl(DEFAULT_BACKEND_BASE, u);
+      const url = new URL(resolved);
+
+      // First: /transcribe (or whatever exact path caller gave)
+      const first = url.toString();
+
+      // If the path already contains '/api/', swap to non-api; else add '/api' prefix.
+      const alt =url.pathname.startsWith("/api/")
+          ? url.toString().replace("/api/", "/")
+          : url.toString().replace(url.pathname, joinUrl("/", `/api${url.pathname}`).replace(/https?:\/\/[^/]+/,""));
+
+      // Ensure a proper absolute alt (handle the replacement above)
+      const altAbs = url.pathname.startsWith("/api/")
+        ? first.replace("/api/", "/")
+        : first.replace(url.pathname, `/api${url.pathname}`);
+
+      return [first, altAbs];
+    };
+
+    const candidates = makeCandidates(transcribeUrl);
+    let lastErr = null;
+
+    for (const u of candidates) {
+      try {
+        const { data } = await axios.post(u, form, {
+          // DO NOT set Content-Type; browser sets multipart boundary
+          headers: {
+            Accept: "application/json, text/plain, */*",
+            "X-Session-Id": sessionId,
+          },
+          withCredentials: false,
+          timeout: 60_000,
+          transformResponse: (r) => r, // keep raw
+          validateStatus: (s) => s >= 200 && s < 300,
+        });
+
+        let parsed;
+        try {
+          parsed = typeof data === "string" ? JSON.parse(data) : data;
+        } catch {
+          if (typeof data === "string" && data.startsWith("<!doctype html>")) {
+            throw new Error("Received HTML body from API (wrong URL).");
+          }
+          throw new Error("Unexpected non-JSON response from API.");
+        }
+        return parsed;
+      } catch (e) {
+        lastErr = e;
+        // If looks like SPA HTML 404, try the next candidate
+        if (looksLikeHtml404(e)) continue;
+        const st = e?.response?.status;
+        if (st === 404) continue;
+        break;
+      }
+    }
+    throw lastErr || new Error("Failed to reach transcription endpoint.");
+  };
+
+  // ---- transcription (fires when recording stops) ----
   const onStop = async (recordedBlob) => {
     try {
-      if (!recordedBlob?.blob) return;
-      const audioFile = new File([recordedBlob.blob], "temp.wav", {
-        type: "audio/wav",
-      });
+      const b = recordedBlob?.blob;
+      if (!b) return;
+
+      // Respect actual MIME when available (ReactMic usually gives WAV).
+      const mime = b.type || "audio/wav";
+      const ext = mimeToExt(mime);
+      const fileName = `recording-${Date.now()}.${ext}`;
+
+      // Create a File that matches the blob bytes and MIME
+      const audioFile = new File([b], fileName, { type: mime });
+
       const form = new FormData();
-      form.append(fileFieldName, audioFile);
-      form.append("session_id", sessionId); // optional, helps server correlate
+      form.append(fileFieldName, audioFile); // Flask expects "audio_data"
+      form.append("session_id", sessionId);
 
       setLoading(true);
-      const { data } = await axios.post(transcribeUrl, form, {
-        headers: { "Content-Type": "multipart/form-data" },
-        withCredentials: false,
-      });
+      setStatus("Uploading…");
 
-      const txt = String(data?.transcript ?? "");
+      const json = await postTranscribeWithFallback(form);
+
+      const txt = String(json?.transcript ?? "");
       transcriptRef.current = txt;
       const ready = Boolean(txt);
       setIsTranscriptReady(ready);
+      setStatus(ready ? "Transcribed ✅" : "No speech detected");
 
       if (ready && typeof onTranscriptReady === "function") {
         onTranscriptReady(txt);
       }
-    } catch (err) {
-      console.error("Transcription error:", err);
+    } catch (e) {
+      console.error("Transcription error:", e);
       setIsTranscriptReady(false);
+      setStatus(friendlyAxiosError(e));
     } finally {
       setLoading(false);
     }
   };
 
-  // stream RAG second opinion (now includes session_id + tougher streaming)
+  // ---- stream RAG second opinion ----
   const analyzeCase = async () => {
     if (!transcriptRef.current) return;
 
@@ -181,35 +324,36 @@ const VoiceRecorderPanel = ({
 
     try {
       setLoading(true);
+      setStatus("Analyzing…");
 
-      // IMPORTANT: explicit Accept to match backend text streaming
-      const resp = await fetch(opinionUrl, {
+      const target = isAbsolute(opinionUrl)
+        ? opinionUrl
+        : joinUrl(DEFAULT_BACKEND_BASE, opinionUrl);
+
+      const resp = await fetch(target, {
         method: "POST",
         mode: "cors",
         credentials: "omit",
         headers: {
           "Content-Type": "application/json",
-          "Accept": "text/plain",
+          Accept: "text/plain",
         },
         body: JSON.stringify(payload),
-        // keepalive can help if user navigates away mid-stream
         keepalive: true,
       });
 
       if (!resp.ok) {
         console.error("Stream request failed:", resp.status, resp.statusText);
+        setStatus(`Analysis failed (${resp.status})`);
         setLoading(false);
         return;
       }
       if (!resp.body) {
-        console.error("Readable stream not available on this browser/host");
-        // Fallback: read as text (non-streaming proxies)
         const text = await resp.text();
-        if (typeof onOpinion === "function") {
-          onOpinion(text, true);
-        }
+        if (typeof onOpinion === "function") onOpinion(text, true);
         setLoading(false);
         setOpen(false);
+        setStatus("Analysis complete");
         return;
       }
 
@@ -218,7 +362,6 @@ const VoiceRecorderPanel = ({
       let done = false;
       let aggregated = "";
 
-      // Push chunks to chat.jsx in real-time
       while (!done) {
         const { value, done: d } = await reader.read();
         done = d;
@@ -228,23 +371,20 @@ const VoiceRecorderPanel = ({
           if (typeof onOpinion === "function") onOpinion(chunk, false);
         }
       }
-
       if (typeof onOpinion === "function") onOpinion(aggregated, true);
+      setStatus("Analysis complete");
     } catch (e) {
-      // net::ERR_FAILED typically = CORS or network block
       console.error("Streaming error:", e);
+      setStatus("Streaming error (check network/CORS)");
     } finally {
       setLoading(false);
-      setOpen(false); // optional close
+      setOpen(false);
     }
   };
 
   return (
     <>
-      {/* Launcher area:
-          - Normal button when idle
-          - Converts into small circular TIMER while recording
-      */}
+      {/* Launcher area: button when idle; circular TIMER while recording */}
       {!isRecording ? (
         <button
           className="record-case-btn-left"
@@ -278,17 +418,13 @@ const VoiceRecorderPanel = ({
             <span className={`badge ${isRecording ? "live" : ""}`}>
               {isRecording ? "Voice Recorder • LIVE" : "Voice Recorder"}
             </span>
-            <button
-              className="close-x"
-              onClick={() => setOpen(false)}
-              aria-label="Close"
-            >
+            <button className="close-x" onClick={() => setOpen(false)} aria-label="Close">
               ×
             </button>
           </div>
 
           <div className="wave-wrap">
-            {/* >>>>>>>>>>> DO NOT CHANGE: your exact mic settings <<<<<<<<<<< */}
+            {/* keep your exact mic settings */}
             <ReactMic
               record={isRecording}
               pause={isPaused}
@@ -329,6 +465,10 @@ const VoiceRecorderPanel = ({
               <p>Processing…</p>
             </div>
           )}
+
+          {status && (
+            <div style={{ marginTop: 8, fontSize: 12, color: "#6b7280" }}>{status}</div>
+          )}
         </motion.div>
       )}
     </>
@@ -336,6 +476,7 @@ const VoiceRecorderPanel = ({
 };
 
 export default VoiceRecorderPanel;
+
 
 
 

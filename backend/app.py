@@ -121,7 +121,7 @@ def get_vector_store() -> QdrantVectorStore:
     return QdrantVectorStore(
         client=qdrant,
         collection_name=QDRANT_COLLECTION,
-        embeddings=embeddings
+        embedding=embeddings
     )
 
 vector_store = get_vector_store()

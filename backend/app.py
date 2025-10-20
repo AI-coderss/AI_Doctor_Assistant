@@ -3103,17 +3103,6 @@ def _sse(obj: dict) -> str:
 
 # ----------------------------- Endpoints -------------------------------------
 
-# (Compatibility) set general context used elsewhere
-@app.post("/set-context")
-def set_context():
-    data = request.get_json(silent=True) or {}
-    session_id = data.get("session_id") or str(uuid4())
-    transcript = (data.get("transcript") or "").strip()
-    st = _sess(session_id)
-    # Merge with existing:
-    st["context"] = transcript if transcript else st.get("context", "")
-    return jsonify({"ok": True, "session_id": session_id, "context_len": len(st["context"])}), 200
-
 # ---------- Lab Agent: set session context ----------
 @app.post("/lab-agent/context")
 def lab_agent_set_context():

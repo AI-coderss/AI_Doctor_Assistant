@@ -367,55 +367,34 @@ def _build_dosage_prompt(drug, age, weight, condition):
     )
 
 
-# ============================== Speech-to-Text ==============================
-SUPPORTED_FORMATS = ['flac','m4a','mp3','mp4','mpeg','mpga','oga','ogg','wav','webm']
 
-@app.route("/transcribe", methods=["POST", "OPTIONS"])
+def speech_to_text(audio_data_path):
+    with open(audio_data_path, "rb") as audio_file:
+        transcript = client.audio.transcriptions.create(
+            model="whisper-1",
+            response_format="text",
+            file=audio_file
+        )
+    return {"text": transcript}
+
+@app.route("/transcribe", methods=["POST"])
 def transcribe():
-    # Handle preflight quickly (if the browser does one)
-    if request.method == "OPTIONS":
-        return ("", 204)
-
     if "audio_data" not in request.files:
-        return jsonify({"error": "No audio file provided"}), 400
-
+        return jsonify({"error": "No audio file provided"}), 400  
     audio_file = request.files["audio_data"]
-    # infer extension safely
-    filename = audio_file.filename or "audio"
-    ext = filename.rsplit(".", 1)[-1].lower() if "." in filename else ""
-    if ext not in SUPPORTED_FORMATS:
-        # try guessing from mimetype if filename has no ext
-        guessed = (audio_file.mimetype or "").split("/")[-1].lower()
-        if guessed in SUPPORTED_FORMATS:
-            ext = guessed
-        else:
-            return jsonify({
-                "error": f"Unsupported file format: {ext or 'unknown'}. "
-                         f"Supported: {SUPPORTED_FORMATS}"
-            }), 400
-
-    with tempfile.NamedTemporaryFile(delete=False, suffix=f".{ext}") as tmp:
-        audio_file.save(tmp.name)
-        temp_path = tmp.name
-
+    supported_formats = ['flac', 'm4a', 'mp3', 'mp4', 'mpeg', 'mpga', 'oga', 'ogg', 'wav', 'webm']
+    file_extension = audio_file.filename.split('.')[-1].lower()
+    if file_extension not in supported_formats:
+        return jsonify({"error": f"Unsupported file format: {file_extension}. Supported formats: {supported_formats}"}), 400
+    with tempfile.NamedTemporaryFile(delete=False, suffix=f".{file_extension}") as temp_audio:
+        audio_file.save(temp_audio.name)
+        temp_audio_path = temp_audio.name
     try:
-        with open(temp_path, "rb") as f:
-            res = client.audio.transcriptions.create(
-                model="whisper-1",
-                file=f,
-                response_format="text"
-            )
-        # some SDKs return raw text when response_format="text"
-        transcript_text = getattr(res, "text", None) if not isinstance(res, str) else res
-        if transcript_text is None:
-            transcript_text = str(res)
+        transcript_result = speech_to_text(temp_audio_path)
     finally:
-        try:
-            os.remove(temp_path)
-        except Exception:
-            pass
+        os.remove(temp_audio_path)
 
-    return jsonify({"transcript": (transcript_text or "").strip()})
+    return jsonify({"transcript": transcript_result.get("text", "")})
 
 
 

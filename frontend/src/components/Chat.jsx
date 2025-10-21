@@ -32,6 +32,37 @@ import LabVoiceAgent from "./LabVoiceAgent.jsx";
 
 let localStream;
 const BACKEND_BASE = "https://ai-doctor-assistant-backend-server.onrender.com"; // ✅ fixed accidental markdown link
+// ✅ one place to send context to both backends
+const VOICE_BASE = "https://ai-doctor-assistant-voice-mode-webrtc.onrender.com";
+
+const pushContextToBackends = async (sessionId, text) => {
+  if (!text || !text.trim()) return;
+  try {
+    await fetch(`${BACKEND_BASE}/set-context`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ session_id: sessionId, transcript: text }),
+    });
+  } catch { }
+
+  try {
+    await fetch(`${VOICE_BASE}/api/session-context`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ session_id: sessionId, transcript: text }),
+    });
+  } catch { }
+};
+
+// tiny debounce so we don't spam context updates
+const useDebounced = () => {
+  const t = useRef(null);
+  return (fn, ms = 400) => {
+    if (t.current) clearTimeout(t.current);
+    t.current = setTimeout(fn, ms);
+  };
+};
+
 
 // 🧪 manual “add lab” chat command
 const ADD_LAB_CMD_RE = /^(?:add|order)\s+(?:lab|test)s?\s*[:\-]\s*(.+)$/i; // ✅ fixed char class
@@ -112,7 +143,7 @@ function ensureOpinionShape(obj) {
       probability_percent: p,
       icd10: d?.icd10 ? String(d.icd10) : null,
     };
-    });
+  });
   return out;
 }
 
@@ -147,7 +178,7 @@ function Donut({ value = 0, size = 140, stroke = 16, label = "" }) {
 }
 
 /* ---------- Second Opinion panel (with “Add” buttons) ---------- */
-function SecondOpinionPanel({ data, narrative, onAddLab = () => {} }) {
+function SecondOpinionPanel({ data, narrative, onAddLab = () => { } }) {
   const diffs = Array.isArray(data?.differential_diagnosis) ? data.differential_diagnosis : [];
   const primary = data?.primary_diagnosis;
 
@@ -356,7 +387,16 @@ const Chat = () => {
   const toggleSfxRef = useRef(null);
 
   // ✅ Fresh session per mount (no localStorage persistence)
-  const [sessionId, setSessionId] = useState(() => crypto.randomUUID());
+  // ✅ persistent across reloads (same behavior as the old working file)
+  const [sessionId, setSessionId] = useState(() => {
+    let id = localStorage.getItem("sessionId");
+    if (!id) {
+      id = crypto.randomUUID();
+      localStorage.setItem("sessionId", id);
+    }
+    return id;
+  });
+
 
   const liveText = useLiveTranscriptStore((s) => s.text);
   const isStreaming = useLiveTranscriptStore((s) => s.isStreaming);
@@ -366,7 +406,7 @@ const Chat = () => {
 
   useEffect(() => {
     toggleSfxRef.current = new Howl({ src: ["/assistant.mp3"], volume: 0.2, preload: true });
-    return () => { try { toggleSfxRef.current?.unload(); } catch {} };
+    return () => { try { toggleSfxRef.current?.unload(); } catch { } };
   }, []);
 
   useEffect(() => {
@@ -395,7 +435,7 @@ const Chat = () => {
             ensureLabOrdersBubble();
           }
         }
-      } catch {}
+      } catch { }
     })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sessionId]);
@@ -484,17 +524,19 @@ const Chat = () => {
         setConnectionStatus("connected");
         setIsMicActive(true);
         try {
-          channel.send(
-            JSON.stringify({
-              type: "conversation.item.create",
-              item: { type: "message", role: "user", content: [{ type: "input_text", text: "hola" }] },
-            })
-          );
+          channel.send(JSON.stringify({
+            type: "conversation.item.create",
+            item: { type: "message", role: "user", content: [{ type: "input_text", text: "hola" }] },
+          }));
           channel.send(JSON.stringify({ type: "response.create" }));
-        } catch {}
-        // ✅ enable from localStream (not micStream)
+        } catch { }
+
+        // ✅ PRIME the realtime session with the current chat context
+        pushContextToBackends(sessionId, buildAgentContext());
+
         if (localStream) localStream.getAudioTracks().forEach((track) => (track.enabled = true));
       };
+
       channel.onclose = () => {
         setConnectionStatus("idle");
         setIsMicActive(false);
@@ -540,25 +582,25 @@ const Chat = () => {
   };
 
   const closeVoiceSession = () => {
-    try { stopAudio?.(); } catch {}
+    try { stopAudio?.(); } catch { }
     try {
       const { setAudioScale } = useAudioForVisualizerStore.getState();
       setAudioScale(1);
-    } catch {}
+    } catch { }
     if (audioPlayerRef.current) {
-      try { audioPlayerRef.current.pause(); } catch {}
+      try { audioPlayerRef.current.pause(); } catch { }
       audioPlayerRef.current.srcObject = null;
       audioPlayerRef.current.src = "";
     }
     if (dataChannel && dataChannel.readyState !== "closed") {
-      try { dataChannel.close(); } catch {}
+      try { dataChannel.close(); } catch { }
     }
     if (peerConnection) {
-      try { peerConnection.getSenders?.().forEach((s) => s.track?.stop()); } catch {}
-      try { peerConnection.close(); } catch {}
+      try { peerConnection.getSenders?.().forEach((s) => s.track?.stop()); } catch { }
+      try { peerConnection.close(); } catch { }
     }
     if (localStream) {
-      try { localStream.getTracks().forEach((t) => t.stop()); } catch {}
+      try { localStream.getTracks().forEach((t) => t.stop()); } catch { }
       localStream = null;
     }
     setDataChannel(null);
@@ -572,14 +614,14 @@ const Chat = () => {
     setIsVoiceMode(true);
     if (audioPlayerRef.current) {
       audioPlayerRef.current.muted = true;
-      audioPlayerRef.current.play().catch(() => {});
+      audioPlayerRef.current.play().catch(() => { });
     }
     try {
       if (toggleSfxRef.current) {
         toggleSfxRef.current.stop();
         toggleSfxRef.current.play();
       }
-    } catch {}
+    } catch { }
   };
 
   /* ---------- Labs: unified workflow ---------- */
@@ -674,7 +716,7 @@ const Chat = () => {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ session_id: sessionId }),
-      }).catch(() => {});
+      }).catch(() => { });
     } finally {
       setLabOrders([]);
       setChats((p) => [...p, { who: "bot", msg: "🧹 Session ended. Starting a new one." }]);
@@ -826,19 +868,45 @@ const Chat = () => {
   };
 
 const handleAssistantContextTranscript = async (transcript) => {
+  try {
+    const t = (transcript || "").trim(); if (!t) return;
+
+    // 1) Preserve existing behavior: push raw transcript to both backends
+    await fetch(`${BACKEND_BASE}/set-context`, {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ session_id: sessionId, transcript: t }),
+    });
+
+    fetch("https://ai-doctor-assistant-voice-mode-webrtc.onrender.com/api/session-context", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ session_id: sessionId, transcript: t }),
+    }).catch(() => { });
+
+    // 2) Keep local stores in sync (unchanged)
     try {
-      const t = (transcript || "").trim(); if (!t) return;
-      await fetch(`${BACKEND_BASE}/set-context`, {
-        method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ session_id: sessionId, transcript: t }),
-      });
-      fetch("https://ai-doctor-assistant-voice-mode-webrtc.onrender.com/api/session-context", {
-        method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ session_id: sessionId, transcript: t }),
-      }).catch(() => {});
-      try { const store = useDosageStore.getState(); store.setTranscript?.(t); store.setSessionId?.(sessionId); } catch {}
-    } catch (e) { console.error("Failed to send transcript context:", e); }
-  };
+      const store = useDosageStore.getState();
+      store.setTranscript?.(t);
+      store.setSessionId?.(sessionId);
+    } catch { }
+
+    // 3) NEW: also push the *full* current context (transcript + second-opinion narrative + approved labs)
+    //     This keeps the realtime voice session and backend perfectly in sync with the UI state.
+    try {
+      const ctx = (typeof buildAgentContext === "function" ? buildAgentContext() : "").trim();
+      if (ctx) {
+        // Fire-and-forget to voice server (non-blocking), await app backend (same pattern as above)
+        await fetch(`${BACKEND_BASE}/set-context`, {
+          method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ session_id: sessionId, transcript: ctx }),
+        });
+        fetch("https://ai-doctor-assistant-voice-mode-webrtc.onrender.com/api/session-context", {
+          method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ session_id: sessionId, transcript: ctx }),
+        }).catch(() => { });
+      }
+    } catch { }
+  } catch (e) { console.error("Failed to send transcript context:", e); }
+};
 
   /** Specialty form streaming (if used elsewhere) */
   const handleFormStreamEvent = (evt) => {
@@ -1271,11 +1339,11 @@ export default Chat;
 const DrawComponent = ({ children }) => {
   const [isOpen, setIsOpen] = useState(false);
   // close the tools drawer when anyone dispatches `tools:close`
-useEffect(() => {
-  const handleToolsClose = () => setIsOpen(false);
-  window.addEventListener("tools:close", handleToolsClose);
-  return () => window.removeEventListener("tools:close", handleToolsClose);
-}, []);
+  useEffect(() => {
+    const handleToolsClose = () => setIsOpen(false);
+    window.addEventListener("tools:close", handleToolsClose);
+    return () => window.removeEventListener("tools:close", handleToolsClose);
+  }, []);
 
 
   // ✅ Listen for Lab Agent’s “close” event only
@@ -1520,7 +1588,7 @@ function toNum(x) {
   if (typeof x === "number") return x;
   if (typeof x === "string") {
     const t = x.trim().replace(",", ".");
-       const m = t.match(/^[-+]?\d+(?:\.\d+)?$/);
+    const m = t.match(/^[-+]?\d+(?:\.\d+)?$/);
     if (m) return parseFloat(m[0]);
   }
   return NaN;

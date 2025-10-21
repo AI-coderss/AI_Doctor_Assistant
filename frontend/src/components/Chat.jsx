@@ -397,6 +397,8 @@ const Chat = () => {
     return id;
   });
 
+// Fresh, in-memory id just for Lab Orders (not in localStorage)
+const [labSessionId, setLabSessionId] = useState(() => crypto.randomUUID());
 
   const liveText = useLiveTranscriptStore((s) => s.text);
   const isStreaming = useLiveTranscriptStore((s) => s.isStreaming);
@@ -425,20 +427,19 @@ const Chat = () => {
   // (Optional) Previously-approved labs loader removed from persistence; still safe to query server.
   // With fresh sessionId this will normally be empty, keeping table clean on refresh.
   useEffect(() => {
-    (async () => {
-      try {
-        const res = await fetch(`${BACKEND_BASE}/lab-agent/list?session_id=${encodeURIComponent(sessionId)}`);
-        if (res.ok) {
-          const data = await res.json();
-          if (Array.isArray(data?.labs) && data.labs.length) {
-            setLabOrders((prev) => mergeByName(prev, data.labs));
-            ensureLabOrdersBubble();
-          }
+  (async () => {
+    try {
+      const res = await fetch(`${BACKEND_BASE}/lab-agent/list?session_id=${encodeURIComponent(labSessionId)}`);
+      if (res.ok) {
+        const data = await res.json();
+        if (Array.isArray(data?.labs) && data.labs.length) {
+          setLabOrders((prev) => mergeByName(prev, data.labs));
+          ensureLabOrdersBubble();
         }
-      } catch { }
-    })();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [sessionId]);
+      }
+    } catch {}
+  })();
+}, [labSessionId]); // ⬅️ key change
 
   // Live transcript bubble lifecycle
   useEffect(() => {
@@ -632,7 +633,7 @@ const Chat = () => {
       await fetch(`${BACKEND_BASE}/lab-agent/approve`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ session_id: sessionId, item }),
+        body: JSON.stringify({ session_id: labSessionId, item }),
       });
     } catch (e) {
       console.error("approveLabViaAPI failed:", e);
@@ -646,7 +647,7 @@ const Chat = () => {
       const res = await fetch(`${BACKEND_BASE}/lab-agent/send`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ session_id: sessionId, items: labOrders }),
+        body: JSON.stringify({ session_id: labSessionId, items: labOrders }),
       });
       if (!res.ok) throw new Error(`/lab-agent/send ${res.status}`);
       setChats((prev) => [...prev, { who: "bot", msg: "✅ Lab orders sent successfully." }]);
@@ -710,20 +711,25 @@ const Chat = () => {
   };
 
   // 🔚 End Session: clear table & rotate session id (and optionally reset server state)
-  const handleEndSession = async () => {
-    try {
-      await fetch(`${BACKEND_BASE}/lab-agent/reset`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ session_id: sessionId }),
-      }).catch(() => { });
-    } finally {
-      setLabOrders([]);
-      setChats((p) => [...p, { who: "bot", msg: "🧹 Session ended. Starting a new one." }]);
-      setSessionId(crypto.randomUUID()); // ✅ brand-new session ensures no carry-over
-      setShowLabAgent(false);
-    }
-  };
+const handleEndSession = async () => {
+  try {
+    // Reset labs for the CURRENT lab case only
+    await fetch(`${BACKEND_BASE}/lab-agent/reset`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ session_id: labSessionId }),
+    }).catch(() => {});
+  } finally {
+    setLabOrders([]);
+    setChats((p) => [...p, { who: "bot", msg: "🧹 Session ended. Starting a new one." }]);
+
+    // Start a brand-new, ephemeral Lab case id
+    setLabSessionId(crypto.randomUUID());
+
+    setShowLabAgent(false);
+  }
+};
+
 
   // Text chat submit (includes small “add lab:” command)
   const handleNewMessage = async ({ text, skipEcho = false }) => {
@@ -1322,7 +1328,7 @@ const handleAssistantContextTranscript = async (transcript) => {
         <LabVoiceAgent
           isVisible={showLabAgent}
           onClose={() => setShowLabAgent(false)}
-          sessionId={sessionId}
+          sessionId={labSessionId}
           backendBase={BACKEND_BASE}
           context={buildAgentContext()}
           onApproveLab={handleApproveLabFromAgent}

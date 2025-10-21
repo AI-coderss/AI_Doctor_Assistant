@@ -628,3 +628,191 @@
   border-radius: 50%;
   border: 1px solid var(--border);
 }
+/* =========================================================
+   LAB ORDERS — PROPORTIONAL WIDTH, NO HORIZONTAL SCROLL
+   (Append at the end of chat-overrides.css)
+   ========================================================= */
+
+/* Let message bubbles accommodate the wider card */
+.chat-content .chat-message .message-text {
+  max-width: 100%;
+}
+
+/* Card spans wider but stays proportional and centered */
+.chat-content .chat-message .message-text > .lab-orders-card {
+  width: 100%;
+  max-width: 960px;        /* ⬅️ tuned so it’s wider but not huge */
+  margin: 8px auto 14px;
+}
+
+/* Card chrome */
+.lab-orders-card {
+  border: 1px solid var(--card-border);
+  border-radius: 16px;
+  background: var(--card-bg);
+  box-shadow: var(--shadow);
+  overflow: hidden;        /* ⬅️ no internal scrollbars */
+}
+
+/* Header */
+.lab-orders-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-weight: 900;
+  padding: 12px 16px;
+  font-size: 15px;
+  background: var(--table-head-bg);
+  border-bottom: 1px solid var(--border);
+}
+
+/* Table: full width, auto layout (no forced min-width) */
+.lab-orders-table {
+  width: 100%;
+  border-collapse: separate;
+  border-spacing: 0;
+  table-layout: auto;      /* ⬅️ columns size naturally */
+  font-size: 14.5px;
+}
+
+/* Header cells (no sticky, no scroll needed) */
+.lab-orders-table thead th {
+  background: var(--table-head-bg);
+  color: var(--text);
+  font-weight: 800;
+  padding: 12px 14px;
+  border-bottom: 1px solid var(--border);
+}
+
+/* Column sizing — gentle guidance; overrides inline widths */
+.lab-orders-table thead th:nth-child(1) { width: 45% !important; } /* Test name */
+.lab-orders-table thead th:nth-child(2) { width: 18% !important; } /* Priority */
+.lab-orders-table thead th:nth-child(3) { width: auto !important; }/* Reason */
+
+/* Body cells */
+.lab-orders-table tbody td {
+  padding: 12px 14px;
+  border-bottom: 1px solid var(--border);
+  color: var(--text);
+  vertical-align: top;
+  word-wrap: break-word;
+  overflow-wrap: anywhere;
+}
+
+/* Emphasize test names, soften reasons */
+.lab-orders-table tbody td:nth-child(1) { font-weight: 800; }
+.lab-orders-table tbody td:nth-child(3) { color: var(--text-dim); }
+
+/* Zebra + hover (subtle) */
+.lab-orders-table tbody tr:nth-child(even) {
+  background: color-mix(in srgb, var(--table-row-hover) 55%, transparent);
+}
+.lab-orders-table tbody tr:hover {
+  background: color-mix(in srgb, var(--table-row-hover) 85%, transparent);
+}
+
+/* Priority pills — balanced scale for the new width */
+.prio-pill {
+  min-width: 60px;
+  padding: 5px 11px;
+  border-radius: 999px;
+  font-size: 12.5px;
+  font-weight: 800;
+}
+
+/* Footer action area */
+.send-lab-wrap {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  padding: 12px 14px;
+  border-top: 1px solid var(--border);
+  background: color-mix(in srgb, var(--bg-elev) 90%, transparent);
+}
+
+.send-lab-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  border: 0;
+  cursor: pointer;
+  padding: 11px 15px;
+  border-radius: 12px;
+  background: var(--primary);
+  color: var(--primary-contrast);
+  font-weight: 900;
+  box-shadow: 0 6px 18px rgba(10,102,194,.22);
+}
+
+/* Ensure bot bubble never clips the wider card */
+.chat-content .chat-message.bot .message-text {
+  width: 100%;
+}
+/* =========================================================
+   ZEBRA EFFECT — clear, balanced striping for lower sections
+   Append at the end of chat-overrides.css
+   ========================================================= */
+
+/* 1) Lab Orders Table — clear zebra stripes */
+.lab-orders-table tbody tr:nth-child(odd) {
+  background: color-mix(in srgb, var(--table-row-hover) 86%, transparent);
+}
+.lab-orders-table tbody tr:nth-child(even) {
+  background: color-mix(in srgb, var(--table-row-hover) 58%, transparent);
+}
+/* Slightly stronger on hover */
+.lab-orders-table tbody tr:hover {
+  background: color-mix(in srgb, var(--table-row-hover) 95%, transparent);
+}
+
+/* Optional dark-mode tuning (keeps stripes visible but softer) */
+@media (prefers-color-scheme: dark) {
+  .lab-orders-table tbody tr:nth-child(odd) {
+    background: color-mix(in srgb, var(--table-row-hover) 70%, transparent);
+  }
+  .lab-orders-table tbody tr:nth-child(even) {
+    background: color-mix(in srgb, var(--table-row-hover) 50%, transparent);
+  }
+  .lab-orders-table tbody tr:hover {
+    background: color-mix(in srgb, var(--table-row-hover) 82%, transparent);
+  }
+}
+
+/* 2) Second Opinion — ICD-10 table with zebra */
+.so-table tbody tr:nth-child(odd) {
+  background: color-mix(in srgb, var(--table-row-hover) 80%, transparent);
+}
+.so-table tbody tr:nth-child(even) {
+  background: color-mix(in srgb, var(--table-row-hover) 55%, transparent);
+}
+.so-table tbody tr:hover {
+  background: color-mix(in srgb, var(--table-row-hover) 92%, transparent);
+}
+
+/* 3) Labs Summary Panel — value rows with zebra */
+.labs-panel__body .lab-row:nth-child(odd) {
+  background: color-mix(in srgb, var(--bg-soft) 85%, transparent);
+}
+.labs-panel__body .lab-row:nth-child(even) {
+  background: color-mix(in srgb, var(--bg-soft) 60%, transparent);
+}
+/* Subtle hover */
+.labs-panel__body .lab-row:hover {
+  background: color-mix(in srgb, var(--bg-soft) 95%, transparent);
+}
+
+/* Light separators that pair nicely with zebra */
+.lab-orders-table tbody td,
+.so-table tbody td {
+  border-bottom: 1px solid var(--border);
+}
+
+/* Prevent horizontal scrolling due to zebra overlays */
+.lab-orders-card,
+.so-card,
+.labs-panel {
+  overflow-x: hidden;
+}
+
+
+

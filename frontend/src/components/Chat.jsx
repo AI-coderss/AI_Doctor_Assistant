@@ -825,28 +825,19 @@ const Chat = () => {
     });
   };
 
-  const handleAssistantContextTranscript = async (transcript) => {
+const handleAssistantContextTranscript = async (transcript) => {
     try {
-      const t = (transcript || "").trim();
-      if (!t) return;
+      const t = (transcript || "").trim(); if (!t) return;
       await fetch(`${BACKEND_BASE}/set-context`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
+        method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ session_id: sessionId, transcript: t }),
       });
       fetch("https://ai-doctor-assistant-voice-mode-webrtc.onrender.com/api/session-context", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
+        method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ session_id: sessionId, transcript: t }),
       }).catch(() => {});
-      try {
-        const store = useDosageStore.getState();
-        store.setTranscript?.(t);
-        store.setSessionId?.(sessionId);
-      } catch {}
-    } catch (e) {
-      console.error("Failed to send transcript context:", e);
-    }
+      try { const store = useDosageStore.getState(); store.setTranscript?.(t); store.setSessionId?.(sessionId); } catch {}
+    } catch (e) { console.error("Failed to send transcript context:", e); }
   };
 
   /** Specialty form streaming (if used elsewhere) */
@@ -1279,6 +1270,13 @@ export default Chat;
 /* Drawer wrapper */
 const DrawComponent = ({ children }) => {
   const [isOpen, setIsOpen] = useState(false);
+  // close the tools drawer when anyone dispatches `tools:close`
+useEffect(() => {
+  const handleToolsClose = () => setIsOpen(false);
+  window.addEventListener("tools:close", handleToolsClose);
+  return () => window.removeEventListener("tools:close", handleToolsClose);
+}, []);
+
 
   // ✅ Listen for Lab Agent’s “close” event only
   useEffect(() => {

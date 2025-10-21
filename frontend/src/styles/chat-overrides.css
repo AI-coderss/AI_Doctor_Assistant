@@ -1,0 +1,630 @@
+/* chat-overrides.css
+   Theme-aware styles for Chat.jsx components and the unified Lab Orders table.
+   Uses CSS variables with light/dark fallbacks. Keep this file imported in Chat.jsx.
+*/
+
+/* =========================
+   THEME VARIABLES
+   ========================= */
+:root {
+  --bg: #ffffff;
+  --bg-soft: #f8fafc;
+  --bg-elev: #ffffff;
+  --text: #0f172a;
+  --text-dim: #475569;
+  --border: rgba(0,0,0,0.10);
+  --shadow: 0 8px 28px rgba(0,0,0,0.10);
+
+  --primary: #0a66c2;
+  --primary-contrast: #ffffff;
+
+  --chip-green: #16a34a;
+  --chip-yellow: #ca8a04;
+  --chip-red: #dc2626;
+
+  --donut-fill: #3750D8;
+  --donut-track: #E5E7EB;
+  --donut-text: #111827;
+
+  /* Labs prompt */
+  --labs-prompt-bg: #eef6ff;
+  --labs-prompt-border: rgba(10,102,194,.25);
+
+  /* Cards */
+  --card-bg: rgba(255,255,255,0.96);
+  --card-border: rgba(0,0,0,0.08);
+
+  /* Table */
+  --table-head-bg: #eef3ff;
+  --table-row-hover: #fbfcff;
+
+  /* Collapsible */
+  --collapsible-bg: #ffffff;
+
+  /* Visual bars */
+  --seg-green: #22c55e;
+  --seg-yellow: #f59e0b;
+  --seg-red: #ef4444;
+  --seg-track: #e5e7eb;
+
+  /* Chips */
+  --chip-bg: #f1f5f9;
+  --chip-border: rgba(0,0,0,0.08);
+}
+
+/* Optional explicit dark class hook: <body data-theme="dark"> */
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #0b1220;
+    --bg-soft: #0f172a;
+    --bg-elev: #111827;
+    --text: #e5e7eb;
+    --text-dim: #94a3b8;
+    --border: rgba(255,255,255,0.12);
+    --shadow: 0 8px 28px rgba(0,0,0,0.35);
+
+    --donut-fill: #8ab4ff;
+    --donut-track: #273449;
+    --donut-text: #e5e7eb;
+
+    --labs-prompt-bg: #0d223a;
+    --labs-prompt-border: rgba(138,180,255,.25);
+
+    --card-bg: rgba(22,27,34,0.9);
+    --card-border: rgba(255,255,255,0.10);
+
+    --table-head-bg: #0e2139;
+    --table-row-hover: rgba(255,255,255,0.04);
+
+    --collapsible-bg: #0f172a;
+
+    --seg-green: #22c55e;
+    --seg-yellow: #f59e0b;
+    --seg-red: #ef4444;
+    --seg-track: #1f2937;
+
+    --chip-bg: rgba(255,255,255,0.05);
+    --chip-border: rgba(255,255,255,0.10);
+  }
+}
+
+[data-theme="dark"] {
+  --bg: #0b1220;
+  --bg-soft: #0f172a;
+  --bg-elev: #111827;
+  --text: #e5e7eb;
+  --text-dim: #94a3b8;
+  --border: rgba(255,255,255,0.12);
+  --shadow: 0 8px 28px rgba(0,0,0,0.35);
+
+  --donut-fill: #8ab4ff;
+  --donut-track: #273449;
+  --donut-text: #e5e7eb;
+
+  --labs-prompt-bg: #0d223a;
+  --labs-prompt-border: rgba(138,180,255,.25);
+
+  --card-bg: rgba(22,27,34,0.9);
+  --card-border: rgba(255,255,255,0.10);
+
+  --table-head-bg: #0e2139;
+  --table-row-hover: rgba(255,255,255,0.04);
+
+  --collapsible-bg: #0f172a;
+
+  --seg-green: #22c55e;
+  --seg-yellow: #f59e0b;
+  --seg-red: #ef4444;
+  --seg-track: #1f2937;
+
+  --chip-bg: rgba(255,255,255,0.05);
+  --chip-border: rgba(255,255,255,0.10);
+}
+
+/* =========================
+   DRAWER / TOOLS GRID
+   ========================= */
+.tools-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  column-gap: 16px;
+  row-gap: 16px;
+  align-items: start;
+  justify-items: center;
+  padding: 16px;
+  background: var(--bg-elev);
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  box-shadow: var(--shadow);
+}
+
+.tool-wrapper {
+  display: flex;
+  justify-content: center;
+  align-items: stretch;
+  width: 100%;
+}
+
+.drawer-toggle-btn {
+  appearance: none;
+  border: 1px solid var(--border);
+  background: var(--bg-elev);
+  color: var(--text);
+  border-radius: 12px;
+  padding: 10px 12px;
+  font-weight: 800;
+  cursor: pointer;
+  box-shadow: var(--shadow);
+}
+.drawer-toggle-btn:hover {
+  transform: translateY(-1px);
+}
+
+/* Normalize fixed pieces in drawer to behave like tiles */
+.tool-wrapper > *:first-child,
+.tool-wrapper .record-case-btn-left,
+.tool-wrapper .record-timer-fixed,
+.tool-wrapper .labs-uploader-fixed,
+.tool-wrapper .meds-uploader-fixed {
+  position: relative !important;
+  left: auto !important;
+  bottom: auto !important;
+  transform: none !important;
+  margin: 0 auto !important;
+  z-index: 1 !important;
+  width: 100% !important;
+  max-width: 220px;
+}
+
+.labs-prompt {
+  width: 100%;
+  margin: 0 0 8px 0;
+}
+
+/* =========================
+   SECOND OPINION
+   ========================= */
+.so-card {
+  border: 1px solid var(--card-border);
+  border-radius: 16px;
+  background: var(--card-bg);
+  box-shadow: var(--shadow);
+  padding: 16px;
+  color: var(--text);
+}
+.so-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 14px;
+}
+.so-title {
+  font-weight: 800;
+  font-size: 18px;
+}
+.so-sub {
+  font-size: 13px;
+  color: var(--text-dim);
+}
+.so-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 10px;
+  border-radius: 999px;
+  background: rgba(55,80,216,0.12);
+  border: 1px solid rgba(55,80,216,0.30);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.so-section {
+  border: 1px dashed var(--border);
+  border-radius: 12px;
+  padding: 12px;
+  background: var(--bg-elev);
+}
+.so-sec-title {
+  font-weight: 800;
+  font-size: 14px;
+  margin-bottom: 8px;
+}
+.so-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: 12px;
+}
+
+/* Differential items with bigger donuts */
+.so-diffs {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 12px;
+}
+.so-diff-item {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  padding: 10px;
+  background: var(--bg-elev);
+}
+.so-diff-meta {
+  display: grid;
+  gap: 4px;
+}
+.so-diff-name {
+  font-weight: 800;
+  font-size: 14px;
+}
+.so-diff-sub {
+  font-size: 12px;
+  color: var(--text-dim);
+}
+
+.so-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+  color: var(--text);
+}
+.so-table th,
+.so-table td {
+  border-bottom: 1px solid var(--border);
+  padding: 8px 6px;
+  text-align: left;
+}
+.so-narrative {
+  border: 1px solid var(--border);
+  background: var(--bg-elev);
+  border-radius: 12px;
+  padding: 12px;
+}
+
+/* Recommended labs list with inline Add buttons */
+.lab-rec-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 6px 8px;
+  border-radius: 10px;
+}
+.lab-rec-item:hover {
+  background: var(--bg-soft);
+}
+.add-lab-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+  padding: 6px 10px;
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  background: var(--bg-elev);
+  color: var(--text);
+  font-weight: 700;
+  font-size: 12.5px;
+}
+.add-lab-btn:hover {
+  transform: translateY(-1px);
+}
+
+/* =========================
+   UNIFIED LAB ORDERS TABLE
+   ========================= */
+.lab-orders-card {
+  border: 1px solid var(--card-border);
+  border-radius: 16px;
+  background: var(--card-bg);
+  box-shadow: var(--shadow);
+  overflow: hidden;
+  color: var(--text);
+}
+.lab-orders-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-weight: 800;
+  padding: 12px 14px;
+  font-size: 15px;
+  background: var(--table-head-bg);
+  border-bottom: 1px solid var(--border);
+}
+.lab-orders-table {
+  width: 100%;
+  border-collapse: separate;
+  border-spacing: 0;
+  font-size: 14px;
+}
+.lab-orders-table thead th {
+  background: var(--table-head-bg);
+  color: var(--text);
+  font-weight: 700;
+  padding: 12px 14px;
+  border-bottom: 1px solid var(--border);
+}
+.lab-orders-table tbody td {
+  padding: 12px 14px;
+  border-bottom: 1px solid var(--border);
+  color: var(--text);
+}
+.lab-orders-table tbody tr {
+  transition: background .15s ease, transform .15s ease;
+}
+.lab-orders-table tbody tr:hover {
+  background: var(--table-row-hover);
+}
+
+/* priority pills */
+.prio-pill {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 56px;
+  padding: 4px 10px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 700;
+}
+.prio-high { background: #fee2e2; color: #b91c1c; }
+.prio-medium { background: #fef9c3; color: #a16207; }
+.prio-low { background: #dcfce7; color: #15803d; }
+
+/* send button area */
+.send-lab-wrap {
+  display: flex;
+  justify-content: flex-end;
+  padding: 12px 14px;
+}
+.send-lab-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  border: 0;
+  cursor: pointer;
+  padding: 10px 14px;
+  border-radius: 10px;
+  background: var(--primary);
+  color: var(--primary-contrast);
+  font-weight: 800;
+  box-shadow: 0 5px 16px rgba(10,102,194,.25);
+}
+.send-lab-btn:disabled {
+  opacity: .6;
+  cursor: not-allowed;
+  box-shadow: none;
+}
+
+/* =========================
+   REQUIRED LABS (legacy badge set)
+   (kept for compatibility; currently not rendered)
+   ========================= */
+.req-labs {
+  border: 1px solid var(--card-border);
+  border-radius: 14px;
+  background: var(--card-bg);
+  padding: 12px;
+}
+.req-labs .title {
+  font-weight: 800;
+  margin-bottom: 8px;
+}
+.req-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  border-radius: 12px;
+  border: 1px solid var(--chip-border);
+  margin: 4px 6px 0 0;
+  background: var(--chip-bg);
+  font-size: 12.5px;
+  color: var(--text);
+}
+.req-chip .why {
+  opacity: .8;
+  font-size: 11.5px;
+}
+
+/* =========================
+   LABS VISUAL SUMMARY PANEL
+   ========================= */
+.labs-panel {
+  border: 1px solid var(--card-border);
+  border-radius: 16px;
+  background: var(--card-bg);
+  box-shadow: var(--shadow);
+  overflow: hidden;
+  color: var(--text);
+}
+.labs-panel__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 14px;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-elev);
+}
+.labs-panel__title {
+  font-weight: 800;
+  font-size: 15px;
+}
+.labs-panel__meta {
+  font-size: 12px;
+  color: var(--text-dim);
+}
+.labs-panel__legend {
+  display: inline-grid;
+  grid-auto-flow: column;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  color: var(--text-dim);
+}
+.chip {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  border-radius: 2px;
+  background: var(--seg-track);
+}
+.chip--green { background: var(--seg-green); }
+.chip--yellow { background: var(--seg-yellow); }
+.chip--red { background: var(--seg-red); }
+.chip--dot {
+  width: 8px; height: 8px; border-radius: 50%;
+  background: var(--text);
+}
+
+.labs-panel__body {
+  padding: 8px 12px 12px 12px;
+}
+
+/* Rows */
+.lab-row {
+  display: grid;
+  grid-template-columns: minmax(160px, 1fr) 3fr auto;
+  gap: 12px;
+  align-items: center;
+  padding: 10px 8px;
+  border-radius: 10px;
+}
+.lab-row:hover {
+  background: var(--bg-soft);
+}
+.lab-row__left {
+  display: grid;
+  gap: 3px;
+}
+.lab-row__name {
+  font-weight: 700;
+}
+.lab-row__range {
+  font-size: 12px;
+  color: var(--text-dim);
+}
+
+.lab-row__bar .range-label {
+  font-size: 10px;
+  color: var(--text-dim);
+  margin-bottom: 6px;
+  letter-spacing: .04em;
+}
+.lab-row__bar .bar {
+  position: relative;
+  display: flex;
+  height: 8px;
+  border-radius: 999px;
+  background: var(--seg-track);
+  overflow: hidden;
+}
+.lab-row__bar .seg { height: 100%; }
+.seg--green { background: var(--seg-green); }
+.seg--yellow { background: var(--seg-yellow); }
+.seg--red { background: var(--seg-red); }
+.lab-row__bar .indicator {
+  position: absolute;
+  top: -4px;
+  width: 2px;
+  height: 16px;
+  background: currentColor;
+  color: var(--text);
+  border-radius: 2px;
+  transform: translateX(-1px);
+}
+
+.lab-row__value {
+  font-weight: 800;
+  padding: 6px 10px;
+  border-radius: 8px;
+  justify-self: end;
+}
+.lab-row__value--normal {
+  color: var(--chip-green);
+  background: color-mix(in oklab, var(--chip-green) 15%, transparent);
+}
+.lab-row__value--borderline {
+  color: var(--chip-yellow);
+  background: color-mix(in oklab, var(--chip-yellow) 18%, transparent);
+}
+.lab-row__value--abnormal {
+  color: var(--chip-red);
+  background: color-mix(in oklab, var(--chip-red) 15%, transparent);
+}
+
+/* =========================
+   LAB AGENT TRIGGER
+   ========================= */
+.lab-agent-open-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  gap: 8px;
+  padding: 10px 12px;
+  border-radius: 12px;
+  border: 1px solid var(--border);
+  background: var(--bg-elev);
+  color: var(--text);
+  font-weight: 800;
+  cursor: pointer;
+  box-shadow: var(--shadow);
+}
+.lab-agent-open-btn:hover {
+  transform: translateY(-1px);
+}
+
+
+/* =========================
+   COLLAPSIBLE DIAGRAM
+   ========================= */
+.collapsible-diagram {
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--collapsible-bg);
+  overflow: hidden;
+}
+.collapsible-header {
+  font-weight: 700;
+  padding: 10px 12px;
+  cursor: pointer;
+  user-select: none;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  border-bottom: 1px solid var(--border);
+}
+.collapsible-header:hover {
+  background: var(--bg-soft);
+}
+
+/* =========================
+   MISC
+   ========================= */
+.typing-caret {
+  display: inline-block;
+  width: 8px;
+  height: 1em;
+  background: var(--text);
+  margin-left: 2px;
+  animation: caret 1s steps(1) infinite;
+}
+@keyframes caret {
+  50% { opacity: 0; }
+}
+
+/* Chat layout helpers (non-invasive; complements chat.css) */
+.chat-layout {
+  background: var(--bg);
+  color: var(--text);
+}
+.chat-content .chat-message .message-text {
+  color: var(--text);
+}
+.avatar img {
+  border-radius: 50%;
+  border: 1px solid var(--border);
+}

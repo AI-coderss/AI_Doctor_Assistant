@@ -1,17 +1,21 @@
 :root {
-    /* Component sizing */
-    --fab-size: 64px;            /* mic diameter */
-    --fab-bottom: 20px;          /* mic distance from bottom */
-    --ring-size: 102px;          /* mic ring size */
+    /* Sizing */
+    --fab-size: 64px;
+    /* mic diameter */
+    --fab-bottom: 20px;
+    /* mic distance from bottom */
+    --ring-size: 102px;
+    /* mic ring size */
 
-    /* Accents */
-    --accent-blue-1: #007BFF;    /* idle blue */
-    --accent-blue-2: #007BFF;
+    /* Brand accents */
+    --brand-blue: #3951DA;
+    /* tools/drawer button color */
+    --black-true: #000000;
 
-    /* 🔆 BRIGHT neon green for ACTIVE */
-    --accent-green-1: #32ff7e;
-    --accent-green-2: #00d27f;
-    --accent-green-ring: rgba(50, 255, 126, 0.85);
+    /* Mic FAB (green theme) */
+    --green-1: #22c55e;
+    --green-2: #16a34a;
+    --green-ring: rgba(34, 197, 94, 0.85);
 
     /* Card tokens */
     --card-bg: #ffffff;
@@ -19,60 +23,56 @@
     --card-border: rgba(15, 23, 42, 0.08);
     --card-shadow: 0 22px 60px rgba(0, 0, 0, 0.08);
 
-    /* ✅ Unified width so dock matches the assistant */
+    /* unified width */
     --va-width: clamp(360px, 28vw, 450px);
 }
 
+/* ================== RIGHT voice panel ================== */
 .voice-assistant {
     position: fixed;
     right: 0;
-    top: 80px;                   /* Positioned below the assumed 80px header */
-    width: var(--va-width);      /* unified width */
-    max-width: var(--va-width);  /* unified width */
-    height: calc(80vh - 80px);   /* Fill remaining viewport height */
-    padding: 20px;               /* General padding */
+    top: 80px;
+    width: var(--va-width);
+    max-width: var(--va-width);
+    /* Height that you confirmed is good */
+    height: calc(90vh - 80px);
+    padding: 20px;
     background: rgba(255, 255, 255, 0.3);
     backdrop-filter: blur(0.5px);
     -webkit-backdrop-filter: blur(0.5px);
     border-left: 1px solid rgba(255, 255, 255, 0.4);
-    color: #0f172a;              /* dark text by default */
+    color: #0f172a;
     box-shadow: -6px 0 16px rgba(0, 0, 0, 0.2);
     z-index: 1000;
     display: flex;
     flex-direction: column;
     box-sizing: border-box;
-    margin-top: 0;
-    padding-top: 70px;           /* space for close button + orb */
-    padding-bottom: 80px;        /* ensure content doesn't go under the mic button */
+    padding-top: 70px;
+    /* close + orb space */
+    padding-bottom: 20px;
 
-    /* ✅ Orb sizing variables so the outer ring has room */
-    --orb-size: 240px;           /* canvas diameter */
-    --orb-ring-size: calc(var(--orb-size) + 36px); /* outer ring diameter */
+    --orb-size: 240px;
+    --orb-ring-size: calc(var(--orb-size) + 36px);
 }
 
-/* Orb container (now holds <BaseOrb /> canvas) */
 .assistant-orb {
     position: absolute;
-    top: 30%;                    /* roughly center vertically */
+    top: 30%;
     left: 50%;
     transform: translate(-50%, -50%);
     width: var(--orb-size);
     height: var(--orb-size);
     border-radius: 50%;
-    object-fit: cover;           /* harmless with canvas; preserved */
     z-index: 1001;
-    overflow: visible;           /* allow outer ring to extend beyond */
-    pointer-events: none;        /* visuals shouldn't block clicks */
+    pointer-events: none;
 }
 
-/* Ensure BaseOrb canvas fills */
 .assistant-orb .base-orb {
     width: 100%;
     height: 100%;
     display: block;
 }
 
-/* Outer ring around the orb — lightened blue */
 .assistant-orb::before {
     content: "";
     position: absolute;
@@ -82,13 +82,11 @@
     height: var(--orb-ring-size);
     transform: translate(-50%, -50%);
     border-radius: 50%;
-    box-sizing: border-box;
-    border: 2px solid rgba(0, 123, 255, 0.28);
-    filter: drop-shadow(0 0 12px rgba(0, 123, 255, 0.20));
+    border: 2px solid rgba(57, 81, 218, 0.28);
+    filter: drop-shadow(0 0 12px rgba(57, 81, 218, 0.20));
     pointer-events: none;
 }
 
-/* Subtle animated halo glow — lightened */
 .assistant-orb::after {
     content: "";
     position: absolute;
@@ -100,9 +98,9 @@
     border-radius: 50%;
     pointer-events: none;
     background: radial-gradient(circle,
-            rgba(0, 123, 255, 0.06) 0%,
-            rgba(0, 123, 255, 0.04) 40%,
-            rgba(0, 123, 255, 0.01) 70%,
+            rgba(57, 81, 218, 0.06) 0%,
+            rgba(57, 81, 218, 0.04) 40%,
+            rgba(57, 81, 218, 0.01) 70%,
             transparent 80%);
     animation: orb-halo 2.8s ease-in-out infinite;
 }
@@ -112,84 +110,215 @@
         transform: translate(-50%, -50%) scale(0.98);
         opacity: 0.7;
     }
+
     50% {
         transform: translate(-50%, -50%) scale(1.02);
         opacity: 1;
     }
+
     100% {
         transform: translate(-50%, -50%) scale(0.98);
         opacity: 0.7;
     }
 }
 
-/* Content area below the orb */
 .assistant-content {
     margin-top: calc(var(--orb-ring-size) + 24px);
     flex: 1;
     padding-right: 10px;
-    color: #0f172a; /* ensure readable text */
+    color: #0f172a;
+    overflow: auto;
 }
 
-/* ===== Mic FAB (centered) ===== */
+/* Top-right controls row */
+.va-controls {
+    position: absolute;
+    top: 12px;
+    right: 12px;
+    display: flex;
+    gap: 8px;
+    align-items: center;
+}
+
+/* ================== Buttons ================== */
+.va-btn {
+    --btn-bg: var(--brand-blue);
+    --btn-ink: #fff;
+    --btn-shadow: 0 6px 16px rgba(57, 81, 218, .26);
+
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 12px;
+    border-radius: 10px;
+    border: 1px solid transparent;
+    cursor: pointer;
+    font-weight: 800;
+    font-size: 12.5px;
+    background: var(--btn-bg);
+    color: var(--btn-ink);
+    box-shadow: var(--btn-shadow);
+    transition: transform .12s ease, box-shadow .2s ease, background .2s ease, border-color .2s ease, color .2s ease;
+}
+
+.va-btn:hover {
+    transform: translateY(-1px);
+    box-shadow: 0 10px 22px rgba(57, 81, 218, .32);
+}
+
+.va-btn:active {
+    transform: translateY(0);
+    box-shadow: 0 6px 16px rgba(57, 81, 218, .2);
+}
+
+/* Primary (brand blue) – e.g., Sync Context */
+.va-btn.is-primary {
+    --btn-bg: linear-gradient(180deg, var(--brand-blue), #2c40c6);
+}
+
+/* Reset (white) */
+.va-btn.is-reset {
+    --btn-bg: #fff;
+    --btn-ink: #0f172a;
+    border-color: rgba(15, 23, 42, 0.12);
+    box-shadow: 0 6px 14px rgba(0, 0, 0, .08);
+}
+
+.va-btn.is-reset:hover {
+    box-shadow: 0 10px 20px rgba(0, 0, 0, .12);
+}
+
+/* Danger (explicit red) – End Session stays red */
+.va-btn.is-danger {
+    --btn-bg: linear-gradient(180deg, #ef4444, #b91c1c);
+    --btn-ink: #fff;
+    box-shadow: 0 8px 18px rgba(239, 68, 68, .28);
+}
+
+.va-btn.is-danger:hover {
+    box-shadow: 0 12px 24px rgba(239, 68, 68, .35);
+}
+
+/* Close button (round) inside controls row */
+.close-btn {
+    color: #fff;
+    background-color: var(--brand-blue);
+    width: 40px;
+    height: 40px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border: none;
+    border-radius: 50%;
+    cursor: pointer;
+    transition: background .3s ease, transform .2s ease, box-shadow .2s ease;
+    font-size: 1rem;
+    box-shadow: 0 6px 14px rgba(57, 81, 218, .25);
+}
+
+.close-btn:hover {
+    background-color: #2c40c6;
+    transform: translateY(-2px);
+    box-shadow: 0 10px 20px rgba(57, 81, 218, .32);
+}
+
+/* Header + status */
+.va-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 10px;
+}
+
+.va-title {
+    font-weight: 900;
+    font-size: 18px;
+    display: flex;
+    align-items: center;
+}
+
+.va-status {
+    font-size: 12.5px;
+    opacity: .85;
+}
+
+.va-status.prepping {
+    color: #2c40c6;
+}
+
+.va-status.connected {
+    color: #065f46;
+}
+
+.va-status.error {
+    color: #b91c1c;
+}
+
+/* Sections */
+.va-section {
+    border: 1px solid var(--card-border);
+    border-radius: 12px;
+    padding: 12px;
+    background: #fff;
+    margin-top: 8px;
+}
+
+.va-subtitle {
+    font-weight: 800;
+    margin-bottom: 8px;
+}
+
+.va-stream {
+    min-height: 120px;
+    white-space: pre-wrap;
+    line-height: 1.45;
+    font-size: 13.5px;
+}
+
+.va-ask {
+    font-weight: 700;
+}
+
+.va-hint {
+    font-size: 12px;
+    opacity: .7;
+}
+
+/* ================== Mic FAB (green) ================== */
 .mic-btn {
     position: absolute;
     left: 50%;
     bottom: var(--fab-bottom);
     transform: translateX(-50%);
     z-index: 1005;
-
     width: var(--fab-size);
     height: var(--fab-size);
     border-radius: 50%;
     border: none;
     cursor: pointer;
     isolation: isolate;
-
-    /* 3D blue idle */
     background:
         radial-gradient(120% 120% at 30% 20%, rgba(255, 255, 255, 0.45), transparent 40%),
-        linear-gradient(180deg, var(--accent-blue-1), var(--accent-blue-2));
+        linear-gradient(180deg, var(--green-1), var(--green-2));
     box-shadow:
-        0 14px 26px rgba(23, 70, 197, 0.28),
-        0 6px 10px rgba(23, 70, 197, 0.22),
+        0 14px 26px rgba(34, 197, 94, 0.28),
+        0 6px 10px rgba(34, 197, 94, 0.22),
         inset 0 -6px 10px rgba(0, 0, 0, 0.20),
         inset 0 2px 3px rgba(255, 255, 255, 0.45);
-
     color: #ffffff !important;
     font-size: 1.65rem;
     line-height: 1;
     display: flex;
     align-items: center;
     justify-content: center;
-
     transition: transform .15s ease, box-shadow .22s ease;
 }
 
-/* Force mic icon to white across libs */
 .mic-btn,
 .mic-btn * {
-    color: #ffffff !important;
+    color: #fff !important;
 }
 
-.mic-btn svg,
-.mic-btn svg *,
-.mic-btn i,
-.mic-btn .fa,
-.mic-btn .icon,
-.mic-btn [class*="icon"],
-.mic-btn .lucide {
-    fill: #ffffff !important;
-    stroke: #ffffff !important;
-    color: #ffffff !important;
-    opacity: 1 !important;
-}
-
-.mic-btn img,
-.mic-btn .icon-img {
-    filter: brightness(0) invert(1) !important;
-}
-
-/* top glossy streak */
 .mic-btn::before {
     content: "";
     position: absolute;
@@ -197,7 +326,7 @@
     top: 10%;
     width: 60%;
     height: 38%;
-    background: linear-gradient(180deg, rgba(255, 255, 255, 0.35), rgba(255, 255, 255, 0.05));
+    background: linear-gradient(180deg, rgba(255, 255, 255, .35), rgba(255, 255, 255, .05));
     filter: blur(6px);
     border-radius: 80% 80% 50% 50%;
     pointer-events: none;
@@ -205,7 +334,6 @@
     z-index: 0;
 }
 
-/* Radiating ring — BLUE while idle */
 .mic-btn::after {
     content: "";
     position: absolute;
@@ -215,377 +343,156 @@
     height: var(--ring-size);
     transform: translate(-50%, -50%);
     border-radius: 50%;
-    border: 2px solid rgba(42, 108, 244, 0.45);
-    box-shadow: 0 0 10px rgba(42, 108, 244, 0.22);
+    border: 2px solid rgba(34, 197, 94, .45);
+    box-shadow: 0 0 10px rgba(34, 197, 94, .22);
     pointer-events: none;
     animation: mic-ring 1.25s ease-out infinite;
     z-index: 0;
 }
 
-.mic-btn > * { position: relative; z-index: 1; }
+.mic-btn>* {
+    position: relative;
+    z-index: 1;
+}
 
 @keyframes mic-ring {
-    0%   { opacity: .55; transform: translate(-50%, -50%) scale(1); }
-    70%  { opacity: .18; transform: translate(-50%, -50%) scale(1.35); }
-    100% { opacity: 0;   transform: translate(-50%, -50%) scale(1.65); }
+    0% {
+        opacity: .55;
+        transform: translate(-50%, -50%) scale(1);
+    }
+
+    70% {
+        opacity: .18;
+        transform: translate(-50%, -50%) scale(1.35);
+    }
+
+    100% {
+        opacity: 0;
+        transform: translate(-50%, -50%) scale(1.65);
+    }
 }
 
 .mic-btn:hover {
     transform: translateX(-50%) translateY(-2px);
     box-shadow:
-        0 18px 36px rgba(23, 70, 197, 0.34),
-        0 8px 14px rgba(23, 70, 197, 0.26),
-        inset 0 -7px 12px rgba(0, 0, 0, 0.22),
-        inset 0 3px 4px rgba(255, 255, 255, 0.5);
-}
-
-/* Active (recording) — BRIGHT GREEN; icon stays WHITE */
-.mic-btn.mic-active {
-    background:
-        radial-gradient(120% 120% at 30% 20%, rgba(255, 255, 255, 0.55), transparent 42%),
-        linear-gradient(180deg, var(--accent-green-1), var(--accent-green-2));
-    box-shadow:
-        0 0 22px rgba(50, 255, 126, 0.55),
-        0 18px 36px rgba(0, 210, 127, 0.38),
-        0 8px 14px rgba(0, 210, 127, 0.30),
-        inset 0 -7px 12px rgba(0, 0, 0, 0.18),
-        inset 0 3px 5px rgba(255, 255, 255, 0.60);
-    color: #ffffff !important;
-}
-
-@media (min-width: 1025px) {
-    .mic-btn.mic-active { transform: translateX(-50%) scale(1.05); }
+        0 18px 36px rgba(34, 197, 94, .34),
+        0 8px 14px rgba(34, 197, 94, .26),
+        inset 0 -7px 12px rgba(0, 0, 0, .22),
+        inset 0 3px 4px rgba(255, 255, 255, .5);
 }
 
 .mic-btn.mic-active::after {
-    border-color: var(--accent-green-ring);
-    box-shadow:
-        0 0 16px rgba(50, 255, 126, 0.55),
-        0 0 30px rgba(50, 255, 126, 0.35);
+    border-color: var(--green-ring);
+    box-shadow: 0 0 16px rgba(34, 197, 94, .55), 0 0 30px rgba(34, 197, 94, .35);
     animation: mic-ring-green 1.05s ease-out infinite;
 }
 
 @keyframes mic-ring-green {
-    0%   { opacity: .55; transform: translate(-50%, -50%) scale(0.98); }
-    70%  { opacity: .18; transform: translate(-50%, -50%) scale(1.40); }
-    100% { opacity: 0;   transform: translate(-50%, -50%) scale(1.70); }
-}
-
-.close-btn {
-    color: white;
-    background-color: #ffa3a3;
-    width: 40px;
-    height: 40px;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    border: none;
-    border-radius: 50%;
-    cursor: pointer;
-    transition: background 0.3s ease, transform 0.2s ease;
-    font-size: 1rem;
-    position: absolute;
-    bottom: 105px;
-    right: 15px;
-    z-index: 1005;
-}
-
-.close-btn:hover {
-    background-color: #dc2626;
-    transform: translateY(-2px);
-}
-
-/* 📱 Responsive */
-@media (max-width: 1024px) {
-    .voice-assistant {
-        position: absolute;
-        width: 100%;
-        max-width: none;
-        height: auto;
-        padding: 16px;
-        margin-top: 160px;       /* Adjusted for mobile header */
-        padding-top: 60px;
-        padding-bottom: 70px;
-        border-left: none;
-        border-top: 1px solid rgba(255, 255, 255, 0.2);
-        box-shadow: 0 -4px 12px rgba(0, 0, 0, 0.1);
-        backdrop-filter: none;
-        -webkit-backdrop-filter: none;
+    0% {
+        opacity: .55;
+        transform: translate(-50%, -50%) scale(.98);
     }
-    .assistant-orb { display: none; }
-    .close-btn {
-        position: fixed;
-        bottom: 175px;            /* Above mic button */
-        right: 15px;
-        z-index: 1005;
+
+    70% {
+        opacity: .18;
+        transform: translate(-50%, -50%) scale(1.40);
+    }
+
+    100% {
+        opacity: 0;
+        transform: translate(-50%, -50%) scale(1.70);
     }
 }
 
-.waveform-container {
-    width: 100%;
-    max-width: 100%;
-    margin-top: 2px;
-}
-.waveform-container canvas {
-    width: 100% !important;
-    display: block;
-    border-radius: 10px;
-}
-
-.assistant-loader-overlay {
-    position: absolute;
-    top: 0; left: 0;
-    width: 100%; height: 100%;
-    backdrop-filter: blur(8px);
-    background: rgba(255, 255, 255, 0.2);
-    z-index: 10000;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    pointer-events: none;
-}
-.assistant-loader {
-    text-align: center;
-    color: #000;
-    font-weight: 500;
-    backdrop-filter: none;
-}
-.assistant-loader .spinner {
-    margin-top: 10px;
-    width: 30px; height: 30px;
-    border: 4px solid #ccc;
-    border-top-color: #0a66c2;
-    border-radius: 50%;
-    animation: spin 0.8s linear infinite;
-}
-
-.mic-btn.mic-active {
-    background-color: #10b981;
-    box-shadow: 0 0 0 4px rgba(16, 185, 129, 0.3);
-}
-.mic-btn.mic-active::after {
-    border-color: #10b981;
-    animation: mic-radiate-green 1.2s infinite;
-}
-@keyframes mic-radiate-green {
-    0%   { opacity: 0.4; transform: translate(-50%, -50%) scale(1); }
-    70%  { opacity: 0.15; transform: translate(-50%, -50%) scale(1.4); }
-    100% { opacity: 0;    transform: translate(-50%, -50%) scale(1.7); }
-}
-
-/* Responsive layout for mobile */
-@media (max-width: 768px) {
-    .mic-btn {
-        position: fixed;
-        bottom: 80px;
-        left: 50%;
-        transform: translateX(-50%);
-        width: auto;
-        max-width: 90%;
-        padding: 12px 20px;
-        font-size: 18px;
-    }
-}
-
-/* ====== Small additions for panel content ====== */
-.va-header {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    margin-bottom: 10px;
-}
-.va-title {
-    font-weight: 800;
-    font-size: 16px;
-    color: #0f172a;
-}
-.va-status {
-    font-size: 12.5px;
-    padding: 6px 10px;
-    border-radius: 999px;
-    background: #f1f5f9;
-    color: #0f172a;
-    border: 1px solid rgba(0, 0, 0, 0.08);
-}
-.va-status.connected {
-    background: #e8fff3;
-    border-color: #b7f7cf;
-}
-.va-status.error {
-    background: #fff1f2;
-    border-color: #fecaca;
-}
-.va-section {
-    border: 1px solid rgba(0, 0, 0, 0.06);
-    background: #fff;
-    border-radius: 12px;
-    padding: 12px;
-    margin-bottom: 12px;
-    box-shadow: 0 4px 14px rgba(0, 0, 0, 0.04);
-}
-.va-subtitle {
-    font-weight: 800;
-    font-size: 14px;
-    margin-bottom: 8px;
-    display: flex;
-    align-items: center;
-    gap: 10px;
-}
-.pill {
-    display: inline-flex;
-    align-items: center;
-    padding: 2px 8px;
-    background: #eef2ff;
-    border: 1px solid #c7d2fe;
-    border-radius: 999px;
-    font-size: 12px;
-}
-.va-stream {
-    white-space: pre-wrap;
-    font-size: 13.5px;
-    color: #0f172a;
-    min-height: 64px;
-}
-
-.lab-suggestions {
-    display: grid;
-    grid-template-columns: 1fr;
-    gap: 10px;
-}
-.sug-card {
-    border: 1px solid rgba(0, 0, 0, 0.06);
-    border-radius: 12px;
-    background: #fff;
-    padding: 10px;
-    display: flex;
-    align-items: flex-start;
-    justify-content: space-between;
-    gap: 10px;
-}
-.sug-title {
-    font-weight: 800;
-    font-size: 14px;
-    color: #0f172a;
-}
-.sug-meta {
-    font-size: 12px;
-    color: #475569;
-}
-.badge {
-    display: inline-flex;
-    align-items: center;
-    padding: 2px 6px;
-    background: #f1f5f9;
-    border-radius: 8px;
-    margin-right: 6px;
-    border: 1px solid rgba(0, 0, 0, 0.06);
-}
-.why { opacity: .85; }
-.sug-actions {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-}
-.approve-btn {
-    border: none;
-    background: #0ea5e9;
-    color: #fff;
-    border-radius: 8px;
-    padding: 8px 10px;
-    cursor: pointer;
-    display: inline-flex;
-    align-items: center;
-    gap: 6px;
-    font-weight: 700;
-    font-size: 12.5px;
-}
-.approve-btn:hover { filter: brightness(0.96); }
-.approve-all-btn {
-    margin-left: auto;
-    border: none;
-    background: #10b981;
-    color: #fff;
-    border-radius: 8px;
-    padding: 6px 10px;
-    cursor: pointer;
-    display: inline-flex;
-    align-items: center;
-    gap: 6px;
-    font-weight: 700;
-    font-size: 12px;
-}
-.approve-all-btn:hover { filter: brightness(0.96); }
-
-.approved-list {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 6px;
-}
-.chip-approved {
-    display: inline-flex;
-    align-items: center;
-    padding: 6px 10px;
-    background: #ecfeff;
-    border: 1px solid #a5f3fc;
-    color: #0f172a;
-    border-radius: 12px;
-    font-size: 12.5px;
-}
-.empty-hint {
-    font-size: 12.5px;
-    color: #64748b;
-}
-
-/* === New: Pending Suggestions Dock (draggable, same width, dark text) === */
+/* ================== Left Column: Pending Suggestions (same height as agent) ================== */
 .pending-dock {
     position: fixed;
-    right: 24px;
-    bottom: 24px;
     width: var(--va-width);
     max-width: var(--va-width);
     background: var(--card-bg, #fff);
     color: var(--card-ink, #0f172a);
-    border: 1px solid var(--card-border, rgba(15,23,42,0.08));
+    border: 1px solid var(--card-border, rgba(15, 23, 42, 0.08));
     border-radius: 14px;
-    box-shadow: 0 10px 30px rgba(0,0,0,0.15);
+    box-shadow: 0 10px 30px rgba(0, 0, 0, 0.15);
     padding: 12px;
-    cursor: grab;
-    z-index: 1100;
+    z-index: 910;
+    /* under right panel (1000), above page */
+    cursor: default;
+    overflow: visible;
 }
+
 .pending-dock .dock-title {
     font-weight: 800;
     font-size: 14px;
     margin-bottom: 8px;
     color: var(--card-ink, #0f172a);
 }
+
+/* 👉 Height matches the agent: top 80px, bottom 10vh (agent ends at 90vh) */
+.pending-dock--left {
+    left: 16px !important;
+    right: auto !important;
+    top: 80px;
+    bottom: 10vh;
+    /* = 100vh - 90vh => same bottom as agent */
+    display: flex;
+    flex-direction: column;
+}
+
+.pending-dock--left .dock-title {
+    position: sticky;
+    top: 0;
+    z-index: 1;
+    background: var(--card-bg, #fff);
+    padding-bottom: 8px;
+    margin-bottom: 8px;
+    border-bottom: 1px solid var(--card-border, rgba(15, 23, 42, 0.08));
+}
+
+/* internal list fills the remaining space inside the dock */
 .pending-list {
     display: grid;
     gap: 10px;
-    max-height: calc(80vh - 220px); /* tall & responsive */
+    /* Height inside dock = calc(90vh - 80px) minus ≈48px for title spacing */
+    max-height: calc(90vh - 80px - 48px);
     overflow: auto;
-
-    /* hide scrollbars, keep scrollability */
-    scrollbar-width: none;              /* Firefox */
-    -ms-overflow-style: none;           /* IE/Edge Legacy */
+    scrollbar-width: none;
+    -ms-overflow-style: none;
+    -webkit-mask-image: none;
+    mask-image: none;
+    /* ensure no fade/cut at bottom */
 }
-.pending-list::-webkit-scrollbar { display: none; } /* WebKit */
+
+.pending-list::-webkit-scrollbar {
+    display: none;
+}
 
 .pending-item {
     background: #ffffff;
-    border: 1px solid rgba(15,23,42,0.08);
+    border: 1px solid rgba(15, 23, 42, 0.08);
     border-radius: 10px;
     padding: 10px;
     color: #0f172a;
+    transition: background-color .15s ease, box-shadow .18s ease, transform .12s ease;
 }
+
+.pending-item:hover {
+    background: #fbfcff;
+    box-shadow: 0 6px 18px rgba(0, 0, 0, 0.06);
+    transform: translateY(-1px);
+}
+
 .pending-item .sug-title {
     font-weight: 800;
     font-size: 14px;
     color: #0f172a;
 }
+
 .pending-item .sug-meta {
     font-size: 12px;
     color: #475569;
 }
+
 .pending-item .badge {
     display: inline-flex;
     align-items: center;
@@ -593,21 +500,147 @@
     background: #f1f5f9;
     border-radius: 8px;
     margin-right: 6px;
-    border: 1px solid rgba(0,0,0,0.06);
-}
-.pending-item .why { opacity: .85; }
-
-/* extra feedback when dragging */
-.pending-item[style*="transform"] {
-    box-shadow: 0 8px 28px rgba(0,0,0,0.12);
+    border: 1px solid rgba(0, 0, 0, 0.06);
 }
 
-/* small screens: dock spans full width (still draggable) */
+.pending-item .why {
+    opacity: .85;
+}
+
+.btn-row {
+    margin-top: 10px;
+    display: flex;
+    gap: 8px;
+}
+
+.tiny-hint {
+    font-size: 11px;
+    opacity: .6;
+    margin-top: 6px;
+}
+
+/* Mobile: left column becomes full width at top */
 @media (max-width: 768px) {
-    .pending-dock {
-        left: 12px;
-        right: 12px;
+    .pending-dock--left {
+        left: 12px !important;
+        right: 12px !important;
+        top: 90px;
         width: auto;
         max-width: none;
+        bottom: 16px;
+        /* on small screens we let it breathe a bit */
     }
+
+    .pending-list {
+        max-height: calc(100vh - 90px - 16px - 48px);
+    }
+}
+
+/* ================== Buttons used in Pending Dock (reuse) ================== */
+.va-btn.is-primary {
+    background: linear-gradient(180deg, var(--brand-blue), #2c40c6);
+    color: #fff;
+}
+
+.va-btn.is-ghost,
+.va-btn.is-reset {
+    background: #fff;
+    color: #0f172a;
+    border: 1px solid rgba(15, 23, 42, 0.12);
+    box-shadow: 0 6px 14px rgba(0, 0, 0, .08);
+}
+
+.va-btn.is-ghost:hover,
+.va-btn.is-reset:hover {
+    box-shadow: 0 10px 20px rgba(0, 0, 0, .12);
+}
+
+/* ================== Drawer toggle “Tools” button – BIG, ROUND, PULSING ================== */
+.drawer-toggle-btn {
+    --pulse-color: var(--brand-blue);
+    width: 50px;
+    height: 50px;
+    border-radius: 50%;
+    background: linear-gradient(180deg, var(--brand-blue), #2c40c6);
+    color: #fff;
+    border: none;
+    cursor: pointer;
+    font-size: 20px;
+    display: grid;
+    place-items: center;
+    box-shadow: 0 14px 28px rgba(57, 81, 218, .32), 0 8px 16px rgba(57, 81, 218, .20);
+    position: relative;
+    transition: transform .15s ease, box-shadow .25s ease, filter .2s ease;
+    animation: tools-pulse 1.8s ease-in-out infinite;
+}
+
+.drawer-toggle-btn:hover {
+    transform: translateY(-2px) scale(1.03);
+    box-shadow: 0 18px 36px rgba(57, 81, 218, .36), 0 10px 20px rgba(57, 81, 218, .22);
+}
+
+.drawer-toggle-btn:active {
+    transform: translateY(0) scale(0.98);
+}
+
+.drawer-toggle-btn::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    border-radius: 50%;
+    box-shadow: 0 0 0 0 rgba(57, 81, 218, .45);
+    animation: tools-ring 1.8s ease-out infinite;
+}
+
+@keyframes tools-pulse {
+
+    0%,
+    100% {
+        filter: saturate(1);
+    }
+
+    50% {
+        filter: saturate(1.15);
+    }
+}
+
+@keyframes tools-ring {
+    0% {
+        box-shadow: 0 0 0 0 rgba(57, 81, 218, .45);
+        opacity: .75;
+    }
+
+    70% {
+        box-shadow: 0 0 0 16px rgba(57, 81, 218, 0);
+        opacity: 0;
+    }
+
+    100% {
+        box-shadow: 0 0 0 0 rgba(57, 81, 218, 0);
+        opacity: 0;
+    }
+}
+
+/* ================== Lab Agent trigger stays BLACK ================== */
+.lab-agent-open-btn {
+    background: var(--black-true);
+    color: #fff;
+    border: 1px solid #111;
+    border-radius: 10px;
+    padding: 10px 12px;
+    font-weight: 800;
+    cursor: pointer;
+    box-shadow: 0 8px 18px rgba(0, 0, 0, .28);
+    transition: transform .12s ease, box-shadow .2s ease, filter .2s ease, background .2s ease;
+}
+
+.lab-agent-open-btn:hover {
+    transform: translateY(-1px);
+    box-shadow: 0 12px 24px rgba(0, 0, 0, .35);
+    background: #0a0a0a;
+}
+
+.lab-agent-open-btn:active {
+    transform: translateY(0);
+    box-shadow: 0 8px 18px rgba(0, 0, 0, .22);
 }

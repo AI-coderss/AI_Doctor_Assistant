@@ -155,7 +155,7 @@
   border-radius: 10px;
   border: 1px solid transparent;
   cursor: pointer;
-  font-weight: 800;
+  font-weight: normal !important;
   font-size: 12.5px;
   background: var(--btn-bg);
   color: var(--btn-ink);

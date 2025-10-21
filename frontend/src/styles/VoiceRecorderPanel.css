@@ -93,9 +93,10 @@
 }
 
 .record-case-btn-left {
-    position: fixed;
+    position: relative;
     left: 1.25rem;
     bottom: 5.5rem;
+    margin-top: 250px;
     z-index: 1000;
 
     padding: .72rem 1.15rem;
@@ -553,4 +554,39 @@
         --digits-size: 20px;
         --colon-size: 16px;
     }
+}
+
+/* === Drawer overrides (append at end) ===================== */
+:root {
+  /* One place to tweak drawer tile size, if needed */
+  --drawer-tile-w: 150px;        /* ≈ “Record The Case” width */
+  --drawer-tile-h: 44px;         /* consistent button height  */
+  --drawer-primary-ink: #fff;
+  --drawer-primary-bg:#6366f1;
+}
+
+/* Make the Record button behave like a tile inside the drawer */
+.tools-grid .record-case-btn-left {
+  position: static !important;
+  left: auto !important;
+  bottom: auto !important;
+  transform: none !important;
+  width: var(--drawer-tile-w) !important;
+  max-width: var(--drawer-tile-w) !important;
+  min-height: var(--drawer-tile-h) !important;
+  margin: 0 auto !important;
+  background: var(--drawer-primary-bg) !important;
+  color: var(--drawer-primary-ink) !important;
+  box-shadow: 0 6px 14px rgba(57, 81, 218, .25) !important;
+}
+
+/* If the timer replaces the button while recording, also constrain it */
+.tools-grid .record-timer-fixed {
+  position: static !important;
+  left: auto !important;
+  bottom: auto !important;
+  width: var(--drawer-tile-w) !important;
+  max-width: var(--drawer-tile-w) !important;
+  margin: 0 auto !important;
+  justify-items: center;
 }

@@ -380,9 +380,6 @@ const LabResultsUploader = forwardRef(function LabResultsUploader(
   return (
     <div className={`lab-uploader ${dense ? "dense" : ""} ${className || ""}`}>
       <div className="file-upload">
-        <p className="upload-label">
-          <label>Please upload lab result</label>
-        </p>
 
         {/* Square dashed dropzone */}
         <div

@@ -425,3 +425,22 @@ html[data-theme="dark"] .pending-item .badge {
 }
 .lab-agent-open-btn:hover { transform: translateY(-1px); box-shadow: 0 12px 24px rgba(0, 0, 0, .35); background: #0a0a0a; }
 .lab-agent-open-btn:active { transform: translateY(0); box-shadow: 0 8px 18px rgba(0, 0, 0, .22); }
+/* === Drawer overrides (append at end) ===================== */
+:root {
+  --drawer-tile-w: 150px;
+  --drawer-tile-h: 44px;
+  --drawer-primary-ink: #fff;
+  --drawer-primary-bg: #6366f1;
+}
+
+/* Make the black button match the uniform drawer look */
+.tools-grid .lab-agent-open-btn {
+  width: var(--drawer-tile-w) !important;
+  max-width: var(--drawer-tile-w) !important;
+  min-height: var(--drawer-tile-h) !important;
+  margin: 0 auto !important;
+  background: var(--drawer-primary-bg) !important;
+  color: var(--drawer-primary-ink) !important;
+  border: none !important;
+  
+}

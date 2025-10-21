@@ -1,11 +1,4 @@
-/* Make the button behave like a normal block inside the tile */
-.left-rail-actions{
-  display:flex;
-  align-items:center;
-  justify-content:center;
-  width:100%;
-  margin:0;
-}
+
 
 /* Inline, centered, full width inside the tile; no absolute offsets */
 .calc-dose-btn{
@@ -41,4 +34,23 @@
 
 @media (max-width:640px){
   .calc-dose-btn{ padding: 10px 12px; font-size: .9rem; }
+}
+/* === Drawer overrides (append at end) ===================== */
+:root {
+  --drawer-tile-w: 150px;
+  --drawer-tile-h: 44px;
+  --drawer-primary-ink: #fff;
+  --drawer-primary-bg: #6366f1;
+}
+
+/* Make it a uniform tile and unify color with Record button */
+.tools-grid .calc-dose-btn {
+  position: static !important;
+  width: var(--drawer-tile-w) !important;
+  max-width: var(--drawer-tile-w) !important;
+  min-height: var(--drawer-tile-h) !important;
+  margin: 0 auto !important;
+  background: var(--drawer-primary-bg) !important;
+  color: var(--drawer-primary-ink) !important;
+  box-shadow: 0 6px 14px rgba(57,81,218,.25) !important;
 }

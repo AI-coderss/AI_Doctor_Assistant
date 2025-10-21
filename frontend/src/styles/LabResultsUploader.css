@@ -325,3 +325,30 @@
     border-radius: 10px;
     background: rgba(176, 0, 32, .08);
 }
+/* === Drawer overrides (append at end) ===================== */
+:root {
+  --drawer-tile-w: 150px;
+  --drawer-tile-hs: 50px;
+}
+
+/* Make the fixed uploader act like a tile inside the drawer */
+.tools-grid .labs-uploader-fixed {
+  position: static !important;
+  left: auto !important;
+  bottom: auto !important;
+  width: var(--drawer-tile-w) !important;
+  max-width: var(--drawer-tile-w) !important;
+  min-height: var(--drawer-tile-hs) !important;
+  margin: 0 auto !important;
+}
+
+/* Standardize the purple rectangle to the same width */
+.tools-grid .lab-uploader .dropzone,
+.tools-grid .lab-uploader .drop-zone {
+  width: var(--drawer-tile-w) !important;
+  height: var(--drawer-tile-hs) !important;
+  padding: 0 !important;
+  display: grid !important;
+  place-items: center !important;
+  font-size: 16px !important;   /* simple, clean glyph size */
+}

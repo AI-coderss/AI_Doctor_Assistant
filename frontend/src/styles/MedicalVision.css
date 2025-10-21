@@ -112,11 +112,7 @@
 
 /* Status line */
 .vision-status {
-  min-height: 18px;
-  font-size: 12px;
-  font-weight: 600;
-  color: #334155;
-  text-align: center;
+ display: none
 }
 
 /* Error chip */
@@ -283,4 +279,22 @@
     width: calc(100vw - 24px);
   }
   .vf-header, .vision-followup { padding: 10px; }
+}
+/* === Drawer overrides (append at end) ===================== */
+:root {
+  --drawer-tile-w: 208px;
+  --drawer-tile-h: 44px;
+  --drawer-primary-ink: #fff;
+  --drawer-primary-bg: #6366f1;
+}
+
+/* Tile width + simple primary color for consistency */
+.tools-grid .vision-tool { width: var(--drawer-tile-w) !important; }
+.tools-grid .vision-btn {
+  width: var(--drawer-tile-w) !important;
+  min-height: var(--drawer-tile-h) !important;
+  margin: 0 auto !important;
+  background: var(--drawer-primary-bg) !important;
+  color: var(--drawer-primary-ink) !important;
+  
 }

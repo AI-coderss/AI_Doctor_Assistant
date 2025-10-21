@@ -290,4 +290,17 @@
 @media (max-width: 700px) {
   .meds-list__item { grid-template-columns: 1fr; }
 }
+/* === Drawer overrides (append at end) ===================== */
+:root { --drawer-tile-w: 150px; --drawer-tile-h: 44px; }
+
+.tools-grid .meds-uploader {
+  width: var(--drawer-tile-w) !important;
+  max-width: var(--drawer-tile-w) !important;
+  margin: 0 auto !important;
+}
+
+/* Keep the inner dropzone compact so the whole tile matches */
+.tools-grid .meds-dropzone {
+  height: var(--drawer-tile-h) !important;
+}
 

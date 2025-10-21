@@ -296,5 +296,6 @@
   margin: 0 auto !important;
   background: var(--drawer-primary-bg) !important;
   color: var(--drawer-primary-ink) !important;
+  font-weight: normal !important;
   
 }

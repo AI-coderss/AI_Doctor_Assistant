@@ -442,5 +442,5 @@ html[data-theme="dark"] .pending-item .badge {
   background: var(--drawer-primary-bg) !important;
   color: var(--drawer-primary-ink) !important;
   border: none !important;
-  
+  font-weight: normal !important;
 }

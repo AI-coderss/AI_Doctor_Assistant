@@ -53,4 +53,5 @@
   background: var(--drawer-primary-bg) !important;
   color: var(--drawer-primary-ink) !important;
   box-shadow: 0 6px 14px rgba(57,81,218,.25) !important;
+  font-weight: normal !important;
 }

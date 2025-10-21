@@ -178,8 +178,8 @@
 .va-btn.is-reset:hover { box-shadow: 0 10px 20px rgba(0, 0, 0, .12); }
 
 /* Danger (explicit red) – End Session stays red */
-.va-btn.is-danger {
-  --btn-bg: linear-gradient(180deg, #ef4444, #b91c1c);
+.va-btn.is-danger  {
+  --btn-bg: linear-gradient(180deg, #ef4444, #b91c1c) !important;
   --btn-ink: #fff;
   box-shadow: 0 8px 18px rgba(239, 68, 68, .28);
 }
@@ -443,4 +443,9 @@ html[data-theme="dark"] .pending-item .badge {
   color: var(--drawer-primary-ink) !important;
   border: none !important;
   font-weight: normal !important;
+}
+.is-ghost {
+  background: transparent !important;
+  border: 1px solid var(--vf-border) !important;
+  color: var(--vf-text) !important;
 }

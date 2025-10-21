@@ -235,6 +235,18 @@ CORS(
             "supports_credentials": True,
             "max_age": 86400,
         },
+        r"/lab-agent/approve": {
+            "origins": [
+                "https://ai-doctor-assistant-app-dev.onrender.com",
+                "http://localhost:3000",
+            ],
+            "methods": ["POST", "OPTIONS"],
+            "allow_headers": ["Content-Type", "Authorization", "Accept", "X-Requested-With", "X-Session-Id"],
+            "expose_headers": ["Content-Type"],
+            "supports_credentials": True,
+            "max_age": 86400,
+        },
+
     },
 )
 

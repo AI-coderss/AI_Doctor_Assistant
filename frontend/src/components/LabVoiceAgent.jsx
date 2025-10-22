@@ -18,7 +18,7 @@ import { startVolumeMonitoring } from "./audioLevelAnalyzer";
  * - WebRTC to OpenAI Realtime
  * - Registers approve_lab tool (strict schema)
  * - Buffers function-call deltas; applies only on "completed"
- * - Uses SSE /lab-agent/events to react to backend "approved" signals in real-time
+ * - Replaces "Conversation" card with the AudioWave visualizer (no scroll, no label)
  *
  * Props:
  *  - isVisible: boolean
@@ -26,7 +26,7 @@ import { startVolumeMonitoring } from "./audioLevelAnalyzer";
  *  - sessionId: string
  *  - backendBase: string
  *  - context: string
- *  - onApproveLab: (item: {id, name, why?, priority?, __source?}) => void
+ *  - onApproveLab: (item: {id, name, why?, priority?}) => void
  *  - onEndSession: () => void
  *  - allowedLabs?: string[] (optional; sent as guidance to the model)
  */
@@ -50,11 +50,14 @@ export default function LabVoiceAgent({
   const dcRef = useRef(null);             // our outbound control DataChannel ("oai-events")
   const localStreamRef = useRef(null);
   const remoteAudioRef = useRef(null);
+  const remoteStreamRef = useRef(null);   // <<— keep remote MediaStream for visualizer
 
-  // SSE: suggestions stream (existing) + approvals event stream (NEW)
-  const suggestAbortRef = useRef(null);
-  const suggestReaderRef = useRef(null);
-  const approvalsESRef = useRef(null);
+  // Which source should drive the visualizer: "mic" | "agent"
+  const [vizSource, setVizSource] = useState("mic");
+
+  // SSE (kept for compatibility)
+  const sseAbortRef = useRef(null);
+  const sseReaderRef = useRef(null);
 
   // Tool-call deltas buffer
   const toolBuffersRef = useRef(new Map()); // id -> { name, argsText }
@@ -65,9 +68,6 @@ export default function LabVoiceAgent({
 
   // Local id counter
   const seqRef = useRef(0);
-
-  // Track locally-applied approvals to ignore the echo from SSE
-  const ignoreOnceByNameRef = useRef(new Set()); // set of lowercased names
 
   const resetAll = () => {
     setPendingQueue([]);
@@ -84,10 +84,10 @@ export default function LabVoiceAgent({
       try {
         setStatus("prepping");
         resetAll();
+        setVizSource("mic"); // default to mic when opening
         await sendContext();
-        await startVoice();           // mic <-> model audio
-        startSuggestStream();         // optional SSE text/suggestions (existing)
-        startApprovalsEventStream();  // NEW: backend -> frontend approval events
+        await startVoice();       // mic <-> model audio
+        startSuggestStream();     // optional SSE text/suggestions (kept)
       } catch (e) {
         console.error("Agent init failed:", e);
         setStatus("error");
@@ -197,16 +197,45 @@ export default function LabVoiceAgent({
       // 3) mic -> PC
       stream.getAudioTracks().forEach((track) => pc.addTrack(track, stream));
 
-      // 4) agent voice -> audio element
+      // 4) agent voice -> audio element + visualizer switching
       pc.ontrack = (event) => {
         const [remoteStream] = event.streams || [];
-        if (remoteStream && remoteAudioRef.current) {
+        if (!remoteStream) return;
+
+        remoteStreamRef.current = remoteStream;
+
+        if (remoteAudioRef.current) {
           remoteAudioRef.current.srcObject = remoteStream;
-          remoteAudioRef.current.play?.().catch((err) => console.warn("Agent audio play failed:", err));
-          // visualizer can also react to OUTPUT if you prefer; we show MIC by default below
-          try { setAudioUrl(remoteStream); } catch {}
-          try { startVolumeMonitoring(remoteStream, setAudioScale); } catch {}
+
+          // When output starts/pauses/ends, flip the visualizer source.
+          const audioEl = remoteAudioRef.current;
+          const onPlay   = () => setVizSource("agent");
+          const onPause  = () => setVizSource("mic");
+          const onEnded  = () => setVizSource("mic");
+
+          // Clean before re-binding to avoid duplicates
+          audioEl.removeEventListener?.("play", onPlay);
+          audioEl.removeEventListener?.("pause", onPause);
+          audioEl.removeEventListener?.("ended", onEnded);
+
+          audioEl.addEventListener?.("play", onPlay);
+          audioEl.addEventListener?.("pause", onPause);
+          audioEl.addEventListener?.("ended", onEnded);
+
+          audioEl.play?.().catch((err) => console.warn("Agent audio play failed:", err));
         }
+
+        // Also respond to remote track mute/unmute to toggle visualizer
+        const audioTracks = remoteStream.getAudioTracks?.() || [];
+        audioTracks.forEach((t) => {
+          t.onunmute = () => setVizSource("agent");
+          t.onmute   = () => setVizSource("mic");
+          t.onended  = () => setVizSource("mic");
+        });
+
+        // (Optional) if your orb should react to OUTPUT as well:
+        try { startVolumeMonitoring(remoteStream, setAudioScale); } catch {}
+        try { setAudioUrl(remoteStream); } catch {}
       };
 
       pc.ondatachannel = (e) => {
@@ -222,6 +251,7 @@ export default function LabVoiceAgent({
         } else if (["failed", "closed", "disconnected"].includes(pc.connectionState)) {
           setStatus("error");
           setMicActive(false);
+          setVizSource("mic");
         }
       };
 
@@ -246,6 +276,7 @@ export default function LabVoiceAgent({
       console.error("startVoice error:", err);
       setStatus("error");
       setMicActive(false);
+      setVizSource("mic");
       throw err;
     }
   };
@@ -278,8 +309,6 @@ export default function LabVoiceAgent({
         let args = {};
         try { args = JSON.parse(buf.argsText || "{}"); } catch {}
         if ((buf.name === "approve_lab" || /approve_lab/i.test(buf.name)) && args?.name) {
-          // ✅ Do NOT update UI directly here; POST to backend.
-          // We rely on backend → SSE (/lab-agent/events) "approved" signal to update the table.
           approveFromTool(args);
         }
         return;
@@ -300,7 +329,7 @@ export default function LabVoiceAgent({
 
   async function approveFromTool(item) {
     try {
-      await fetch(`${backendBase}/lab-agent/approve`, {
+      const res = await fetch(`${backendBase}/lab-agent/approve`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -312,21 +341,29 @@ export default function LabVoiceAgent({
           }
         })
       });
-      // No local UI update here; the SSE approval event will handle it.
+      if (!res.ok) throw new Error(`/lab-agent/approve ${res.status}`);
+      const data = await res.json();
+
+      const approved = {
+        id: data?.item?.id || `${Date.now()}-${Math.random().toString(16).slice(2)}`,
+        name: data?.item?.name || item.name,
+        priority: data?.item?.priority || item.priority || "",
+        why: data?.item?.why || item.why || ""
+      };
+      applyApproved(approved);
+      // once applied, clear ask if it matches
+      if (askingText && approved.name && askingText.toLowerCase().includes(approved.name.toLowerCase())) {
+        setAskingText("");
+      }
     } catch (e) {
       console.error("approveFromTool failed:", e);
     }
   }
 
   const stopAll = () => {
-    // close approvals EventSource
-    try { approvalsESRef.current?.close(); } catch {}
-    approvalsESRef.current = null;
-
-    // stop suggest-stream reader
-    try { suggestAbortRef.current?.abort(); } catch {}
-    suggestAbortRef.current = null;
-    suggestReaderRef.current = null;
+    try { sseAbortRef.current?.abort(); } catch {}
+    sseAbortRef.current = null;
+    sseReaderRef.current = null;
 
     try {
       if (pcRef.current) {
@@ -341,64 +378,27 @@ export default function LabVoiceAgent({
 
     try {
       if (remoteAudioRef.current) {
-        remoteAudioRef.current.pause?.();
+        // remove listeners we attached
         remoteAudioRef.current.srcObject = null;
+        remoteAudioRef.current.pause?.();
         remoteAudioRef.current.src = "";
       }
     } catch {}
 
+    remoteStreamRef.current = null;
+
     setMicActive(false);
+    setVizSource("mic");
     setStatus("idle");
 
     // clear suggestions when agent is closed/hidden
     setPendingQueue([]);
   };
 
-  // ===== NEW: approvals event stream (SSE) from backend =====
-  const startApprovalsEventStream = () => {
-    try { approvalsESRef.current?.close(); } catch {}
-    approvalsESRef.current = null;
-
-    if (!backendBase || !sessionId) return;
-
-    const url = `${backendBase}/lab-agent/events?session_id=${encodeURIComponent(sessionId)}`;
-    const es = new EventSource(url, { withCredentials: false });
-    approvalsESRef.current = es;
-
-    es.onmessage = (e) => {
-      if (!e?.data) return;
-      try {
-        const msg = JSON.parse(e.data);
-        if (msg?.type === "approved" && msg?.item?.name) {
-          const itm = normalizeItem(msg.item, false);
-          if (!itm) return;
-
-          // If we just applied this locally (manual button), ignore the echo once
-          const key = String(itm.name || "").trim().toLowerCase();
-          if (ignoreOnceByNameRef.current.has(key)) {
-            ignoreOnceByNameRef.current.delete(key);
-            return; // swallow echo
-          }
-
-          // Mark source so Chat.jsx skips re-posting to backend
-          itm.__source = "sse";
-          applyApproved(itm);
-        }
-        // (optional) handle msg.type === "rejected" if you want UI feedback
-      } catch {
-        // ignore malformed frames
-      }
-    };
-
-    es.onerror = () => {
-      // EventSource will auto-reconnect. Nothing needed here.
-    };
-  };
-
   // Optional: keep your SSE suggestions stream alive, unchanged
   const startSuggestStream = async () => {
     const ctrl = new AbortController();
-    suggestAbortRef.current = ctrl;
+    sseAbortRef.current = ctrl;
     try {
       const res = await fetch(`${backendBase}/lab-agent/suggest-stream`, {
         method: "POST",
@@ -408,7 +408,7 @@ export default function LabVoiceAgent({
       });
       if (!res.ok || !res.body) throw new Error(`/lab-agent/suggest-stream ${res.status}`);
       const reader = res.body.getReader();
-      suggestReaderRef.current = reader;
+      sseReaderRef.current = reader;
       const decoder = new TextDecoder();
 
       let buf = "";
@@ -427,7 +427,7 @@ export default function LabVoiceAgent({
           if (!payload) continue;
           try {
             const msg = JSON.parse(payload);
-            // Push suggestions into pendingQueue if you want:
+            // You can emit suggestions into pendingQueue if you want:
             if (msg?.type === "suggestion" && msg?.item?.name) {
               const itm = normalizeItem(msg.item, true);
               if (itm && !hasByName(pendingQueue, itm.name)) {
@@ -453,14 +453,13 @@ export default function LabVoiceAgent({
 
   const normalizeItem = (raw, forceId = false) => {
     if (!raw) return null;
-    const name = ((raw.name || raw.test || "") + "").trim();
+     const name = ((raw.name || raw.test || "") + "").trim();
     if (!name) return null;
     return {
       id: raw.id && !forceId ? String(raw.id) : makeId(name),
       name,
       why: raw.why ? String(raw.why).trim() : "",
       priority: raw.priority ? String(raw.priority).trim() : "",
-      __source: raw.__source // preserve if present
     };
   };
 
@@ -485,16 +484,9 @@ export default function LabVoiceAgent({
     } catch {}
   };
 
-  // NOTE: add optional second arg { local: true } when *manually* adding,
-  // so we can ignore the one echo from SSE that follows the server write.
-  const applyApproved = (item, opts = {}) => {
+  const applyApproved = (item) => {
     const nm = String(item?.name || "").trim();
     if (!nm) return;
-
-    if (opts.local) {
-      try { ignoreOnceByNameRef.current.add(nm.toLowerCase()); } catch {}
-    }
-
     removePendingByName(nm);
     try { onApproveLab?.(item); } catch {}
     if (askingText && nm && askingText.toLowerCase().includes(nm.toLowerCase())) {
@@ -542,21 +534,7 @@ export default function LabVoiceAgent({
             <div className="btn-row">
               <button
                 className="va-btn is-primary"
-                onClick={() => {
-                  // mark as locally applied to swallow the single SSE echo
-                  applyApproved(s, { local: true });
-                  notifyManualAdd(s);
-                  // also inform backend /lab-agent/approve to persist & fan-out
-                  // (tool-bridge "add_lab_manual" above is optional analytics; the authoritative write is approve)
-                  fetch(`${backendBase}/lab-agent/approve`, {
-                    method: "POST",
-                    headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify({
-                      session_id: sessionId,
-                      item: { name: s.name, priority: s.priority || "", why: s.why || "" }
-                    })
-                  }).catch(() => {});
-                }}
+                onClick={() => { applyApproved(s); notifyManualAdd(s); }}
               >
                 Add to Table
               </button>
@@ -576,6 +554,12 @@ export default function LabVoiceAgent({
     </div>,
     document.body
   ) : null;
+
+  // Decide which stream drives the AudioWave
+  const waveStream =
+    vizSource === "agent" && remoteStreamRef.current
+      ? remoteStreamRef.current
+      : localStreamRef.current || null;
 
   return (
     <>
@@ -599,7 +583,7 @@ export default function LabVoiceAgent({
           </button>
         </div>
 
-        {/* Content: replace conversation box with the visualizer, no scroll, no label */}
+        {/* Content: visualizer (no scroll, no label). Auto-switches between MIC and AGENT output */}
         <div className="assistant-content" style={{ overflow: "hidden" }}>
           {/* Minimal header (status on the right) */}
           <div className="va-header" style={{ marginBottom: 12 }}>
@@ -612,9 +596,9 @@ export default function LabVoiceAgent({
             </div>
           </div>
 
-          {/* AudioWave visualizer — use MIC stream by default */}
+          {/* AudioWave visualizer — auto-switches to agent output while the model is speaking */}
           <div style={{ border: "1px solid var(--card-border)", borderRadius: 12, padding: 8 }}>
-            <AudioWave stream={localStreamRef.current || null} />
+            <AudioWave stream={waveStream} />
           </div>
 
           {/* If you want to show the current ask/approval prompt visually, keep this tiny hint (optional) */}
@@ -633,6 +617,8 @@ export default function LabVoiceAgent({
             const enabled = !micActive;
             localStreamRef.current.getAudioTracks().forEach((t) => (t.enabled = enabled));
             setMicActive(enabled);
+            // Keep visualizer source unchanged; if agent is speaking it stays on agent,
+            // otherwise it shows mic (enabled/disabled just affects actual signal).
           }}
           title={micActive ? "Mute mic" : "Unmute mic"}
           aria-label="Toggle microphone"
@@ -646,6 +632,5 @@ export default function LabVoiceAgent({
     </>
   );
 }
-
 
 

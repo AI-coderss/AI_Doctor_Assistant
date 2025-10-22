@@ -8,18 +8,27 @@ import BaseOrb from "./BaseOrb.jsx";
 import { FaMicrophoneAlt, FaFlask, FaTimes, FaBroom, FaPaperPlane } from "react-icons/fa";
 
 /* 🔊 Visualizer + audio store */
+import AudioWave from "./AudioWave.jsx"; // <<— your provided visualizer component
 import useAudioForVisualizerStore from "../store/useAudioForVisualizerStore.js";
 import useAudioStore from "../store/audioStore.js";
 import { startVolumeMonitoring } from "./audioLevelAnalyzer";
 
-/* 🔊 Audio waveform component (kept exactly as you asked, only imported and used) */
-import AudioWave from "./AudioWave.jsx";
-
 /**
  * LabVoiceAgent
- * - Connects to backend voice agent (WebRTC + SSE).
- * - Conversation area replaced by AudioWave (no label; no internal scroll).
- * - Pending Lab Suggestions render in a fixed LEFT column (via portal to <body>), not draggable.
+ * - WebRTC to OpenAI Realtime
+ * - Registers approve_lab tool (strict schema)
+ * - Buffers function-call deltas; applies only on "completed"
+ * - Replaces "Conversation" card with the AudioWave visualizer (no scroll, no label)
+ *
+ * Props:
+ *  - isVisible: boolean
+ *  - onClose: () => void
+ *  - sessionId: string
+ *  - backendBase: string
+ *  - context: string
+ *  - onApproveLab: (item: {id, name, why?, priority?}) => void
+ *  - onEndSession: () => void
+ *  - allowedLabs?: string[] (optional; sent as guidance to the model)
  */
 export default function LabVoiceAgent({
   isVisible,
@@ -29,47 +38,34 @@ export default function LabVoiceAgent({
   context,
   onApproveLab,
   onEndSession = () => {},
+  allowedLabs = []
 }) {
   const [status, setStatus] = useState("idle"); // idle | prepping | connected | error
   const [micActive, setMicActive] = useState(false);
-  const [streamingText, setStreamingText] = useState("");
   const [pendingQueue, setPendingQueue] = useState([]); // [{id, name, why, priority}]
   const [askingText, setAskingText] = useState("");
 
-  /* expose streams to the visualizer */
-  const [localStreamState, setLocalStreamState] = useState(null);
-  const [remoteStreamState, setRemoteStreamState] = useState(null);
-
   // WebRTC
   const pcRef = useRef(null);
+  const dcRef = useRef(null);             // our outbound control DataChannel ("oai-events")
   const localStreamRef = useRef(null);
   const remoteAudioRef = useRef(null);
 
-  // SSE
+  // SSE (kept for compatibility)
   const sseAbortRef = useRef(null);
   const sseReaderRef = useRef(null);
 
-  // Text buffer
-  const textBufRef = useRef("");
-
-  // Function-call buffers
+  // Tool-call deltas buffer
   const toolBuffersRef = useRef(new Map()); // id -> { name, argsText }
 
-  // Orb / output level stores
+  // Visualizer stores (unchanged)
   const { setAudioScale } = useAudioForVisualizerStore.getState();
   const { setAudioUrl } = useAudioStore();
 
   // Local id counter
   const seqRef = useRef(0);
 
-  const appendText = (s) => {
-    textBufRef.current += s;
-    setStreamingText(textBufRef.current);
-  };
-
   const resetAll = () => {
-    textBufRef.current = "";
-    setStreamingText("");
     setPendingQueue([]);
     setAskingText("");
   };
@@ -85,8 +81,8 @@ export default function LabVoiceAgent({
         setStatus("prepping");
         resetAll();
         await sendContext();
-        await startVoice();       // mic -> model; model -> audio
-        startSuggestStream();     // SSE text/suggestions
+        await startVoice();       // mic <-> model audio
+        startSuggestStream();     // optional SSE text/suggestions (kept)
       } catch (e) {
         console.error("Agent init failed:", e);
         setStatus("error");
@@ -110,35 +106,104 @@ export default function LabVoiceAgent({
     }
   };
 
+  const APPROVE_LAB_TOOL = {
+    name: "approve_lab",
+    description:
+      "Approve a lab test that the user has verbally confirmed. Only call this tool after explicit user approval (e.g., 'yes', 'approve', 'add'). Choose names from the allowed list if provided.",
+    parameters: {
+      type: "object",
+      additionalProperties: false,
+      properties: {
+        name: { type: "string", description: "Canonical lab test name." },
+        priority: {
+          type: "string",
+          enum: ["high", "medium", "low"],
+          description: "Optional priority label."
+        },
+        why: { type: "string", description: "Optional reason the test is indicated." }
+      },
+      required: ["name"]
+    }
+  };
+
+  const sendSessionUpdate = () => {
+    // Guidance/instructions: constrain behavior hard
+    const instruction = [
+      "You are a clinical lab assistant. Speak concisely. No long monologues.",
+      "You must NEVER modify the table directly via text. Instead, ONLY call the 'approve_lab' tool after the user explicitly confirms (e.g., 'yes', 'approve', 'add').",
+      "If you are not sure which lab name to use, ask a short clarification question then wait.",
+      allowedLabs?.length
+        ? `Use ONLY names from this allowed list when approving: ${allowedLabs.join(", ")}.`
+        : "If a canonical list is not provided, prefer standard test names (e.g., 'CBC', 'CMP', 'TSH').",
+    ].join(" ");
+
+    const msg = {
+      type: "session.update",
+      session: {
+        voice: "alloy",
+        // set to "server_vad" for talk over / natural turn-taking
+        turn_detection: { type: "server_vad", threshold: 0.5 },
+        tools: [APPROVE_LAB_TOOL],
+        tool_choice: { type: "auto" },
+        instructions: instruction
+      }
+    };
+    try {
+      dcRef.current?.send(JSON.stringify(msg));
+    } catch (e) {
+      console.warn("session.update send failed:", e);
+    }
+  };
+
+  // Tighten tool gating when the agent is explicitly asking for approval
+  useEffect(() => {
+    if (!dcRef.current || dcRef.current.readyState !== "open") return;
+    const msg = {
+      type: "session.update",
+      session: {
+        tool_choice: askingText ? { type: "required", name: "approve_lab" } : { type: "auto" }
+      }
+    };
+    try { dcRef.current.send(JSON.stringify(msg)); } catch {}
+  }, [askingText]);
+
   const startVoice = async () => {
     try {
+      // 1) Mic
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       localStreamRef.current = stream;
-      setLocalStreamState(stream); // expose mic
 
       // Orb reacts to MIC input
       try { startVolumeMonitoring(stream, setAudioScale); } catch {}
 
+      // 2) WebRTC peer
       const pc = new RTCPeerConnection({ iceServers: [{ urls: "stun:stun.l.google.com:19302" }] });
       pcRef.current = pc;
 
-      // mic -> PC
+      // 2a) create our outbound data channel for control/events
+      const dc = pc.createDataChannel("oai-events");
+      dcRef.current = dc;
+      dc.onopen = () => {
+        // Register tools, instructions, VAD, voice
+        sendSessionUpdate();
+      };
+      dc.onclose = () => {};
+
+      // 3) mic -> PC
       stream.getAudioTracks().forEach((track) => pc.addTrack(track, stream));
 
-      // agent voice -> audio element + visualizer
+      // 4) agent voice -> audio element
       pc.ontrack = (event) => {
         const [remoteStream] = event.streams || [];
-        if (!remoteStream) return;
-        if (remoteAudioRef.current) {
+        if (remoteStream && remoteAudioRef.current) {
           remoteAudioRef.current.srcObject = remoteStream;
           remoteAudioRef.current.play?.().catch((err) => console.warn("Agent audio play failed:", err));
+          // visualizer can also react to OUTPUT if you prefer; we show MIC by default below
+          try { setAudioUrl(remoteStream); } catch {}
+          try { startVolumeMonitoring(remoteStream, setAudioScale); } catch {}
         }
-        setRemoteStreamState(remoteStream);       // expose agent output
-        try { setAudioUrl(remoteStream); } catch {}
-        try { startVolumeMonitoring(remoteStream, setAudioScale); } catch {}
       };
 
-      // DataChannel for events/tool-calls
       pc.ondatachannel = (e) => {
         const ch = e.channel;
         if (!ch) return;
@@ -155,8 +220,9 @@ export default function LabVoiceAgent({
         }
       };
 
-      // Offer/answer — set & POST *the same* SDP
+      // 5) Offer/answer
       let offer = await pc.createOffer({ offerToReceiveAudio: true, offerToReceiveVideo: false });
+      // (optional) tweak Opus fmtp
       offer.sdp = offer.sdp.replace(
         /a=rtpmap:\d+ opus\/48000\/2/g,
         "a=rtpmap:111 opus/48000/2\r\n" + "a=fmtp:111 minptime=10;useinbandfec=1"
@@ -170,6 +236,7 @@ export default function LabVoiceAgent({
       if (!res.ok) throw new Error(`/lab-agent/rtc-connect ${res.status}`);
       const answer = await res.text();
       await pc.setRemoteDescription({ type: "answer", sdp: answer });
+
     } catch (err) {
       console.error("startVoice error:", err);
       setStatus("error");
@@ -184,66 +251,77 @@ export default function LabVoiceAgent({
       let msg = null;
       try { msg = JSON.parse(raw); } catch {}
 
-      // 1) Function-call deltas
-      if (msg && (msg.type === "response.function_call.arguments.delta" || msg.type === "tool_call.delta")) {
+      // ---- Tool calling stream (delta) ----
+      if (msg?.type === "response.function_call.arguments.delta" || msg?.type === "tool_call.delta") {
         const id = msg.call_id || msg.id || "default";
         const name = msg.name || msg.function_name || "";
         const delta = msg.delta || msg.arguments_delta || "";
         const prev = toolBuffersRef.current.get(id) || { name, argsText: "" };
         prev.name = name || prev.name;
-        prev.argsText += delta || "";
+        prev.argsText += (delta || "");
         toolBuffersRef.current.set(id, prev);
         return;
       }
 
-      // 2) Function-call completed
-      if (msg && (msg.type === "response.function_call.completed" || msg.type === "tool_call.completed")) {
+      // ---- Tool completed ----
+      if (msg?.type === "response.function_call.completed" || msg?.type === "tool_call.completed") {
         const id = msg.call_id || msg.id || "default";
         const buf = toolBuffersRef.current.get(id);
         toolBuffersRef.current.delete(id);
-        if (!buf || !buf.name) return;
+        if (!buf?.name) return;
 
         let args = {};
         try { args = JSON.parse(buf.argsText || "{}"); } catch {}
-        const tool = mapToolName(buf.name);
-
-        fetch(`${backendBase}/lab-agent/tool-bridge`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ session_id: sessionId, tool, args }),
-        })
-          .then((r) => r.json())
-          .then((data) => {
-            if (data?.applied && (tool === "approve_lab" || tool === "add_lab_manual")) {
-              const item = normalizeItem(data.item || args, true);
-              if (!item) return;
-              applyApproved(item);
-            }
-          })
-          .catch((e) => console.error("tool-bridge failed:", e));
+        if ((buf.name === "approve_lab" || /approve_lab/i.test(buf.name)) && args?.name) {
+          approveFromTool(args);
+        }
         return;
       }
 
-      // 3) Structured JSON event
-      if (msg && msg.type) {
-        handleStreamEvent(msg);
+      // ---- Asking / prompts (optional) ----
+      if (msg?.type === "ask") {
+        setAskingText(String(msg.prompt || ""));
         return;
       }
 
-      // 4) Plain text fallback
-      appendText(raw);
-      softApproveFromText(raw);
+      // (Optional) other event types can be handled as needed:
+      // response.audio_transcript.delta / done, input.audio_buffer.speech_started, etc.
     };
 
     ch.onerror = (e) => console.error("DataChannel error:", e);
   }
 
-  function mapToolName(n) {
-    const s = String(n || "").toLowerCase();
-    if (s.includes("reject")) return "reject_lab";
-    if (s.includes("manual")) return "add_lab_manual";
-    if (s.includes("approve") || s.includes("add")) return "approve_lab";
-    return "approve_lab";
+  async function approveFromTool(item) {
+    try {
+      const res = await fetch(`${backendBase}/lab-agent/approve`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          session_id: sessionId,
+          item: {
+            name: String(item.name || "").trim(),
+            priority: item.priority || "",
+            why: item.why || ""
+          }
+        })
+      });
+      if (!res.ok) throw new Error(`/lab-agent/approve ${res.status}`);
+      const data = await res.json();
+
+      const approved = {
+        id: data?.item?.id || `${Date.now()}-${Math.random().toString(16).slice(2)}`,
+        name: data?.item?.name || item.name,
+        priority: data?.item?.priority || item.priority || "",
+        why: data?.item?.why || item.why || ""
+      };
+      applyApproved(approved);
+      // once applied, clear ask if it matches
+      if (askingText && approved.name && askingText.toLowerCase().includes(approved.name.toLowerCase())) {
+        setAskingText("");
+      }
+    } catch (e) {
+      console.error("approveFromTool failed:", e);
+    }
   }
 
   const stopAll = () => {
@@ -272,13 +350,15 @@ export default function LabVoiceAgent({
 
     setMicActive(false);
     setStatus("idle");
+
+    // clear suggestions when agent is closed/hidden
     setPendingQueue([]);
   };
 
+  // Optional: keep your SSE suggestions stream alive, unchanged
   const startSuggestStream = async () => {
     const ctrl = new AbortController();
     sseAbortRef.current = ctrl;
-
     try {
       const res = await fetch(`${backendBase}/lab-agent/suggest-stream`, {
         method: "POST",
@@ -287,7 +367,6 @@ export default function LabVoiceAgent({
         signal: ctrl.signal,
       });
       if (!res.ok || !res.body) throw new Error(`/lab-agent/suggest-stream ${res.status}`);
-
       const reader = res.body.getReader();
       sseReaderRef.current = reader;
       const decoder = new TextDecoder();
@@ -308,17 +387,21 @@ export default function LabVoiceAgent({
           if (!payload) continue;
           try {
             const msg = JSON.parse(payload);
-            handleStreamEvent(msg);
+            // You can emit suggestions into pendingQueue if you want:
+            if (msg?.type === "suggestion" && msg?.item?.name) {
+              const itm = normalizeItem(msg.item, true);
+              if (itm && !hasByName(pendingQueue, itm.name)) {
+                setPendingQueue((prev) => [...prev, itm]);
+              }
+            }
           } catch {
-            appendText(payload + "\n");
-            softApproveFromText(payload);
+            // ignore
           }
         }
       }
     } catch (e) {
       if (ctrl.signal.aborted) return;
       console.error("suggest-stream error:", e);
-      appendText("\n\n[stream ended]");
     }
   };
 
@@ -350,18 +433,8 @@ export default function LabVoiceAgent({
     setPendingQueue((prev) => prev.filter((x) => (x.name || "").toLowerCase() !== low));
   };
 
-  const softApproveFromText = (txt) => {
-    const t = (txt || "").toLowerCase();
-    const m = t.match(/\b(approved|approve|add|yes)\b[:\s-]*([a-z0-9 .+\-/()]+)$/i);
-    if (!m) return;
-    const name = (m[2] || "").trim();
-    if (!name) return;
-    if (hasByName([], name)) return;
-    const item = normalizeItem({ name }, true);
-    applyApproved(item);
-  };
-
   const notifyManualAdd = (item) => {
+    // optional: inform backend of manual add for analytics
     try {
       fetch(`${backendBase}/lab-agent/tool-bridge`, {
         method: "POST",
@@ -376,56 +449,8 @@ export default function LabVoiceAgent({
     if (!nm) return;
     removePendingByName(nm);
     try { onApproveLab?.(item); } catch {}
-    if (askingText && askingText.toLowerCase().includes(nm.toLowerCase())) setAskingText("");
-  };
-
-  const handleStreamEvent = (msg) => {
-    const t = String(msg?.type || "").toLowerCase();
-
-    if (t === "delta" || t === "text") {
-      const c = String(msg.content || "");
-      if (c) {
-        appendText(c);
-        softApproveFromText(c);
-      }
-      return;
-    }
-
-    if (t === "suggestion" || t === "pending" || t === "proposed") {
-      const itm = normalizeItem(msg.item || msg, true);
-      if (!itm) return;
-      if (hasByName(pendingQueue, itm.name)) return;
-      setPendingQueue((prev) => [...prev, itm]);
-      return;
-    }
-
-    if (t === "ask") {
-      setAskingText(String(msg.prompt || ""));
-      return;
-    }
-
-    if (t === "approved" || t === "approval" || t === "lab_approved") {
-      const itm = normalizeItem(msg.item || msg, true);
-      if (!itm) return;
-      applyApproved(itm);
-      return;
-    }
-
-    if (t === "rejected" || t === "lab_rejected") {
-      const itm = normalizeItem(msg.item || msg, true);
-      if (!itm) return;
-      removePendingByName(itm.name);
-      if (askingText && itm.name && askingText.toLowerCase().includes(itm.name.toLowerCase())) {
-        setAskingText("");
-      }
-      return;
-    }
-
-    if (t === "end") return;
-
-    if (typeof msg === "string") {
-      appendText(msg + "\n");
-      softApproveFromText(msg);
+    if (askingText && nm && askingText.toLowerCase().includes(nm.toLowerCase())) {
+      setAskingText("");
     }
   };
 
@@ -446,7 +471,7 @@ export default function LabVoiceAgent({
 
   if (!isVisible) return null;
 
-  /* ---------- LEFT COLUMN PORTAL ---------- */
+  /* ---------- LEFT COLUMN PORTAL (unchanged manual pending list) ---------- */
   const leftColumn = pendingQueue.length > 0 ? createPortal(
     <div
       key="pending-left-column"
@@ -490,9 +515,6 @@ export default function LabVoiceAgent({
     document.body
   ) : null;
 
-  /* Prefer remote (agent output); fallback to mic */
-  const visualizerStream = remoteStreamState || localStreamState;
-
   return (
     <>
       {/* Right-side voice assistant panel */}
@@ -515,8 +537,10 @@ export default function LabVoiceAgent({
           </button>
         </div>
 
-        <div className="assistant-content">
-          <div className="va-header">
+        {/* Content: replace conversation box with the visualizer, no scroll, no label */}
+        <div className="assistant-content" style={{ overflow: "hidden" }}>
+          {/* Minimal header (status on the right) */}
+          <div className="va-header" style={{ marginBottom: 12 }}>
             <div className="va-title"><FaFlask style={{ marginRight: 8 }} /> Lab Agent</div>
             <div className={`va-status ${status}`}>
               {status === "prepping" ? "Preparing • sending context…"
@@ -526,16 +550,15 @@ export default function LabVoiceAgent({
             </div>
           </div>
 
-          {/* ✅ Conversation area replaced by the visualizer (no title, no scroll) */}
-          <div className="va-section va-visualizer">
-            <AudioWave stream={visualizerStream} />
+          {/* AudioWave visualizer — use MIC stream by default */}
+          <div style={{ border: "1px solid var(--card-border)", borderRadius: 12, padding: 8 }}>
+            <AudioWave stream={localStreamRef.current || null} />
           </div>
 
+          {/* If you want to show the current ask/approval prompt visually, keep this tiny hint (optional) */}
           {askingText && (
-            <div className="va-section" style={{ marginTop: 8 }}>
-              <div className="va-subtitle">Approval</div>
-              <div className="va-ask">{askingText}</div>
-              <div className="va-hint">Reply verbally to the agent. No buttons needed.</div>
+            <div className="va-hint" style={{ marginTop: 8 }}>
+              {askingText}
             </div>
           )}
         </div>
@@ -556,9 +579,10 @@ export default function LabVoiceAgent({
         </button>
       </div>
 
-      {/* Render the LEFT column at top-left OUTSIDE the voice panel */}
+      {/* Left column with pending approvals */}
       {leftColumn}
     </>
   );
 }
+
 

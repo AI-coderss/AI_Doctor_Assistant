@@ -18,7 +18,7 @@ import { startVolumeMonitoring } from "./audioLevelAnalyzer";
  * - WebRTC to OpenAI Realtime
  * - Registers approve_lab tool (strict schema)
  * - Buffers function-call deltas; applies only on "completed"
- * - Replaces "Conversation" card with the AudioWave visualizer (no scroll, no label)
+ * - Uses SSE /lab-agent/events to react to backend "approved" signals in real-time
  *
  * Props:
  *  - isVisible: boolean
@@ -26,7 +26,7 @@ import { startVolumeMonitoring } from "./audioLevelAnalyzer";
  *  - sessionId: string
  *  - backendBase: string
  *  - context: string
- *  - onApproveLab: (item: {id, name, why?, priority?}) => void
+ *  - onApproveLab: (item: {id, name, why?, priority?, __source?}) => void
  *  - onEndSession: () => void
  *  - allowedLabs?: string[] (optional; sent as guidance to the model)
  */
@@ -51,9 +51,10 @@ export default function LabVoiceAgent({
   const localStreamRef = useRef(null);
   const remoteAudioRef = useRef(null);
 
-  // SSE (kept for compatibility)
-  const sseAbortRef = useRef(null);
-  const sseReaderRef = useRef(null);
+  // SSE: suggestions stream (existing) + approvals event stream (NEW)
+  const suggestAbortRef = useRef(null);
+  const suggestReaderRef = useRef(null);
+  const approvalsESRef = useRef(null);
 
   // Tool-call deltas buffer
   const toolBuffersRef = useRef(new Map()); // id -> { name, argsText }
@@ -64,6 +65,9 @@ export default function LabVoiceAgent({
 
   // Local id counter
   const seqRef = useRef(0);
+
+  // Track locally-applied approvals to ignore the echo from SSE
+  const ignoreOnceByNameRef = useRef(new Set()); // set of lowercased names
 
   const resetAll = () => {
     setPendingQueue([]);
@@ -81,8 +85,9 @@ export default function LabVoiceAgent({
         setStatus("prepping");
         resetAll();
         await sendContext();
-        await startVoice();       // mic <-> model audio
-        startSuggestStream();     // optional SSE text/suggestions (kept)
+        await startVoice();           // mic <-> model audio
+        startSuggestStream();         // optional SSE text/suggestions (existing)
+        startApprovalsEventStream();  // NEW: backend -> frontend approval events
       } catch (e) {
         console.error("Agent init failed:", e);
         setStatus("error");
@@ -273,6 +278,8 @@ export default function LabVoiceAgent({
         let args = {};
         try { args = JSON.parse(buf.argsText || "{}"); } catch {}
         if ((buf.name === "approve_lab" || /approve_lab/i.test(buf.name)) && args?.name) {
+          // ✅ Do NOT update UI directly here; POST to backend.
+          // We rely on backend → SSE (/lab-agent/events) "approved" signal to update the table.
           approveFromTool(args);
         }
         return;
@@ -293,7 +300,7 @@ export default function LabVoiceAgent({
 
   async function approveFromTool(item) {
     try {
-      const res = await fetch(`${backendBase}/lab-agent/approve`, {
+      await fetch(`${backendBase}/lab-agent/approve`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -305,29 +312,21 @@ export default function LabVoiceAgent({
           }
         })
       });
-      if (!res.ok) throw new Error(`/lab-agent/approve ${res.status}`);
-      const data = await res.json();
-
-      const approved = {
-        id: data?.item?.id || `${Date.now()}-${Math.random().toString(16).slice(2)}`,
-        name: data?.item?.name || item.name,
-        priority: data?.item?.priority || item.priority || "",
-        why: data?.item?.why || item.why || ""
-      };
-      applyApproved(approved);
-      // once applied, clear ask if it matches
-      if (askingText && approved.name && askingText.toLowerCase().includes(approved.name.toLowerCase())) {
-        setAskingText("");
-      }
+      // No local UI update here; the SSE approval event will handle it.
     } catch (e) {
       console.error("approveFromTool failed:", e);
     }
   }
 
   const stopAll = () => {
-    try { sseAbortRef.current?.abort(); } catch {}
-    sseAbortRef.current = null;
-    sseReaderRef.current = null;
+    // close approvals EventSource
+    try { approvalsESRef.current?.close(); } catch {}
+    approvalsESRef.current = null;
+
+    // stop suggest-stream reader
+    try { suggestAbortRef.current?.abort(); } catch {}
+    suggestAbortRef.current = null;
+    suggestReaderRef.current = null;
 
     try {
       if (pcRef.current) {
@@ -355,10 +354,51 @@ export default function LabVoiceAgent({
     setPendingQueue([]);
   };
 
+  // ===== NEW: approvals event stream (SSE) from backend =====
+  const startApprovalsEventStream = () => {
+    try { approvalsESRef.current?.close(); } catch {}
+    approvalsESRef.current = null;
+
+    if (!backendBase || !sessionId) return;
+
+    const url = `${backendBase}/lab-agent/events?session_id=${encodeURIComponent(sessionId)}`;
+    const es = new EventSource(url, { withCredentials: false });
+    approvalsESRef.current = es;
+
+    es.onmessage = (e) => {
+      if (!e?.data) return;
+      try {
+        const msg = JSON.parse(e.data);
+        if (msg?.type === "approved" && msg?.item?.name) {
+          const itm = normalizeItem(msg.item, false);
+          if (!itm) return;
+
+          // If we just applied this locally (manual button), ignore the echo once
+          const key = String(itm.name || "").trim().toLowerCase();
+          if (ignoreOnceByNameRef.current.has(key)) {
+            ignoreOnceByNameRef.current.delete(key);
+            return; // swallow echo
+          }
+
+          // Mark source so Chat.jsx skips re-posting to backend
+          itm.__source = "sse";
+          applyApproved(itm);
+        }
+        // (optional) handle msg.type === "rejected" if you want UI feedback
+      } catch {
+        // ignore malformed frames
+      }
+    };
+
+    es.onerror = () => {
+      // EventSource will auto-reconnect. Nothing needed here.
+    };
+  };
+
   // Optional: keep your SSE suggestions stream alive, unchanged
   const startSuggestStream = async () => {
     const ctrl = new AbortController();
-    sseAbortRef.current = ctrl;
+    suggestAbortRef.current = ctrl;
     try {
       const res = await fetch(`${backendBase}/lab-agent/suggest-stream`, {
         method: "POST",
@@ -368,7 +408,7 @@ export default function LabVoiceAgent({
       });
       if (!res.ok || !res.body) throw new Error(`/lab-agent/suggest-stream ${res.status}`);
       const reader = res.body.getReader();
-      sseReaderRef.current = reader;
+      suggestReaderRef.current = reader;
       const decoder = new TextDecoder();
 
       let buf = "";
@@ -387,7 +427,7 @@ export default function LabVoiceAgent({
           if (!payload) continue;
           try {
             const msg = JSON.parse(payload);
-            // You can emit suggestions into pendingQueue if you want:
+            // Push suggestions into pendingQueue if you want:
             if (msg?.type === "suggestion" && msg?.item?.name) {
               const itm = normalizeItem(msg.item, true);
               if (itm && !hasByName(pendingQueue, itm.name)) {
@@ -420,6 +460,7 @@ export default function LabVoiceAgent({
       name,
       why: raw.why ? String(raw.why).trim() : "",
       priority: raw.priority ? String(raw.priority).trim() : "",
+      __source: raw.__source // preserve if present
     };
   };
 
@@ -444,9 +485,16 @@ export default function LabVoiceAgent({
     } catch {}
   };
 
-  const applyApproved = (item) => {
+  // NOTE: add optional second arg { local: true } when *manually* adding,
+  // so we can ignore the one echo from SSE that follows the server write.
+  const applyApproved = (item, opts = {}) => {
     const nm = String(item?.name || "").trim();
     if (!nm) return;
+
+    if (opts.local) {
+      try { ignoreOnceByNameRef.current.add(nm.toLowerCase()); } catch {}
+    }
+
     removePendingByName(nm);
     try { onApproveLab?.(item); } catch {}
     if (askingText && nm && askingText.toLowerCase().includes(nm.toLowerCase())) {
@@ -494,7 +542,21 @@ export default function LabVoiceAgent({
             <div className="btn-row">
               <button
                 className="va-btn is-primary"
-                onClick={() => { applyApproved(s); notifyManualAdd(s); }}
+                onClick={() => {
+                  // mark as locally applied to swallow the single SSE echo
+                  applyApproved(s, { local: true });
+                  notifyManualAdd(s);
+                  // also inform backend /lab-agent/approve to persist & fan-out
+                  // (tool-bridge "add_lab_manual" above is optional analytics; the authoritative write is approve)
+                  fetch(`${backendBase}/lab-agent/approve`, {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({
+                      session_id: sessionId,
+                      item: { name: s.name, priority: s.priority || "", why: s.why || "" }
+                    })
+                  }).catch(() => {});
+                }}
               >
                 Add to Table
               </button>
@@ -584,5 +646,6 @@ export default function LabVoiceAgent({
     </>
   );
 }
+
 
 

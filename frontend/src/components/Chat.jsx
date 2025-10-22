@@ -691,20 +691,26 @@ const [labSessionId, setLabSessionId] = useState(() => crypto.randomUUID());
   };
 
   const handleAddLabToTable = async (item) => {
-    const clean = {
-      name: String(item?.name || "").trim(),
-      priority: String(item?.priority || "Low").trim(),
-      why: String(item?.why || "").trim(),
-    };
-    if (!clean.name) return;
-    setLabOrders((prev) => {
-      const next = mergeByName(prev, [clean]);
-      return next;
-    });
-    ensureLabOrdersBubble();
-    approveLabViaAPI(clean);
-  };
+  const isFromSSE = item && item.__source === "sse";  // ⬅️ NEW: detect SSE-origin approvals
 
+  const clean = {
+    name: String(item?.name || "").trim(),
+    priority: String(item?.priority || "Low").trim(),
+    why: String(item?.why || "").trim(),
+  };
+  if (!clean.name) return;
+
+  setLabOrders((prev) => {
+    const next = mergeByName(prev, [clean]);
+    return next;
+  });
+  ensureLabOrdersBubble();
+
+  // ⬅️ NEW: Do NOT re-post to backend if this came from SSE
+  if (!isFromSSE) {
+    approveLabViaAPI(clean);
+  }
+};
   // Hook for LabVoiceAgent -> when it approves a lab, update the unified table only (no extra bubbles)
   const handleApproveLabFromAgent = async (item) => {
     await handleAddLabToTable(item);

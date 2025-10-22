@@ -3022,8 +3022,6 @@ REALTIME_VOICE     = os.getenv("OPENAI_REALTIME_VOICE", "ballad")
 
 LIST_MODEL         = os.getenv("OPENAI_LIST_MODEL", "gpt-4o-mini")
 
-
-
 # ---------- Optional RAG (Qdrant) ----------
 vector_store = None
 def _maybe_init_vector_store():
@@ -3130,7 +3128,12 @@ def _sse(obj: dict) -> str:
 def lab_agent_set_context():
     data = request.get_json(silent=True) or {}
     session_id = data.get("session_id") or str(uuid4())
-    context = (data.get("context") or "").trim() if hasattr(str, "trim") else (data.get("context") or "").strip()
+    # normalize context safely
+    context = (data.get("context") or "")
+    if isinstance(context, str):
+        context = context.strip()
+    else:
+        context = str(context)
     st = _sess(session_id)
     st["context"] = context
     return jsonify({"ok": True, "session_id": session_id, "approved_count": len(st["approved"])}), 200
@@ -3168,19 +3171,19 @@ def lab_agent_tool_bridge():
             if all((x.get("name") or "").strip().lower() != item["name"].strip().lower() for x in st["approved"]):
                 st["approved"].append(item)
             # push SSE event so any subscriber can reflect instantly
-            _emit(session_id, {"type": "approved", "item": item})
+            _emit(session_id, {"type": "approved", "item": item, "session_id": session_id})
             return jsonify({"ok": True, "applied": True, "item": item, "approved_count": len(st["approved"])}), 200
         return jsonify({"ok": False, "error": "Invalid item"}), 400
 
     elif tool == "reject_lab":
         item = _normalize_row(args) or {}
-        # For now we just emit rejection info
-        _emit(session_id, {"type": "rejected", "item": item})
+        # emit rejection info (UI may ignore or log)
+        _emit(session_id, {"type": "rejected", "item": item, "session_id": session_id})
         return jsonify({"ok": True, "applied": True}), 200
 
     return jsonify({"ok": False, "error": f"Unknown tool '{tool}'"}), 400
 
-# ---------- Lab Agent: SSE events channel (optional) ----------
+# ---------- Lab Agent: SSE events channel ----------
 @app.get("/lab-agent/events")
 def lab_agent_events():
     session_id = request.args.get("session_id") or ""
@@ -3189,14 +3192,15 @@ def lab_agent_events():
     q = _events_q(session_id)
 
     def gen():
-        # Send hello
-        yield _sse({"type": "hello", "ts": time.time()})
+        # initial hello + reconnection pacing (client EventSource auto-reconnects)
+        yield "retry: 3000\n"
+        yield _sse({"type": "hello", "ts": time.time(), "session_id": session_id})
         while True:
             try:
                 obj = q.get(timeout=60)
             except Exception:
-                # keep-alive
-                yield _sse({"type": "ping", "ts": time.time()})
+                # keep-alive every 60s
+                yield _sse({"type": "ping", "ts": time.time(), "session_id": session_id})
                 continue
             yield _sse(obj)
 
@@ -3205,8 +3209,10 @@ def lab_agent_events():
         "Cache-Control": "no-cache, no-transform",
         "X-Accel-Buffering": "no",
         "Connection": "keep-alive",
+        "Access-Control-Allow-Origin": "*",  # allow cross-origin EventSource
     }
     return Response(stream_with_context(gen()), headers=headers)
+
 @app.route("/lab-agent/approve", methods=["POST", "OPTIONS"])
 def lab_agent_approve():
     # --- CORS preflight ---
@@ -3232,10 +3238,13 @@ def lab_agent_approve():
     if not any((a.get("name") or "").strip().lower() == name_low for a in approved):
         # add a lightweight id if none provided
         if not raw.get("id"):
-            import time, re
-            slug = re.sub(r"[^a-z0-9\-]+", "-", name_low).strip("-") or "lab"
-            item["id"] = f"{slug}-{int(time.time()*1000)}"
+            import time as _t, re as _re
+            slug = _re.sub(r"[^a-z0-9\-]+", "-", name_low).strip("-") or "lab"
+            item["id"] = f"{slug}-{int(_t.time()*1000)}"
         approved.append(item)
+
+    # *** NEW: emit SSE so the UI updates immediately (remove from pending -> append to table)
+    _emit(session_id, {"type": "approved", "item": item, "session_id": session_id})
 
     return jsonify({"applied": True, "item": item, "session_id": session_id}), 200
 
@@ -3262,7 +3271,7 @@ def lab_agent_suggest_stream():
         + _build_context_instructions(st.get("context"), st.get("approved"))
     )
 
-    import re, json, requests, os, time
+    import re, json as _json, requests, os, time
     OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
     CHAT_URL = "https://api.openai.com/v1/chat/completions"
 
@@ -3278,7 +3287,7 @@ def lab_agent_suggest_stream():
         if i != -1 and j > i:
             txt = txt[i:j+1]
         try:
-            obj = json.loads(txt)
+            obj = _json.loads(txt)
             return obj if isinstance(obj, list) else [obj]
         except Exception:
             return []
@@ -3335,7 +3344,6 @@ def lab_agent_suggest_stream():
         # 3) Emit suggestions one-by-one as SSE frames (UI handles them)
         for it in norm:
             yield emit({"type": "suggestion", "item": it})
-            # small pacing gap helps the UI feel live
             time.sleep(0.05)
 
         yield emit({"type": "end"})
@@ -3345,6 +3353,7 @@ def lab_agent_suggest_stream():
         "Cache-Control": "no-cache, no-transform",
         "X-Accel-Buffering": "no",
         "Connection": "keep-alive",
+        "Access-Control-Allow-Origin": "*",
     }
     return Response(generate(), headers=headers)
 
@@ -3413,7 +3422,6 @@ def lab_agent_rtc_connect():
                 "required": ["name"]
             }
         },
-        
     ]
 
     import requests, os
@@ -3455,6 +3463,7 @@ def lab_agent_rtc_connect():
     resp = Response(answer, status=200, mimetype="application/sdp")
     resp.headers["Cache-Control"] = "no-cache"
     return resp
+
 
 if __name__ == "__main__":
     app.run(host="127.0.0.1", port=5050, debug=True)

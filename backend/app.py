@@ -3006,6 +3006,7 @@ def vision_analyze():
 SYSTEM_PROMPT = (
     "You are a clinical lab-test recommender assisting a physician.\n"
     "- Speak concisely.\n"
+    "- Reply in English only.\n"
     "- Suggest high-yield diagnostic/staging lab tests ONE AT A TIME.\n"
     "- After each suggestion, WAIT for the doctor to approve or skip.\n"
     "- If approved, briefly confirm and move to the next.\n"
@@ -3412,20 +3413,7 @@ def lab_agent_rtc_connect():
                 "required": ["name"]
             }
         },
-        {
-        "type": "function",
-        "name": "queue_lab_suggestion",
-        "description": "Queue ONE suggested lab test into the pending list (do NOT approve automatically).",
-        "parameters": {
-            "type": "object",
-            "properties": {
-                "name": {"type": "string"},
-                "why": {"type": "string"},
-                "priority": {"type": "string", "enum": ["STAT", "High", "Routine"]}
-            },
-            "required": ["name"]
-        }
-    },
+        
     ]
 
     import requests, os

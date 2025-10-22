@@ -311,20 +311,12 @@ function SecondOpinionPanel({ data, narrative, onAddLab = () => { } }) {
 
 /* ====== Lab Orders Table bubble (single instance) ====== */
 function LabOrdersTable({ rows = [], onSend, sending }) {
-  const normalize = (p) => {
-    const s = String(p || "").toLowerCase();
-    if (s === "stat" || s === "high") return "high";
-    if (s === "medium") return "medium";
-    if (s === "routine" || s === "low") return "low";
-    return "low";
-  };
   const badge = (p) => {
-    const lvl = normalize(p);
-    if (lvl === "high") return <span className="prio-pill prio-high">High</span>;
-    if (lvl === "medium") return <span className="prio-pill prio-medium">Medium</span>;
+    const s = String(p || "").toLowerCase();
+    if (s === "high") return <span className="prio-pill prio-high">High</span>;
+    if (s === "medium") return <span className="prio-pill prio-medium">Medium</span>;
     return <span className="prio-pill prio-low">Low</span>;
   };
-
 
   return (
     <div className="lab-orders-card">
@@ -405,8 +397,8 @@ const Chat = () => {
     return id;
   });
 
-  // Fresh, in-memory id just for Lab Orders (not in localStorage)
-  const [labSessionId, setLabSessionId] = useState(() => crypto.randomUUID());
+// Fresh, in-memory id just for Lab Orders (not in localStorage)
+const [labSessionId, setLabSessionId] = useState(() => crypto.randomUUID());
 
   const liveText = useLiveTranscriptStore((s) => s.text);
   const isStreaming = useLiveTranscriptStore((s) => s.isStreaming);
@@ -435,19 +427,19 @@ const Chat = () => {
   // (Optional) Previously-approved labs loader removed from persistence; still safe to query server.
   // With fresh sessionId this will normally be empty, keeping table clean on refresh.
   useEffect(() => {
-    (async () => {
-      try {
-        const res = await fetch(`${BACKEND_BASE}/lab-agent/list?session_id=${encodeURIComponent(labSessionId)}`);
-        if (res.ok) {
-          const data = await res.json();
-          if (Array.isArray(data?.labs) && data.labs.length) {
-            setLabOrders((prev) => mergeByName(prev, data.labs));
-            ensureLabOrdersBubble();
-          }
+  (async () => {
+    try {
+      const res = await fetch(`${BACKEND_BASE}/lab-agent/list?session_id=${encodeURIComponent(labSessionId)}`);
+      if (res.ok) {
+        const data = await res.json();
+        if (Array.isArray(data?.labs) && data.labs.length) {
+          setLabOrders((prev) => mergeByName(prev, data.labs));
+          ensureLabOrdersBubble();
         }
-      } catch { }
-    })();
-  }, [labSessionId]); // ⬅️ key change
+      }
+    } catch {}
+  })();
+}, [labSessionId]); // ⬅️ key change
 
   // Live transcript bubble lifecycle
   useEffect(() => {
@@ -667,29 +659,31 @@ const Chat = () => {
     }
   };
 
-  const coerce = (p) => {
-    const s = String(p || "").toLowerCase();
-    if (s === "stat" || s === "high") return "High";
-    if (s === "medium") return "Medium";
-    if (s === "routine" || s === "low") return "Low";
-    return "Low";
-  };
   const mergeByName = (prev, items) => {
     const map = new Map(prev.map((i) => [String(i.name).toLowerCase(), i]));
     (items || []).forEach((it) => {
       const nm = String(it?.name || "").trim();
       if (!nm) return;
       const key = nm.toLowerCase();
-      const incoming = { name: nm, priority: coerce(it?.priority), why: it?.why || "" };
       if (!map.has(key)) {
-        map.set(key, incoming);
+        map.set(key, {
+          name: nm,
+          priority: it?.priority || "",
+          why: it?.why || "",
+        });
       } else {
+        // Merge minimal fields if missing
         const cur = map.get(key);
-        map.set(key, { name: cur.name, priority: cur.priority || incoming.priority, why: cur.why || incoming.why });
+        map.set(key, {
+          name: cur.name,
+          priority: cur.priority || it?.priority || "",
+          why: cur.why || it?.why || "",
+        });
       }
     });
     return Array.from(map.values());
   };
+
   const ensureLabOrdersBubble = () => {
     if (tableBubbleCreatedRef.current) return;
     tableBubbleCreatedRef.current = true;
@@ -697,47 +691,44 @@ const Chat = () => {
   };
 
   const handleAddLabToTable = async (item) => {
-    const normP = (p) => {
-      const s = String(p || "").toLowerCase();
-      if (s === "stat" || s === "high") return "High";
-      if (s === "medium") return "Medium";
-      if (s === "routine" || s === "low") return "Low";
-      return "Low";
-    };
     const clean = {
       name: String(item?.name || "").trim(),
-      priority: normP(item?.priority),
+      priority: String(item?.priority || "Low").trim(),
       why: String(item?.why || "").trim(),
     };
     if (!clean.name) return;
-    setLabOrders((prev) => mergeByName(prev, [clean]));
+    setLabOrders((prev) => {
+      const next = mergeByName(prev, [clean]);
+      return next;
+    });
     ensureLabOrdersBubble();
     approveLabViaAPI(clean);
   };
+
   // Hook for LabVoiceAgent -> when it approves a lab, update the unified table only (no extra bubbles)
   const handleApproveLabFromAgent = async (item) => {
     await handleAddLabToTable(item);
   };
 
   // 🔚 End Session: clear table & rotate session id (and optionally reset server state)
-  const handleEndSession = async () => {
-    try {
-      // Reset labs for the CURRENT lab case only
-      await fetch(`${BACKEND_BASE}/lab-agent/reset`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ session_id: labSessionId }),
-      }).catch(() => { });
-    } finally {
-      setLabOrders([]);
-      setChats((p) => [...p, { who: "bot", msg: "🧹 Session ended. Starting a new one." }]);
+const handleEndSession = async () => {
+  try {
+    // Reset labs for the CURRENT lab case only
+    await fetch(`${BACKEND_BASE}/lab-agent/reset`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ session_id: labSessionId }),
+    }).catch(() => {});
+  } finally {
+    setLabOrders([]);
+    setChats((p) => [...p, { who: "bot", msg: "🧹 Session ended. Starting a new one." }]);
 
-      // Start a brand-new, ephemeral Lab case id
-      setLabSessionId(crypto.randomUUID());
+    // Start a brand-new, ephemeral Lab case id
+    setLabSessionId(crypto.randomUUID());
 
-      setShowLabAgent(false);
-    }
-  };
+    setShowLabAgent(false);
+  }
+};
 
 
   // Text chat submit (includes small “add lab:” command)
@@ -882,46 +873,46 @@ const Chat = () => {
     });
   };
 
-  const handleAssistantContextTranscript = async (transcript) => {
+const handleAssistantContextTranscript = async (transcript) => {
+  try {
+    const t = (transcript || "").trim(); if (!t) return;
+
+    // 1) Preserve existing behavior: push raw transcript to both backends
+    await fetch(`${BACKEND_BASE}/set-context`, {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ session_id: sessionId, transcript: t }),
+    });
+
+    fetch("https://ai-doctor-assistant-voice-mode-webrtc.onrender.com/api/session-context", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ session_id: sessionId, transcript: t }),
+    }).catch(() => { });
+
+    // 2) Keep local stores in sync (unchanged)
     try {
-      const t = (transcript || "").trim(); if (!t) return;
+      const store = useDosageStore.getState();
+      store.setTranscript?.(t);
+      store.setSessionId?.(sessionId);
+    } catch { }
 
-      // 1) Preserve existing behavior: push raw transcript to both backends
-      await fetch(`${BACKEND_BASE}/set-context`, {
-        method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ session_id: sessionId, transcript: t }),
-      });
-
-      fetch("https://ai-doctor-assistant-voice-mode-webrtc.onrender.com/api/session-context", {
-        method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ session_id: sessionId, transcript: t }),
-      }).catch(() => { });
-
-      // 2) Keep local stores in sync (unchanged)
-      try {
-        const store = useDosageStore.getState();
-        store.setTranscript?.(t);
-        store.setSessionId?.(sessionId);
-      } catch { }
-
-      // 3) NEW: also push the *full* current context (transcript + second-opinion narrative + approved labs)
-      //     This keeps the realtime voice session and backend perfectly in sync with the UI state.
-      try {
-        const ctx = (typeof buildAgentContext === "function" ? buildAgentContext() : "").trim();
-        if (ctx) {
-          // Fire-and-forget to voice server (non-blocking), await app backend (same pattern as above)
-          await fetch(`${BACKEND_BASE}/set-context`, {
-            method: "POST", headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ session_id: sessionId, transcript: ctx }),
-          });
-          fetch("https://ai-doctor-assistant-voice-mode-webrtc.onrender.com/api/session-context", {
-            method: "POST", headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ session_id: sessionId, transcript: ctx }),
-          }).catch(() => { });
-        }
-      } catch { }
-    } catch (e) { console.error("Failed to send transcript context:", e); }
-  };
+    // 3) NEW: also push the *full* current context (transcript + second-opinion narrative + approved labs)
+    //     This keeps the realtime voice session and backend perfectly in sync with the UI state.
+    try {
+      const ctx = (typeof buildAgentContext === "function" ? buildAgentContext() : "").trim();
+      if (ctx) {
+        // Fire-and-forget to voice server (non-blocking), await app backend (same pattern as above)
+        await fetch(`${BACKEND_BASE}/set-context`, {
+          method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ session_id: sessionId, transcript: ctx }),
+        });
+        fetch("https://ai-doctor-assistant-voice-mode-webrtc.onrender.com/api/session-context", {
+          method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ session_id: sessionId, transcript: ctx }),
+        }).catch(() => { });
+      }
+    } catch { }
+  } catch (e) { console.error("Failed to send transcript context:", e); }
+};
 
   /** Specialty form streaming (if used elsewhere) */
   const handleFormStreamEvent = (evt) => {

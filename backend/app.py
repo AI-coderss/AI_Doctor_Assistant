@@ -885,6 +885,15 @@ def _extract_case_fields_strict(transcript: str, topn: int = 12):
         "weight_kg": weight_kg,
         "drug_suggestions": drug_suggestions,
     }
+# ====== small helper to add CORS headers consistently ======
+def _corsify(resp):
+    origin = request.headers.get("Origin", "*")
+    resp.headers["Access-Control-Allow-Origin"] = origin
+    resp.headers["Vary"] = "Origin"
+    resp.headers["Access-Control-Allow-Credentials"] = "true"
+    resp.headers["Access-Control-Allow-Headers"] = "Content-Type, Authorization"
+    resp.headers["Access-Control-Allow-Methods"] = "POST, OPTIONS"
+    return resp
 
 def _merge_with_context(session_id: str, data: dict) -> dict:
     """
@@ -3197,6 +3206,33 @@ def lab_agent_events():
         "Connection": "keep-alive",
     }
     return Response(stream_with_context(gen()), headers=headers)
+@app.route("/lab-agent/approve", methods=["POST", "OPTIONS"])
+def lab_agent_approve():
+    # -- CORS preflight --
+    if request.method == "OPTIONS":
+        return _corsify(Response("", status=204))
+
+    payload = request.get_json(silent=True) or {}
+    session_id = str(payload.get("session_id") or "")
+    raw = payload.get("item") or {}
+
+    name = (raw.get("name") or raw.get("test") or "").strip()
+    if not name:
+        return _corsify(jsonify({"applied": False, "error": "Missing item.name"})), 400
+
+    # normalize/build item
+    slug = re.sub(r"[^a-z0-9\-]+", "-", name.lower()).strip("-") or "item"
+    item = {
+        "id": raw.get("id") or f"{slug}-{int(time.time())}",
+        "name": name,
+        "why": (raw.get("why") or "").strip(),
+        "priority": (raw.get("priority") or "").strip(),
+    }
+
+    # TODO: persist if your app keeps server-side state per session_id
+
+    resp = jsonify({"applied": True, "item": item, "session_id": session_id})
+    return _corsify(resp), 200
 
 # ---------- Lab Agent: LLM suggestions stream (context-driven JSON; NO defaults) ----------
 @app.post("/lab-agent/suggest-stream")
@@ -3371,5 +3407,6 @@ def lab_agent_rtc_connect():
     resp = Response(answer, status=200, mimetype="application/sdp")
     resp.headers["Cache-Control"] = "no-cache"
     return resp
+
 if __name__ == "__main__":
     app.run(host="127.0.0.1", port=5050, debug=True)

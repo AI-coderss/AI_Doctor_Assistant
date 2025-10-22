@@ -12,20 +12,14 @@ import useAudioForVisualizerStore from "../store/useAudioForVisualizerStore.js";
 import useAudioStore from "../store/audioStore.js";
 import { startVolumeMonitoring } from "./audioLevelAnalyzer";
 
+/* 🔊 Audio waveform component (kept exactly as you asked, only imported and used) */
+import AudioWave from "./AudioWave.jsx";
+
 /**
  * LabVoiceAgent
  * - Connects to backend voice agent (WebRTC + SSE).
- * - Conversation panel stays at right.
+ * - Conversation area replaced by AudioWave (no label; no internal scroll).
  * - Pending Lab Suggestions render in a fixed LEFT column (via portal to <body>), not draggable.
- *
- * Props:
- *  - isVisible: boolean
- *  - onClose: () => void
- *  - sessionId: string
- *  - backendBase: string
- *  - context: string
- *  - onApproveLab: (item: {id, name, why?, priority?}) => void
- *  - onEndSession: () => void
  */
 export default function LabVoiceAgent({
   isVisible,
@@ -42,6 +36,10 @@ export default function LabVoiceAgent({
   const [pendingQueue, setPendingQueue] = useState([]); // [{id, name, why, priority}]
   const [askingText, setAskingText] = useState("");
 
+  /* expose streams to the visualizer */
+  const [localStreamState, setLocalStreamState] = useState(null);
+  const [remoteStreamState, setRemoteStreamState] = useState(null);
+
   // WebRTC
   const pcRef = useRef(null);
   const localStreamRef = useRef(null);
@@ -57,7 +55,7 @@ export default function LabVoiceAgent({
   // Function-call buffers
   const toolBuffersRef = useRef(new Map()); // id -> { name, argsText }
 
-  // Visualizer stores
+  // Orb / output level stores
   const { setAudioScale } = useAudioForVisualizerStore.getState();
   const { setAudioUrl } = useAudioStore();
 
@@ -116,6 +114,7 @@ export default function LabVoiceAgent({
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       localStreamRef.current = stream;
+      setLocalStreamState(stream); // expose mic
 
       // Orb reacts to MIC input
       try { startVolumeMonitoring(stream, setAudioScale); } catch {}
@@ -126,7 +125,7 @@ export default function LabVoiceAgent({
       // mic -> PC
       stream.getAudioTracks().forEach((track) => pc.addTrack(track, stream));
 
-      // agent voice -> audio element
+      // agent voice -> audio element + visualizer
       pc.ontrack = (event) => {
         const [remoteStream] = event.streams || [];
         if (!remoteStream) return;
@@ -134,7 +133,7 @@ export default function LabVoiceAgent({
           remoteAudioRef.current.srcObject = remoteStream;
           remoteAudioRef.current.play?.().catch((err) => console.warn("Agent audio play failed:", err));
         }
-        // expose remote stream; orb can also react to OUTPUT
+        setRemoteStreamState(remoteStream);       // expose agent output
         try { setAudioUrl(remoteStream); } catch {}
         try { startVolumeMonitoring(remoteStream, setAudioScale); } catch {}
       };
@@ -273,8 +272,6 @@ export default function LabVoiceAgent({
 
     setMicActive(false);
     setStatus("idle");
-
-    // Also clear suggestions when agent is closed/hidden
     setPendingQueue([]);
   };
 
@@ -432,7 +429,7 @@ export default function LabVoiceAgent({
     }
   };
 
-  // 🔚 End Session: stop streams, clear UI, tell parent to create a fresh session id & clear table
+  // 🔚 End Session
   const endSessionNow = async () => {
     try {
       await fetch(`${backendBase}/lab-agent/reset`, {
@@ -443,7 +440,7 @@ export default function LabVoiceAgent({
     } finally {
       stopAll();
       resetAll();
-      onEndSession?.();  // parent clears table + rotates sessionId + closes overlay (already wired)
+      onEndSession?.();
     }
   };
 
@@ -493,6 +490,9 @@ export default function LabVoiceAgent({
     document.body
   ) : null;
 
+  /* Prefer remote (agent output); fallback to mic */
+  const visualizerStream = remoteStreamState || localStreamState;
+
   return (
     <>
       {/* Right-side voice assistant panel */}
@@ -526,11 +526,9 @@ export default function LabVoiceAgent({
             </div>
           </div>
 
-          <div className="va-section">
-            <div className="va-subtitle">Conversation</div>
-            <div className="va-stream">
-              {streamingText ? streamingText : <em>Agent is speaking & listening over the voice channel…</em>}
-            </div>
+          {/* ✅ Conversation area replaced by the visualizer (no title, no scroll) */}
+          <div className="va-section va-visualizer">
+            <AudioWave stream={visualizerStream} />
           </div>
 
           {askingText && (

@@ -449,3 +449,23 @@ html[data-theme="dark"] .pending-item .badge {
   border: 1px solid var(--vf-border) !important;
   color: var(--vf-text) !important;
 }
+/* === AudioWave-in-conversation overrides === */
+
+/* No internal scroll; let content be visible */
+.voice-assistant .assistant-content {
+  overflow: visible;            /* was: auto */
+}
+
+/* The visualizer section has no chrome; just the canvas */
+.va-section.va-visualizer {
+  padding: 0;
+  border: 0;
+  background: transparent;
+}
+
+/* Make sure the visualizer fits naturally; no fixed width/height here */
+.va-visualizer .container {
+  width: 100%;
+  max-width: 100%;
+  margin: 0;
+}

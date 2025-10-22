@@ -1,0 +1,13 @@
+/* Keeps the visualizer responsive and neat inside the agent card */
+.container {
+  width: 100%;
+  max-width: 100%;
+}
+
+#waveCanvas {
+  display: block;
+  width: 100%;
+  height: auto;        /* JS sets actual height; this keeps it responsive */
+  border-radius: 12px;
+  background: transparent;
+}

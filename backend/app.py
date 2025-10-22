@@ -3411,7 +3411,21 @@ def lab_agent_rtc_connect():
                 },
                 "required": ["name"]
             }
+        },
+        {
+        "type": "function",
+        "name": "queue_lab_suggestion",
+        "description": "Queue ONE suggested lab test into the pending list (do NOT approve automatically).",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "name": {"type": "string"},
+                "why": {"type": "string"},
+                "priority": {"type": "string", "enum": ["STAT", "High", "Routine"]}
+            },
+            "required": ["name"]
         }
+    },
     ]
 
     import requests, os

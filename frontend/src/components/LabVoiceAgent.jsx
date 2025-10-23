@@ -8,7 +8,7 @@ import BaseOrb from "./BaseOrb.jsx";
 import { FaMicrophoneAlt, FaFlask, FaTimes, FaBroom, FaPaperPlane } from "react-icons/fa";
 
 /* 🔊 Visualizer + audio store */
-import AudioWave from "./AudioWave.jsx";
+import AudioWave from "./AudioWave.jsx"; // <<— your provided visualizer component
 import useAudioForVisualizerStore from "../store/useAudioForVisualizerStore.js";
 import useAudioStore from "../store/audioStore.js";
 import { startVolumeMonitoring } from "./audioLevelAnalyzer";
@@ -17,8 +17,8 @@ import { startVolumeMonitoring } from "./audioLevelAnalyzer";
  * LabVoiceAgent
  * - WebRTC to OpenAI Realtime
  * - Registers approve_lab tool (strict schema)
- * - Buffers function-call deltas (official events); applies only on ".done"
- * - Removes from Pending and appends to the table via onApproveLab
+ * - Buffers function-call deltas; applies only on "completed"
+ * - Replaces "Conversation" card with the AudioWave visualizer (no scroll, no label)
  *
  * Props:
  *  - isVisible: boolean
@@ -28,7 +28,7 @@ import { startVolumeMonitoring } from "./audioLevelAnalyzer";
  *  - context: string
  *  - onApproveLab: (item: {id, name, why?, priority?}) => void
  *  - onEndSession: () => void
- *  - allowedLabs?: string[]
+ *  - allowedLabs?: string[] (optional; sent as guidance to the model)
  */
 export default function LabVoiceAgent({
   isVisible,
@@ -47,23 +47,22 @@ export default function LabVoiceAgent({
 
   // WebRTC
   const pcRef = useRef(null);
-  const dcRef = useRef(null);             // outbound control DataChannel ("oai-events")
+  const dcRef = useRef(null);             // our outbound control DataChannel ("oai-events")
   const localStreamRef = useRef(null);
   const remoteAudioRef = useRef(null);
-  const remoteStreamRef = useRef(null);
+  const remoteStreamRef = useRef(null);   // <<— keep remote MediaStream for visualizer
 
   // Which source should drive the visualizer: "mic" | "agent"
   const [vizSource, setVizSource] = useState("mic");
 
-  // SSE
+  // SSE (kept for compatibility)
   const sseAbortRef = useRef(null);
   const sseReaderRef = useRef(null);
 
-  // Tool-call buffers (by call_id)
-  const toolBuffersRef = useRef(new Map()); // call_id -> { name, argsText }
-  const callIdToNameRef = useRef(new Map()); // call_id OR item.id -> name (from output_item.added)
+  // Tool-call deltas buffer
+  const toolBuffersRef = useRef(new Map()); // id -> { name, argsText }
 
-  // Visualizer stores
+  // Visualizer stores (unchanged)
   const { setAudioScale } = useAudioForVisualizerStore.getState();
   const { setAudioUrl } = useAudioStore();
 
@@ -85,7 +84,7 @@ export default function LabVoiceAgent({
       try {
         setStatus("prepping");
         resetAll();
-        setVizSource("mic");
+        setVizSource("mic"); // default to mic when opening
         await sendContext();
         await startVoice();       // mic <-> model audio
         startSuggestStream();     // optional SSE text/suggestions (kept)
@@ -123,7 +122,7 @@ export default function LabVoiceAgent({
         name: { type: "string", description: "Canonical lab test name." },
         priority: {
           type: "string",
-          enum: ["STAT", "High", "Routine", "Medium", "Low"], // accept extras; we will normalize
+          enum: ["high", "medium", "low"],
           description: "Optional priority label."
         },
         why: { type: "string", description: "Optional reason the test is indicated." }
@@ -133,9 +132,11 @@ export default function LabVoiceAgent({
   };
 
   const sendSessionUpdate = () => {
+    // Guidance/instructions: constrain behavior hard
     const instruction = [
       "You are a clinical lab assistant. Speak concisely. No long monologues.",
-      "NEVER modify the table via text. ONLY call the 'approve_lab' function after explicit user approval (e.g., 'yes', 'approve', 'add').",
+      "You must NEVER modify the table directly via text. Instead, ONLY call the 'approve_lab' tool after the user explicitly confirms (e.g., 'yes', 'approve', 'add').",
+      "If you are not sure which lab name to use, ask a short clarification question then wait.",
       allowedLabs?.length
         ? `Use ONLY names from this allowed list when approving: ${allowedLabs.join(", ")}.`
         : "If a canonical list is not provided, prefer standard test names (e.g., 'CBC', 'CMP', 'TSH').",
@@ -145,6 +146,7 @@ export default function LabVoiceAgent({
       type: "session.update",
       session: {
         voice: "alloy",
+        // set to "server_vad" for talk over / natural turn-taking
         turn_detection: { type: "server_vad", threshold: 0.5 },
         tools: [APPROVE_LAB_TOOL],
         tool_choice: { type: "auto" },
@@ -158,7 +160,7 @@ export default function LabVoiceAgent({
     }
   };
 
-  // Tighten tool gating when explicitly asking for approval (optional visual prompt)
+  // Tighten tool gating when the agent is explicitly asking for approval
   useEffect(() => {
     if (!dcRef.current || dcRef.current.readyState !== "open") return;
     const msg = {
@@ -176,22 +178,26 @@ export default function LabVoiceAgent({
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       localStreamRef.current = stream;
 
+      // Orb reacts to MIC input
       try { startVolumeMonitoring(stream, setAudioScale); } catch {}
 
       // 2) WebRTC peer
       const pc = new RTCPeerConnection({ iceServers: [{ urls: "stun:stun.l.google.com:19302" }] });
       pcRef.current = pc;
 
-      // 2a) our outbound data channel for control/events
+      // 2a) create our outbound data channel for control/events
       const dc = pc.createDataChannel("oai-events");
       dcRef.current = dc;
-      dc.onopen = () => { sendSessionUpdate(); };
+      dc.onopen = () => {
+        // Register tools, instructions, VAD, voice
+        sendSessionUpdate();
+      };
       dc.onclose = () => {};
 
       // 3) mic -> PC
       stream.getAudioTracks().forEach((track) => pc.addTrack(track, stream));
 
-      // 4) agent -> audio element + visualizer switching
+      // 4) agent voice -> audio element + visualizer switching
       pc.ontrack = (event) => {
         const [remoteStream] = event.streams || [];
         if (!remoteStream) return;
@@ -201,10 +207,16 @@ export default function LabVoiceAgent({
         if (remoteAudioRef.current) {
           remoteAudioRef.current.srcObject = remoteStream;
 
+          // When output starts/pauses/ends, flip the visualizer source.
           const audioEl = remoteAudioRef.current;
           const onPlay   = () => setVizSource("agent");
           const onPause  = () => setVizSource("mic");
           const onEnded  = () => setVizSource("mic");
+
+          // Clean before re-binding to avoid duplicates
+          audioEl.removeEventListener?.("play", onPlay);
+          audioEl.removeEventListener?.("pause", onPause);
+          audioEl.removeEventListener?.("ended", onEnded);
 
           audioEl.addEventListener?.("play", onPlay);
           audioEl.addEventListener?.("pause", onPause);
@@ -213,6 +225,7 @@ export default function LabVoiceAgent({
           audioEl.play?.().catch((err) => console.warn("Agent audio play failed:", err));
         }
 
+        // Also respond to remote track mute/unmute to toggle visualizer
         const audioTracks = remoteStream.getAudioTracks?.() || [];
         audioTracks.forEach((t) => {
           t.onunmute = () => setVizSource("agent");
@@ -220,6 +233,7 @@ export default function LabVoiceAgent({
           t.onended  = () => setVizSource("mic");
         });
 
+        // (Optional) if your orb should react to OUTPUT as well:
         try { startVolumeMonitoring(remoteStream, setAudioScale); } catch {}
         try { setAudioUrl(remoteStream); } catch {}
       };
@@ -243,6 +257,7 @@ export default function LabVoiceAgent({
 
       // 5) Offer/answer
       let offer = await pc.createOffer({ offerToReceiveAudio: true, offerToReceiveVideo: false });
+      // (optional) tweak Opus fmtp
       offer.sdp = offer.sdp.replace(
         /a=rtpmap:\d+ opus\/48000\/2/g,
         "a=rtpmap:111 opus/48000/2\r\n" + "a=fmtp:111 minptime=10;useinbandfec=1"
@@ -272,68 +287,45 @@ export default function LabVoiceAgent({
       let msg = null;
       try { msg = JSON.parse(raw); } catch {}
 
-      // ---- 1) Name capture when function call item appears ----
-      if (msg?.type === "response.output_item.added" && msg?.item?.type === "function_call") {
-        const itemId = msg?.item?.id;
-        const fname  = msg?.item?.name || "";
-        if (itemId && fname) {
-          callIdToNameRef.current.set(itemId, fname);
-          // seed buffer in case deltas come before we see .done
-          if (!toolBuffersRef.current.has(itemId)) {
-            toolBuffersRef.current.set(itemId, { name: fname, argsText: "" });
-          }
-        }
-        return;
-      }
-
-      // ---- 2) Streaming args ----
-      if (msg?.type === "response.function_call_arguments.delta") {
-        const callId = msg.call_id || msg.item_id || "default";
-        const delta  = msg.delta || "";
-        const prev   = toolBuffersRef.current.get(callId) || { name: callIdToNameRef.current.get(callId) || "", argsText: "" };
+      // ---- Tool calling stream (delta) ----
+      if (msg?.type === "response.function_call.arguments.delta" || msg?.type === "tool_call.delta") {
+        const id = msg.call_id || msg.id || "default";
+        const name = msg.name || msg.function_name || "";
+        const delta = msg.delta || msg.arguments_delta || "";
+        const prev = toolBuffersRef.current.get(id) || { name, argsText: "" };
+        prev.name = name || prev.name;
         prev.argsText += (delta || "");
-        if (!prev.name && callIdToNameRef.current.get(callId)) prev.name = callIdToNameRef.current.get(callId);
-        toolBuffersRef.current.set(callId, prev);
+        toolBuffersRef.current.set(id, prev);
         return;
       }
 
-      // ---- 3) Completion of args ----
-      if (msg?.type === "response.function_call_arguments.done") {
-        const callId = msg.call_id || msg.item_id || "default";
-        const buf    = toolBuffersRef.current.get(callId);
-        toolBuffersRef.current.delete(callId);
-        const toolName = (buf?.name || callIdToNameRef.current.get(callId) || "").trim();
+      // ---- Tool completed ----
+      if (msg?.type === "response.function_call.completed" || msg?.type === "tool_call.completed") {
+        const id = msg.call_id || msg.id || "default";
+        const buf = toolBuffersRef.current.get(id);
+        toolBuffersRef.current.delete(id);
+        if (!buf?.name) return;
 
         let args = {};
-        try { args = JSON.parse(buf?.argsText || "{}"); } catch (e) {
-          console.warn("Failed to parse tool args JSON:", e, buf?.argsText);
-        }
-
-        if (/approve_lab/i.test(toolName) && args?.name) {
+        try { args = JSON.parse(buf.argsText || "{}"); } catch {}
+        if ((buf.name === "approve_lab" || /approve_lab/i.test(buf.name)) && args?.name) {
           approveFromTool(args);
         }
         return;
       }
 
-      // ---- Optional asking prompt ----
-      if (msg?.type === "ask" && typeof msg.prompt === "string") {
-        setAskingText(msg.prompt);
+      // ---- Asking / prompts (optional) ----
+      if (msg?.type === "ask") {
+        setAskingText(String(msg.prompt || ""));
         return;
       }
 
-      // (Other events ignored)
+      // (Optional) other event types can be handled as needed:
+      // response.audio_transcript.delta / done, input.audio_buffer.speech_started, etc.
     };
 
     ch.onerror = (e) => console.error("DataChannel error:", e);
   }
-
-  const mapPriority = (p) => {
-    const s = String(p || "").trim().toLowerCase();
-    if (s === "stat" || s === "urgent" || s === "high") return "High";
-    if (s === "medium") return "Medium";
-    if (s === "routine" || s === "low") return "Low";
-    return ""; // unknown/omitted
-  };
 
   async function approveFromTool(item) {
     try {
@@ -344,8 +336,8 @@ export default function LabVoiceAgent({
           session_id: sessionId,
           item: {
             name: String(item.name || "").trim(),
-            priority: mapPriority(item.priority),
-            why: String(item.why || "").trim()
+            priority: item.priority || "",
+            why: item.why || ""
           }
         })
       });
@@ -355,11 +347,11 @@ export default function LabVoiceAgent({
       const approved = {
         id: data?.item?.id || `${Date.now()}-${Math.random().toString(16).slice(2)}`,
         name: data?.item?.name || item.name,
-        priority: mapPriority(data?.item?.priority || item.priority),
+        priority: data?.item?.priority || item.priority || "",
         why: data?.item?.why || item.why || ""
       };
       applyApproved(approved);
-
+      // once applied, clear ask if it matches
       if (askingText && approved.name && askingText.toLowerCase().includes(approved.name.toLowerCase())) {
         setAskingText("");
       }
@@ -386,6 +378,7 @@ export default function LabVoiceAgent({
 
     try {
       if (remoteAudioRef.current) {
+        // remove listeners we attached
         remoteAudioRef.current.srcObject = null;
         remoteAudioRef.current.pause?.();
         remoteAudioRef.current.src = "";
@@ -398,10 +391,11 @@ export default function LabVoiceAgent({
     setVizSource("mic");
     setStatus("idle");
 
+    // clear suggestions when agent is closed/hidden
     setPendingQueue([]);
   };
 
-  // Optional: keep SSE suggestions stream alive
+  // Optional: keep your SSE suggestions stream alive, unchanged
   const startSuggestStream = async () => {
     const ctrl = new AbortController();
     sseAbortRef.current = ctrl;
@@ -433,6 +427,7 @@ export default function LabVoiceAgent({
           if (!payload) continue;
           try {
             const msg = JSON.parse(payload);
+            // You can emit suggestions into pendingQueue if you want:
             if (msg?.type === "suggestion" && msg?.item?.name) {
               const itm = normalizeItem(msg.item, true);
               if (itm && !hasByName(pendingQueue, itm.name)) {
@@ -458,13 +453,13 @@ export default function LabVoiceAgent({
 
   const normalizeItem = (raw, forceId = false) => {
     if (!raw) return null;
-    const name = ((raw.name || raw.test || "") + "").trim();
+     const name = ((raw.name || raw.test || "") + "").trim();
     if (!name) return null;
     return {
       id: raw.id && !forceId ? String(raw.id) : makeId(name),
       name,
       why: raw.why ? String(raw.why).trim() : "",
-      priority: raw.priority ? mapPriority(raw.priority) : "",
+      priority: raw.priority ? String(raw.priority).trim() : "",
     };
   };
 
@@ -479,6 +474,7 @@ export default function LabVoiceAgent({
   };
 
   const notifyManualAdd = (item) => {
+    // optional: inform backend of manual add for analytics
     try {
       fetch(`${backendBase}/lab-agent/tool-bridge`, {
         method: "POST",
@@ -515,7 +511,7 @@ export default function LabVoiceAgent({
 
   if (!isVisible) return null;
 
-  /* ---------- LEFT COLUMN PORTAL (Pending list) ---------- */
+  /* ---------- LEFT COLUMN PORTAL (unchanged manual pending list) ---------- */
   const leftColumn = pendingQueue.length > 0 ? createPortal(
     <div
       key="pending-left-column"
@@ -567,11 +563,14 @@ export default function LabVoiceAgent({
 
   return (
     <>
+      {/* Right-side voice assistant panel */}
       <div className="voice-assistant" style={{ zIndex: 1000 }}>
+        {/* hidden audio element */}
         <audio ref={remoteAudioRef} autoPlay playsInline style={{ display: "none" }} />
 
         <div className="assistant-orb"><BaseOrb className="base-orb" /></div>
 
+        {/* top-right controls */}
         <div className="va-controls">
           <button className="va-btn is-ghost" onClick={sendContext} title="Resend context">
             <FaPaperPlane />&nbsp;Sync Context
@@ -584,7 +583,9 @@ export default function LabVoiceAgent({
           </button>
         </div>
 
+        {/* Content: visualizer (no scroll, no label). Auto-switches between MIC and AGENT output */}
         <div className="assistant-content" style={{ overflow: "hidden" }}>
+          {/* Minimal header (status on the right) */}
           <div className="va-header" style={{ marginBottom: 12 }}>
             <div className="va-title"><FaFlask style={{ marginRight: 8 }} /> Lab Agent</div>
             <div className={`va-status ${status}`}>
@@ -595,10 +596,12 @@ export default function LabVoiceAgent({
             </div>
           </div>
 
+          {/* AudioWave visualizer — auto-switches to agent output while the model is speaking */}
           <div style={{ border: "1px solid var(--card-border)", borderRadius: 12, padding: 8 }}>
             <AudioWave stream={waveStream} />
           </div>
 
+          {/* If you want to show the current ask/approval prompt visually, keep this tiny hint (optional) */}
           {askingText && (
             <div className="va-hint" style={{ marginTop: 8 }}>
               {askingText}
@@ -606,6 +609,7 @@ export default function LabVoiceAgent({
           )}
         </div>
 
+        {/* Mic toggle */}
         <button
           className={`mic-btn ${micActive ? "mic-active" : ""}`}
           onClick={() => {
@@ -613,6 +617,8 @@ export default function LabVoiceAgent({
             const enabled = !micActive;
             localStreamRef.current.getAudioTracks().forEach((t) => (t.enabled = enabled));
             setMicActive(enabled);
+            // Keep visualizer source unchanged; if agent is speaking it stays on agent,
+            // otherwise it shows mic (enabled/disabled just affects actual signal).
           }}
           title={micActive ? "Mute mic" : "Unmute mic"}
           aria-label="Toggle microphone"
@@ -621,10 +627,10 @@ export default function LabVoiceAgent({
         </button>
       </div>
 
+      {/* Left column with pending approvals */}
       {leftColumn}
     </>
   );
 }
-
 
 

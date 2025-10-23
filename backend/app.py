@@ -507,8 +507,7 @@ def case_second_opinion_stream():
         "Treatment plan:\n\n"
         "Guidance: Be specific and evidence-aware; include typical adult dosages when appropriate. "
         "Only use content inferable from the transcript and retrieved clinical knowledge. "
-        "If helpful, append a flow pathway as a Mermaid block wrapped in ```mermaid ...```."
-    )
+            )
 
     rag_input = (
         f"{structured_instruction}\n\n"
@@ -1566,7 +1565,7 @@ def prompt_formatter():
 
     # 2) Downstream strict instructions for /stream response structure
     downstream_instructions = (
-        "You are a clinical assistant. **Output strictly in Markdown** with these EXACT headings, once each:\n"
+        "You are a clinical assistant . **Output strictly in Markdown** with these EXACT headings, once each:\n"
         "## Assessment\n"
         "## Differential Diagnoses\n"
         "## Red Flags\n"
@@ -3004,7 +3003,7 @@ def vision_analyze():
 # Try to use your project's prompt; fall back if not present
 
 SYSTEM_PROMPT = (
-    "You are a clinical lab-test recommender assisting a physician.\n"
+    "You are a clinical lab-test recommender assisting a physician at doctor samir abbas hospital.\n"
     "- Speak concisely.\n"
     "- Reply in English only.\n"
     "- Suggest high-yield diagnostic/staging lab tests ONE AT A TIME.\n"

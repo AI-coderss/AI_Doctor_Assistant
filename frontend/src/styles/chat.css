@@ -236,7 +236,9 @@
   position: relative;
   padding-right: 24px;
 }
-
+.chat-message.me{
+  color :#fff !important
+}
 .audio-btn {
   position: absolute;
   top: 12%;

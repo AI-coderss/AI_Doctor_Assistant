@@ -623,9 +623,7 @@
   background: var(--bg);
   color: var(--text);
 }
-.chat-content .chat-message .message-text {
-  color: var(--text);
-}
+
 .avatar img {
   border-radius: 50%;
   border: 1px solid var(--border);

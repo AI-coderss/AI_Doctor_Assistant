@@ -706,10 +706,27 @@ const [labSessionId, setLabSessionId] = useState(() => crypto.randomUUID());
   };
 
   // Hook for LabVoiceAgent -> when it approves a lab, update the unified table only (no extra bubbles)
-  const handleApproveLabFromAgent = async (item) => {
-    await handleAddLabToTable(item);
+ // Hook for LabVoiceAgent -> when it approves a lab, update the unified table only (no extra bubbles)
+const handleApproveLabFromAgent = (item) => {
+  // The LabVoiceAgent has *already* persisted this to the backend via approveFromTool.
+  // We just need to update our local UI state to match.
+  const clean = {
+    name: String(item?.name || "").trim(),
+    priority: String(item?.priority || "Low").trim(),
+    why: String(item?.why || "").trim(),
   };
 
+  if (!clean.name) return;
+
+  // Use the same merge logic to add the item to the table state
+  setLabOrders((prev) => {
+    const next = mergeByName(prev, [clean]);
+    return next;
+  });
+
+  // Ensure the table bubble is visible
+  ensureLabOrdersBubble();
+};
   // 🔚 End Session: clear table & rotate session id (and optionally reset server state)
 const handleEndSession = async () => {
   try {

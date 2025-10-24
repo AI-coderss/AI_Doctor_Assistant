@@ -1764,6 +1764,7 @@ def rtc_transcribe_nodes_connect():
     # 1) Create ephemeral transcription session
     # NOTE: Do NOT force input_audio_format; WebRTC uses RTP/Opus.
     session_payload = {
+        "modalities": ["text", "audio"],
         "input_audio_transcription": { "model": "gpt-4o-transcribe" },
         "turn_detection": {
             "type": "server_vad",

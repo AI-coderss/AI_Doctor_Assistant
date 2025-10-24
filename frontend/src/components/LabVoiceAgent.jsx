@@ -37,7 +37,7 @@ export default function LabVoiceAgent({
   backendBase,
   context,
   onApproveLab,
-  onEndSession = () => {},
+  onEndSession = () => { },
   allowedLabs = [],
 }) {
   const [status, setStatus] = useState("idle"); // idle | prepping | connected | error
@@ -168,7 +168,7 @@ export default function LabVoiceAgent({
 
       try {
         startVolumeMonitoring(stream, setAudioScale);
-      } catch {}
+      } catch { }
 
       // 2) WebRTC peer
       const pc = new RTCPeerConnection({ iceServers: [{ urls: "stun:stun.l.google.com:19302" }] });
@@ -177,8 +177,12 @@ export default function LabVoiceAgent({
       // 2a) outbound data channel
       const dc = pc.createDataChannel("oai-events");
       dcRef.current = dc;
-      dc.onopen = () => sendSessionUpdate();
-      dc.onclose = () => {};
+      // Changed by Hamender
+      wireDataChannel(dc); // Wire the outbound channel for bidirectional communication
+      dc.onopen = () => {
+        sendSessionUpdate();
+      };
+      dc.onclose = () => console.log("Outbound data channel closed");
 
       // 3) mic -> PC
       stream.getAudioTracks().forEach((track) => pc.addTrack(track, stream));
@@ -186,7 +190,11 @@ export default function LabVoiceAgent({
       // 4) agent voice -> audio element + visualizer switching
       pc.ontrack = (event) => {
         const [remoteStream] = event.streams || [];
-        if (!remoteStream) return;
+        // Changed by Hamender
+        if (!remoteStream) {
+          console.warn("No remote stream in ontrack event");
+          return;
+        }
 
         remoteStreamRef.current = remoteStream;
 
@@ -218,10 +226,10 @@ export default function LabVoiceAgent({
 
         try {
           startVolumeMonitoring(remoteStream, setAudioScale);
-        } catch {}
+        } catch { }
         try {
           setAudioUrl(remoteStream);
-        } catch {}
+        } catch { }
       };
 
       pc.ondatachannel = (e) => {
@@ -274,67 +282,88 @@ export default function LabVoiceAgent({
       let msg = null;
       try {
         msg = JSON.parse(raw);
-      } catch {}
+      } catch (e) {
+        // Changed by Hamender
+        console.warn("Failed to parse message as JSON:", e, "Raw:", raw);
+      }
 
-      if (msg?.type === "response.function_call.arguments.delta" || msg?.type === "tool_call.delta") {
+      // Changed by Hamender
+      if (msg?.type === "response.output_item.added") {
+        const item = msg.item;
+        if (item?.type === "function_call") {
+          const id = item.call_id || item.id || "default";
+          const name = item.name || "";
+          const prev = toolBuffersRef.current.get(id) || { name: "", argsText: "" };
+          prev.name = name;
+          toolBuffersRef.current.set(id, prev);
+        }
+        return;
+      }
+
+      if (msg?.type === "response.function_call_arguments.delta" || msg?.type === "tool_call.delta") {
         const id = msg.call_id || msg.id || "default";
-        const name = msg.name || msg.function_name || "";
         const delta = msg.delta || msg.arguments_delta || "";
-        const prev = toolBuffersRef.current.get(id) || { name, argsText: "" };
-        prev.name = name || prev.name;
+        const prev = toolBuffersRef.current.get(id) || { name: "", argsText: "" };
+        if (!prev.name) prev.name = "approve_lab";
         prev.argsText += delta || "";
         toolBuffersRef.current.set(id, prev);
         return;
       }
 
-      if (msg?.type === "response.function_call.completed" || msg?.type === "tool_call.completed") {
+      // Changed by Hamender
+      if (msg?.type === "response.function_call_arguments.done" || msg?.type === "tool_call_arguments.done" || msg?.type === "response.function_call.completed" || msg?.type === "tool_call.completed") {
         const id = msg.call_id || msg.id || "default";
         const buf = toolBuffersRef.current.get(id);
         toolBuffersRef.current.delete(id);
-        if (!buf?.name) return;
+        if (!buf) {
+          // No buffer, perhaps done without deltas, ignore
+          return;
+        }
+        if (!buf.name) buf.name = "approve_lab"; // fallback
+        console.log("Tool call completed - id:", id, "name:", buf.name, "argsText:", buf.argsText);
 
         let args = {};
         try {
           args = JSON.parse(buf.argsText || "{}");
-        } catch {}
-
-        if ((buf.name === "approve_lab" || /approve_lab/i.test(buf.name)) && args?.name) {
-          approveFromTool(args);
+          console.log("Parsed args:", args);
+          if (args && args.name && args.priority) {
+            approveFromTool(args)
+          }
+        } catch (e) {
+          console.warn("Failed to parse args:", e);
         }
-        return;
-      }
 
-      if (msg?.type === "ask") {
-        setAskingText(String(msg.prompt || ""));
-      }
-    };
 
-    ch.onerror = (e) => console.error("DataChannel error:", e);
+        if (msg?.type === "ask") {
+          setAskingText(String(msg.prompt || ""));
+        }
+      };
+
+      ch.onerror = (e) => console.error("DataChannel error:", e);
+    }
   }
 
   async function approveFromTool(item) {
+    // Changed by Hamender
+    const approved = {
+      id: `${Date.now()}-${Math.random().toString(16).slice(2)}`,
+      name: String(item.name || "").trim(),
+      priority: item.priority || "",
+      why: item.why || "",
+    };
+
+
     try {
       const res = await fetch(`${backendBase}/lab-agent/approve`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           session_id: sessionId,
-          item: {
-            name: String(item.name || "").trim(),
-            priority: item.priority || "",
-            why: item.why || "",
-          },
+          item: approved,
         }),
       });
       if (!res.ok) throw new Error(`/lab-agent/approve ${res.status}`);
       const data = await res.json();
-
-      const approved = {
-        id: data?.item?.id || `${Date.now()}-${Math.random().toString(16).slice(2)}`,
-        name: data?.item?.name || item.name,
-        priority: data?.item?.priority || item.priority || "",
-        why: data?.item?.why || item.why || "",
-      };
 
       applyApproved(approved);
 
@@ -342,14 +371,14 @@ export default function LabVoiceAgent({
         setAskingText("");
       }
     } catch (e) {
-      console.error("approveFromTool failed:", e);
+      console.error("approveFromTool backend failed:", e);// Approval already applied locally, so no issue
     }
   }
 
   const stopAll = () => {
     try {
       sseAbortRef.current?.abort();
-    } catch {}
+    } catch { }
     sseAbortRef.current = null;
     sseReaderRef.current = null;
 
@@ -358,12 +387,12 @@ export default function LabVoiceAgent({
         pcRef.current.getSenders?.().forEach((s) => s.track?.stop());
         pcRef.current.close();
       }
-    } catch {}
+    } catch { }
     pcRef.current = null;
 
     try {
       localStreamRef.current?.getTracks?.().forEach((t) => t.stop());
-    } catch {}
+    } catch { }
     localStreamRef.current = null;
 
     try {
@@ -372,7 +401,7 @@ export default function LabVoiceAgent({
         remoteAudioRef.current.pause?.();
         remoteAudioRef.current.src = "";
       }
-    } catch {}
+    } catch { }
 
     remoteStreamRef.current = null;
 
@@ -468,8 +497,8 @@ export default function LabVoiceAgent({
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ session_id: sessionId, tool: "add_lab_manual", args: item }),
-      }).catch(() => {});
-    } catch {}
+      }).catch(() => { });
+    } catch { }
   };
 
   const applyApproved = (item) => {
@@ -479,7 +508,7 @@ export default function LabVoiceAgent({
     removePendingByName(nm);
     try {
       onApproveLab?.(item);
-    } catch {}
+    } catch { }
 
     if (askingText && nm && askingText.toLowerCase().includes(nm.toLowerCase())) {
       setAskingText("");
@@ -492,7 +521,7 @@ export default function LabVoiceAgent({
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ session_id: sessionId }),
-      }).catch(() => {});
+      }).catch(() => { });
     } finally {
       stopAll();
       resetAll();
@@ -505,40 +534,40 @@ export default function LabVoiceAgent({
   const leftColumn =
     pendingQueue.length > 0
       ? createPortal(
-          <div key="pending-left-column" className="pending-dock pending-dock--left" aria-live="polite">
-            <div className="dock-title">Pending Lab Suggestions</div>
-            <div className="pending-list">
-              {pendingQueue.map((s) => (
-                <div key={s.id} className="pending-item">
-                  <div className="sug-title">{s.name}</div>
-                  {(s.priority || s.why) && (
-                    <div className="sug-meta">
-                      {s.priority ? <span className="badge">{s.priority}</span> : null}
-                      {s.priority && s.why ? " • " : null}
-                      {s.why ? <span className="why">Reason: {s.why}</span> : null}
-                    </div>
-                  )}
-                  <div className="btn-row">
-                    <button
-                      className="va-btn is-primary"
-                      onClick={() => {
-                        applyApproved(s);
-                        notifyManualAdd(s);
-                      }}
-                    >
-                      Add to Table
-                    </button>
-                    <button className="va-btn is-ghost" onClick={() => removePendingByName(s.name)}>
-                      Skip
-                    </button>
+        <div key="pending-left-column" className="pending-dock pending-dock--left" aria-live="polite">
+          <div className="dock-title">Pending Lab Suggestions</div>
+          <div className="pending-list">
+            {pendingQueue.map((s) => (
+              <div key={s.id} className="pending-item">
+                <div className="sug-title">{s.name}</div>
+                {(s.priority || s.why) && (
+                  <div className="sug-meta">
+                    {s.priority ? <span className="badge">{s.priority}</span> : null}
+                    {s.priority && s.why ? " • " : null}
+                    {s.why ? <span className="why">Reason: {s.why}</span> : null}
                   </div>
-                  <div className="tiny-hint">Say “yes / approve / add” to confirm via the agent.</div>
+                )}
+                <div className="btn-row">
+                  <button
+                    className="va-btn is-primary"
+                    onClick={() => {
+                      applyApproved(s);
+                      notifyManualAdd(s);
+                    }}
+                  >
+                    Add to Table
+                  </button>
+                  <button className="va-btn is-ghost" onClick={() => removePendingByName(s.name)}>
+                    Skip
+                  </button>
                 </div>
-              ))}
-            </div>
-          </div>,
-          document.body
-        )
+                <div className="tiny-hint">Say “yes / approve / add” to confirm via the agent.</div>
+              </div>
+            ))}
+          </div>
+        </div>,
+        document.body
+      )
       : null;
 
   const waveStream =
@@ -580,12 +609,12 @@ export default function LabVoiceAgent({
               {status === "prepping"
                 ? "Preparing • sending context…"
                 : status === "connected"
-                ? micActive
-                  ? "Connected • VAD listening"
-                  : "Connected • mic muted"
-                : status === "error"
-                ? "Error • check connection"
-                : "Idle"}
+                  ? micActive
+                    ? "Connected • VAD listening"
+                    : "Connected • mic muted"
+                  : status === "error"
+                    ? "Error • check connection"
+                    : "Idle"}
             </div>
           </div>
 

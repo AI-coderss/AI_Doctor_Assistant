@@ -1,0 +1,229 @@
+/* RadialTools.css — center-bottom radial launcher (solid theme) */
+
+:root {
+  /* theme */
+  --rt-accent: #0a66c2;
+  --rt-text: #0f1115;
+  --rt-bg: #ffffff;
+  --rt-border: #e5e7eb;
+
+  /* sizes (injected for wheel; toggle fixed) */
+  --rt-size: 460px;      /* wheel diameter */
+  --rt-ring: 22px;       /* annulus thickness */
+  --rt-center: 118px;    /* inner disc */
+
+  --rt-icon: 24px;
+  --rt-label: 10px;
+  --rt-toggle-size: 62px;
+
+  --rt-shadow-sm: 0 4px 10px rgba(0,0,0,.06);
+  --rt-shadow-md: 0 10px 24px rgba(0,0,0,.10);
+  --rt-shadow-lg: 0 22px 46px rgba(0,0,0,.16);
+
+  /* layout: center bottom, ensure full visibility */
+  --rt-root-bottom: 16px;     /* distance from window bottom to toggle */
+  --rt-face-gap: 16px;        /* gap between toggle and wheel edge */
+}
+
+[data-theme="dark"] {
+  --rt-accent: #3ea7ff;
+  --rt-text: #e9edf4;
+  --rt-bg: #121418;
+  --rt-border: #2a2f38;
+
+  --rt-shadow-sm: 0 4px 10px rgba(0,0,0,.25);
+  --rt-shadow-md: 0 10px 24px rgba(0,0,0,.35);
+  --rt-shadow-lg: 0 22px 46px rgba(0,0,0,.45);
+}
+
+/* never clip */
+html, body { overflow-x: hidden; }
+.rt-root, .rt-face { overflow: visible; }
+
+/* root: centered at bottom */
+.rt-root.rt-center {
+  position: fixed;
+  left: 12%;
+  bottom: var(--rt-root-bottom);
+  transform: translateX(-50%);
+  z-index: 1500;
+  pointer-events: none; /* wheel ignores clicks unless open; toggle stays clickable */
+}
+
+/* toggle button */
+.rt-toggle {
+  width: var(--rt-toggle-size);
+  height: var(--rt-toggle-size);
+  border-radius: 999px;
+  border: 1px solid var(--rt-border);
+  background: var(--rt-bg);
+  color: var(--rt-text);
+  display: grid;
+  place-items: center;
+  font-size: 22px;
+  line-height: 1;
+  box-shadow: var(--rt-shadow-md);
+  cursor: pointer;
+  pointer-events: auto;
+  transition: transform .16s ease, background .2s ease, color .2s ease, box-shadow .2s ease;
+}
+.rt-toggle:hover {
+  transform: scale(1.05);
+  background: var(--rt-accent);
+  color: #fff;
+  box-shadow: var(--rt-shadow-lg);
+}
+.rt-toggle:active { transform: scale(.97); }
+
+/* face: sits ABOVE the toggle by its radius + a small gap => full wheel visible */
+.rt-face {
+  position: absolute;
+  left: 50%;
+  /* Place bottom of wheel just above toggle with a gap */
+  bottom: calc(var(--rt-toggle-size) + var(--rt-face-gap));
+  transform: translateX(-50%);
+  width: var(--rt-size);
+  height: var(--rt-size);
+  user-select: none;
+  pointer-events: auto;
+}
+
+/* ring */
+.rt-ring {
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  background: var(--rt-bg);
+  box-shadow:
+    0 0 0 1px var(--rt-border),
+    inset 0 0 0 var(--rt-ring) var(--rt-bg),
+    var(--rt-shadow-sm);
+}
+
+/* separators */
+.rt-separators {
+  --sep-color: rgba(0,0,0,0.28);
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  transform: rotate(var(--rt-rotor, 0deg));
+  background:
+    repeating-conic-gradient(
+      from 0deg,
+      var(--sep-color) 0 1.2deg,
+      transparent 1.2deg calc(360deg/var(--rt-count))
+    );
+  /* visible only in the annulus */
+  mask:
+    radial-gradient(circle at center,
+      transparent 0 calc(50% - var(--rt-ring) - 36px),
+      #000       calc(50% - var(--rt-ring) - 36px) calc(50% + var(--rt-ring) + 2px),
+      transparent calc(50% + var(--rt-ring) + 2px)
+    );
+  opacity: .55;
+}
+
+/* hover highlight */
+.rt-wedge {
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  background:
+    conic-gradient(
+      from var(--rt-sector-start, 0deg),
+      color-mix(in srgb, var(--rt-accent) 22%, transparent) 0 var(--rt-sector-sweep, 60deg),
+      transparent var(--rt-sector-sweep, 60deg) 360deg
+    );
+  mask:
+    radial-gradient(circle at center,
+      transparent 0 calc(50% - var(--rt-ring) - 42px),
+      #000       calc(50% - var(--rt-ring) - 42px) calc(50% + var(--rt-ring) + 6px),
+      transparent calc(50% + var(--rt-ring) + 6px)
+    );
+  pointer-events: none;
+}
+
+/* inner disc */
+.rt-inner {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: var(--rt-center);
+  height: var(--rt-center);
+  transform: translate(-50%, -50%);
+  border-radius: 50%;
+  background: var(--rt-bg);
+  border: 1px solid var(--rt-border);
+  box-shadow: var(--rt-shadow-md), inset 0 0 0 1px var(--rt-border);
+}
+
+/* rotor + items */
+.rt-rotor {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  transform: rotate(var(--rt-rotor, 0deg));
+  transition: transform .25s cubic-bezier(.2,.8,.25,1);
+}
+
+/* orbit radius for icons inside ring */
+:root { --rt-radius: calc(var(--rt-size)/2 - var(--rt-ring) - 54px); }
+
+/* icon buttons (no boxes) */
+.rt-item {
+  --i: 0;
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  transform:
+    rotate(calc(var(--i) * (360deg / var(--rt-count))))
+    translateX(var(--rt-radius))
+    rotate(calc(-1 * var(--i) * (360deg / var(--rt-count))));
+  transform-origin: center;
+  border: none;
+  background: transparent;
+  color: var(--rt-text);
+  cursor: pointer;
+  padding: 0;
+  outline: none;
+  transition: transform .18s ease, color .18s ease, text-shadow .18s ease, opacity .18s ease;
+}
+.rt-item:hover {
+  transform:
+    rotate(calc(var(--i) * (360deg / var(--rt-count))))
+    translateX(var(--rt-radius))
+    rotate(calc(-1 * var(--i) * (360deg / var(--rt-count))))
+    scale(1.12);
+  color: var(--rt-accent);
+  text-shadow: 0 0 8px color-mix(in srgb, var(--rt-accent) 70%, transparent);
+}
+.rt-item.is-focus {
+  color: var(--rt-accent);
+  text-shadow: 0 0 6px color-mix(in srgb, var(--rt-accent) 60%, transparent);
+}
+
+/* icon + tiny label */
+.rt-icon {
+  display: grid;
+  place-items: center;
+  font-size: var(--rt-icon);
+  line-height: 1;
+  text-align: center;
+  background: none; /* no box */
+}
+.rt-label {
+  display: block;
+  margin-top: 4px;
+  font-size: var(--rt-label);
+  font-weight: 700;
+  letter-spacing: .2px;
+  opacity: .82;
+  white-space: nowrap;
+  text-align: center;
+}
+
+/* touch targets */
+@media (hover: none) and (pointer: coarse) {
+  :root { --rt-icon: 26px; --rt-label: 11px; }
+}

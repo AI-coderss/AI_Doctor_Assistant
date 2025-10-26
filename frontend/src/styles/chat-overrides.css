@@ -813,6 +813,441 @@
 .labs-panel {
   overflow-x: hidden;
 }
+/* =========================================
+   RADIAL MENU STYLES (Bottom-Center)
+   ========================================= */
+
+/* 1. THEME VARIABLES */
+:root {
+  --primary: #0a66c2;
+  --primary-hover: #0d7afc;
+  
+  --radial-bg: rgba(255, 255, 255, 0.9);
+  --radial-text: #111;
+  --radial-bg-glass: rgba(255, 255, 255, 0.75);
+  --radial-border: 1px solid rgba(0,0,0,.08);
+  --radial-shadow-sm: 0 4px 12px rgba(0,0,0,.1);
+  --radial-shadow-md: 0 10px 28px rgba(0,0,0,.18);
+  --radial-shadow-lg: 0 32px 72px rgba(0,0,0,.22);
+}
+
+[data-theme="dark"] {
+  --radial-bg: rgba(25, 25, 25, 0.9);
+  --radial-text: #eee;
+  --radial-bg-glass: rgba(30, 30, 30, 0.75);
+  --radial-border: 1px solid rgba(255,255,255,.12);
+  --radial-shadow-sm: 0 4px 12px rgba(0,0,0,.2);
+  --radial-shadow-md: 0 10px 28px rgba(0,0,0,.3);
+  --radial-shadow-lg: 0 32px 72px rgba(0,0,0,.35);
+}
 
 
+/* 2. ROOT CONTAINER & LAUNCHER
+   ========================================= */
+
+/* This is the main fixed container for the entire component */
+.radial-root {
+  --radius: 150px;   /* distance from center to items */
+  --btn: 62px;       /* center button size */
+  --item: 54px;      /* item button size */
+  --launcher-offset: 20px;
+  --open-lift: 100px; /* How high the wheel lifts from bottom */
+
+  position: fixed;
+  left: 50%;
+  bottom: var(--launcher-offset);
+  transform: translateX(-50%);
+  
+  width: calc(var(--radius) * 2 + var(--item));
+  height: calc(var(--radius) * 2 + var(--item));
+  display: grid;
+  place-items: center;
+  z-index: 100;
+  
+  /* Only interactive when open */
+  pointer-events: none;
+  transition: bottom .25s ease-out;
+}
+.radial-root.open {
+  bottom: var(--open-lift);
+  pointer-events: auto;
+}
+
+/* Center launcher button (always visible) */
+.radial-toggle {
+  width: var(--btn);
+  height: var(--btn);
+  border-radius: 999px;
+  border: none;
+  background: var(--radial-bg);
+  color: var(--radial-text);
+  display: grid;
+  place-items: center;
+  font-size: 24px;
+  box-shadow: var(--radial-shadow-md);
+  cursor: pointer;
+  pointer-events: auto; /* Always interactive */
+  z-index: 102; /* Above face/rotor */
+  transition: transform .16s ease, box-shadow .2s ease, background .2s ease;
+}
+.radial-toggle:hover { 
+  transform: scale(1.05);
+  background: var(--primary);
+  color: #fff;
+}
+.radial-toggle:active { transform: scale(.97); }
+
+/* Pulse animation when closed */
+.radial-root:not(.open) .radial-toggle {
+  background: var(--primary);
+  color: #fff;
+  animation: pulse-radial 2s infinite cubic-bezier(0.4, 0, 0.6, 1);
+}
+
+@keyframes pulse-radial {
+  0%, 100% {
+    box-shadow: 0 0 0 0 color-mix(in srgb, var(--primary) 40%, transparent);
+  }
+  50% {
+    box-shadow: 0 0 0 12px color-mix(in srgb, var(--primary) 0%, transparent);
+  }
+}
+
+
+/* 3. RADIAL WHEEL (Animates in/out)
+   ========================================= */
+
+/* Container for face + rotor, animates in/out */
+.radial-face-container {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+}
+
+/* Face (wedge + ticks) — doesn't rotate */
+.radial-face {
+  position: absolute;
+  width: calc(var(--radius) * 2);
+  height: calc(var(--radius) * 2);
+  border-radius: 50%;
+  box-shadow: inset 0 0 0 14px rgba(0,0,0,.03), var(--radial-shadow-md);
+  background: var(--radial-bg);
+  backdrop-filter: blur(10px);
+  pointer-events: none;
+}
+
+/* Ticks behind items */
+.radial-ticks {
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  mask: radial-gradient(circle at center, black 65%, transparent 66%);
+  background: repeating-conic-gradient(from 0deg, var(--radial-text) 0 0.5deg, transparent 0.5deg 12deg);
+  opacity: 0.15;
+}
+
+/* Hover/selected wedge */
+.radial-wedge {
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  background: conic-gradient(
+    from var(--sector-start, 0deg),
+    color-mix(in srgb, var(--primary) 25%, transparent) 0 var(--sector-sweep, 60deg),
+    transparent var(--sector-sweep, 60deg) 360deg
+  );
+  mask: radial-gradient(circle at center, transparent 0 18%, black 19% 100%);
+  pointer-events: none;
+  transition: background 0.1s ease;
+}
+
+/* Rotor (rotates with wheel) */
+.radial-rotor {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  transition: transform .25s cubic-bezier(.2,.8,.25,1);
+}
+
+.radial-inner-disc {
+  width: calc(var(--radius) * 1.1);
+  height: calc(var(--radius) * 1.1);
+  border-radius: 50%;
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--radial-text) 5%, transparent);
+  background: radial-gradient(
+    circle at 50% 50%, 
+    color-mix(in srgb, var(--radial-text) 2%, transparent), 
+    color-mix(in srgb, var(--radial-text) 4%, transparent) 60%, 
+    transparent 61%
+  );
+  pointer-events: none;
+}
+
+/* Item placement on the wheel */
+.radial-item {
+  --angle: 0deg;
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: var(--item);
+  height: var(--item);
+  margin-left: calc(var(--item) / -2);
+  margin-top: calc(var(--item) / -2);
+  border-radius: 50%;
+  border: 0;
+  background: var(--radial-bg);
+  color: var(--radial-text);
+  box-shadow: var(--radial-shadow-md);
+  cursor: pointer;
+  /* 'opacity' and 'transform' handled by framer-motion */
+}
+.radial-item:hover {
+  transform: rotate(var(--angle)) translateX(var(--radius)) scale(1.08) !important;
+  background: var(--primary);
+  color: #fff;
+  z-index: 10;
+}
+
+/* Keep icon/text upright */
+.radial-item-inner {
+  display: grid;
+  place-items: center;
+  gap: 2px;
+  width: 100%;
+  height: 100%;
+  /* Counter-rotation handled by framer-motion's parent */
+}
+.radial-item:hover .radial-item-inner {
+  color: #fff !important;
+}
+
+.radial-item-icon { 
+  font-size: 16px; 
+}
+
+.radial-item-label {
+  position: absolute;
+  top: calc(100% + 8px);
+  left: 50%;
+  transform: translateX(-50%);
+  padding: 4px 8px;
+  border-radius: 6px;
+  font-size: 11px;
+  font-weight: 700;
+  background: color-mix(in srgb, var(--radial-text) 80%, transparent);
+  color: var(--radial-bg);
+  white-space: nowrap;
+  opacity: 0;
+  transition: opacity .2s ease, transform .2s ease;
+  pointer-events: none;
+}
+.radial-item:hover .radial-item-label {
+  opacity: 1;
+  transform: translateX(-50%) translateY(-2px);
+}
+
+
+/* 4. TOOL PANEL (Fixed Position)
+   ========================================= */
+.radial-panel {
+  position: fixed;
+  left: var(--launcher-offset);
+  bottom: var(--launcher-offset); /* Sits at bottom-left */
+  width: min(90vw, 380px);
+  max-height: min(70vh, 640px);
+  display: flex;
+  flex-direction: column;
+  background: var(--radial-bg);
+  color: var(--radial-text);
+  border-radius: 14px;
+  border: var(--radial-border);
+  box-shadow: var(--radial-shadow-lg);
+  overflow: hidden;
+  z-index: 101; /* Above root, below toggle */
+  backdrop-filter: blur(12px);
+}
+.radial-panel-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 12px;
+  font-weight: 700;
+  background: color-mix(in srgb, var(--primary) 10%, transparent);
+  border-bottom: var(--radial-border);
+  gap: 8px;
+}
+.radial-panel-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  color: var(--primary);
+}
+.radial-panel-title > span {
+  color: var(--radial-text);
+}
+
+.radial-panel-close {
+  border: 0;
+  background: transparent;
+  cursor: pointer;
+  color: var(--radial-text);
+  opacity: 0.7;
+  width: 32px;
+  height: 32px;
+  border-radius: 8px;
+  display: grid;
+  place-items: center;
+  transition: all 0.2s ease;
+}
+.radial-panel-close:hover { 
+  background: color-mix(in srgb, var(--radial-text) 10%, transparent);
+  opacity: 1;
+}
+.radial-panel-body { 
+  padding: 12px;
+  overflow-y: auto;
+  overflow-x: hidden;
+}
+
+/* Position & sizing */
+.radial-root {
+  --size: 320px;
+  --radius: 120px;
+  position: fixed;
+  left: 50%;
+  bottom: 18px;               /* closed position */
+  transform: translateX(-50%);
+  z-index: 999;
+  pointer-events: auto;
+}
+
+.radial-root.open {
+  bottom: 140px;              /* shift up when open */
+}
+
+/* Launcher */
+.radial-toggle {
+  width: 64px;
+  height: 64px;
+  border-radius: 999px;
+  border: 1px solid var(--card-border, rgba(0,0,0,0.12));
+  background: var(--card-bg, rgba(255,255,255,0.85));
+  backdrop-filter: blur(6px);
+  box-shadow: 0 8px 22px rgba(0,0,0,0.18);
+  cursor: pointer;
+  font-size: 22px;
+  display: grid;
+  place-items: center;
+}
+
+/* Face container */
+.radial-face-container {
+  position: absolute;
+  left: 50%;
+  bottom: 48px;
+  transform: translateX(-50%);
+  width: var(--size);
+  height: var(--size);
+  pointer-events: none; /* rotor has the click targets */
+}
+
+/* Face (wedge highlight + tick ring) */
+.radial-face {
+  position: absolute;
+  inset: 0;
+  border-radius: 999px;
+  background:
+    conic-gradient(
+      from var(--sector-start, 0deg),
+      color-mix(in oklab, var(--accent, #6366f1), transparent 65%) 0deg,
+      color-mix(in oklab, var(--accent, #6366f1), transparent 65%) var(--sector-sweep, 0deg),
+      transparent var(--sector-sweep, 0deg)
+    );
+  mask:
+    radial-gradient(circle at center, rgba(0,0,0,1) 62%, rgba(0,0,0,0) 63%);
+  opacity: 0.7;
+}
+
+.radial-ticks {
+  position: absolute;
+  inset: 0;
+  border-radius: 999px;
+  box-shadow: inset 0 0 0 1px var(--card-border, rgba(0,0,0,0.12));
+}
+
+/* Rotor with items */
+.radial-rotor {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  pointer-events: none;
+}
+
+.radial-inner-disc {
+  width: 110px;
+  height: 110px;
+  border-radius: 999px;
+  background: var(--card-bg, rgba(255,255,255,0.8));
+  backdrop-filter: blur(4px);
+  border: 1px solid var(--card-border, rgba(0,0,0,0.12));
+  box-shadow: 0 10px 24px rgba(0,0,0,0.15);
+}
+
+.radial-item {
+  --angle: 0deg;
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  transform-origin: center;
+  translate: -50% -50%;
+  pointer-events: auto;
+  border: none;
+  background: transparent;
+  cursor: pointer;
+}
+
+.radial-item-inner {
+  display: grid;
+  place-items: center;
+  width: 84px;
+  height: 84px;
+  border-radius: 14px;
+  border: 1px solid var(--card-border, rgba(0,0,0,0.1));
+  background: var(--panel-bg, rgba(255,255,255,0.9));
+  backdrop-filter: blur(6px);
+  box-shadow: 0 10px 24px rgba(0,0,0,0.15);
+  transform: rotate(calc(var(--angle) * -1));
+  user-select: none;
+}
+
+.radial-item-icon {
+  font-size: 20px;
+  line-height: 1;
+}
+
+.radial-item-label {
+  margin-top: 6px;
+  font-size: 12px;
+  opacity: 0.8;
+}
+
+/* Hidden host so tiles remain mountable but invisible */
+.tool-host-hidden {
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  opacity: 0;
+  z-index: -1;
+}
+
+/* Ensure any internal tiles we mounted don’t claim layout */
+.tool-host-hidden .tool-host-tile,
+.tool-host-hidden .vision-tool,
+.tool-host-hidden .left-rail-actions {
+  display: contents; /* keep DOM for programmatic clicks/refs */
+}
 

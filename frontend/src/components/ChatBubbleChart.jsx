@@ -4,32 +4,30 @@ import Highcharts from 'highcharts';
 import HighchartsReact from 'highcharts-react-official';
 
 export default function ChatBubbleChart({ config }) {
-  const merged = useMemo(() => {
-    return {
-      // sensible, larger defaults
-      chart: {
-        backgroundColor: 'transparent',
-        height: 420,                // ⬅️ bigger chart height
-        spacing: [16, 16, 16, 16],
-        ...(config.chart || {}),
-      },
-      title: {
-        style: { fontSize: '16px', fontWeight: '700' },
-        ...(config.title || {}),
-      },
-      plotOptions: {
-        pie: {
-          size: '85%',              // ⬅️ larger pie diameter
-          dataLabels: {
-            style: { fontSize: '13px', fontWeight: '600' },
-          },
-          ...(config.plotOptions?.pie || {}),
+  const merged = useMemo(() => ({
+    chart: {
+      backgroundColor: 'transparent',
+      height: 600,                     // ⬅️ TALL
+      spacing: [16,16,16,16],
+      ...(config.chart || {}),
+    },
+    title: {
+      style: { fontSize: '18px', fontWeight: '700' },
+      ...(config.title || {}),
+    },
+    plotOptions: {
+      pie: {
+        size: '100%',                  // ⬅️ FULL DIAMETER
+        dataLabels: {
+          distance: 14,
+          style: { fontSize: '14px', fontWeight: '600' },
         },
-        ...(config.plotOptions || {}),
+        ...(config.plotOptions?.pie || {}),
       },
-      ...config,
-    };
-  }, [config]);
+      ...(config.plotOptions || {}),
+    },
+    ...config,
+  }), [config]);
 
   return (
     <div className="bubble-chart">

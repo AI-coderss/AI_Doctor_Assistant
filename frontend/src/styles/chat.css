@@ -1270,3 +1270,270 @@
 .bubble-chart {
   width: min(680px, 92vw);
 }
+/* RadialDraw.css — styles for radial DrawComponent (center-bottom, solid) */
+
+:root {
+  --rd-accent: #0a66c2;
+  --rd-text: #0f1115;
+  --rd-bg: #ffffff;
+  --rd-border: #e5e7eb;
+
+  --rd-size: 460px;       /* wheel diameter */
+  --rd-ring: 22px;        /* ring thickness */
+  --rd-center: 118px;     /* inner disc */
+
+  --rd-icon: 24px;
+  --rd-label: 10px;
+  --rd-toggle-size: 62px;
+
+  --rd-shadow-sm: 0 4px 10px rgba(0,0,0,.06);
+  --rd-shadow-md: 0 10px 24px rgba(0,0,0,.10);
+  --rd-shadow-lg: 0 22px 46px rgba(0,0,0,.16);
+
+  --rd-face-gap: 16px;    /* gap between toggle and wheel */
+}
+
+[data-theme="dark"] {
+  --rd-accent: #3ea7ff;
+  --rd-text: #e9edf4;
+  --rd-bg: #121418;
+  --rd-border: #2a2f38;
+
+  --rd-shadow-sm: 0 4px 10px rgba(0,0,0,.25);
+  --rd-shadow-md: 0 10px 24px rgba(0,0,0,.35);
+  --rd-shadow-lg: 0 22px 46px rgba(0,0,0,.45);
+}
+
+html, body { overflow-x: hidden; }
+.rd-root, .rd-face { overflow: visible; }
+
+/* center-bottom placement so full wheel is visible */
+.rd-root.rd-center-bottom {
+  position: fixed;
+  left: 14%;
+  bottom: 16px;
+  transform: translateX(-50%);
+  z-index: 1500;
+  pointer-events: none;     /* toggle & panel re-enable pointer events */
+}
+
+/* toggle */
+.rd-toggle {
+  width: var(--rd-toggle-size);
+  height: var(--rd-toggle-size);
+  border-radius: 999px;
+  border: 1px solid var(--rd-border);
+  background: var(--rd-bg);
+  color: var(--rd-text);
+  display: grid;
+  place-items: center;
+  font-size: 22px;
+  line-height: 1;
+  box-shadow: var(--rd-shadow-md);
+  cursor: pointer;
+  pointer-events: auto;
+  transition: transform .16s ease, background .2s ease, color .2s ease, box-shadow .2s ease;
+}
+.rd-toggle:hover {
+  transform: scale(1.05);
+  background: var(--rd-accent);
+  color: #fff;
+  box-shadow: var(--rd-shadow-lg);
+}
+.rd-toggle:active { transform: scale(.97); }
+
+/* wheel container sits above the toggle by its radius + small gap */
+.rd-face {
+  position: absolute;
+  left: 50%;
+  bottom: calc(var(--rd-toggle-size) + var(--rd-face-gap));
+  transform: translateX(-50%);
+  width: var(--rd-size);
+  height: var(--rd-size);
+  user-select: none;
+  pointer-events: auto;
+}
+
+/* ring */
+.rd-ring {
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  background: var(--rd-bg);
+  box-shadow:
+    0 0 0 1px var(--rd-border),
+    inset 0 0 0 var(--rd-ring) var(--rd-bg),
+    var(--rd-shadow-sm);
+}
+
+/* separators (annulus only) */
+.rd-separators {
+  --sep-color: rgba(0,0,0,0.28);
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  transform: rotate(var(--rd-rotor, 0deg));
+  background:
+    repeating-conic-gradient(
+      from 0deg,
+      var(--sep-color) 0 1.2deg,
+      transparent 1.2deg calc(360deg/var(--rd-count))
+    );
+  mask:
+    radial-gradient(circle at center,
+      transparent 0 calc(50% - var(--rd-ring) - 36px),
+      #000       calc(50% - var(--rd-ring) - 36px) calc(50% + var(--rd-ring) + 2px),
+      transparent calc(50% + var(--rd-ring) + 2px)
+    );
+  opacity: .55;
+}
+
+/* hover highlight wedge */
+.rd-wedge {
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  background:
+    conic-gradient(
+      from var(--rd-sector-start, 0deg),
+      color-mix(in srgb, var(--rd-accent) 22%, transparent) 0 var(--rd-sector-sweep, 60deg),
+      transparent var(--rd-sector-sweep, 60deg) 360deg
+    );
+  mask:
+    radial-gradient(circle at center,
+      transparent 0 calc(50% - var(--rd-ring) - 42px),
+      #000       calc(50% - var(--rd-ring) - 42px) calc(50% + var(--rd-ring) + 6px),
+      transparent calc(50% + var(--rd-ring) + 6px)
+    );
+  pointer-events: none;
+}
+
+/* inner disc */
+.rd-inner {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: var(--rd-center);
+  height: var(--rd-center);
+  transform: translate(-50%, -50%);
+  border-radius: 50%;
+  background: var(--rd-bg);
+  border: 1px solid var(--rd-border);
+  box-shadow: var(--rd-shadow-md), inset 0 0 0 1px var(--rd-border);
+}
+
+/* rotor */
+.rd-rotor {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  transform: rotate(var(--rd-rotor, 0deg));
+  transition: transform .25s cubic-bezier(.2,.8,.25,1);
+}
+
+/* icon orbit radius */
+:root { --rd-radius: calc(var(--rd-size)/2 - var(--rd-ring) - 54px); }
+
+/* items */
+.rd-item {
+  --i: 0;
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  transform:
+    rotate(calc(var(--i) * (360deg / var(--rd-count))))
+    translateX(var(--rd-radius))
+    rotate(calc(-1 * var(--i) * (360deg / var(--rd-count))));
+  transform-origin: center;
+  border: none;
+  background: transparent;
+  color: var(--rd-text);
+  cursor: pointer;
+  padding: 0;
+  outline: none;
+  transition: transform .18s ease, color .18s ease, text-shadow .18s ease, opacity .18s ease;
+}
+.rd-item:hover {
+  transform:
+    rotate(calc(var(--i) * (360deg / var(--rd-count))))
+    translateX(var(--rd-radius))
+    rotate(calc(-1 * var(--i) * (360deg / var(--rd-count))))
+    scale(1.12);
+  color: var(--rd-accent);
+  text-shadow: 0 0 8px color-mix(in srgb, var(--rd-accent) 70%, transparent);
+}
+.rd-item.is-focus {
+  color: var(--rd-accent);
+  text-shadow: 0 0 6px color-mix(in srgb, var(--rd-accent) 60%, transparent);
+}
+
+/* icon + label */
+.rd-icon {
+  display: grid;
+  place-items: center;
+  font-size: var(--rd-icon);
+  line-height: 1;
+  text-align: center;
+  background: none; /* no boxes */
+}
+.rd-default-icon {
+  display: inline-block;
+  width: 24px; height: 24px;
+  border-radius: 999px;
+  border: 1px solid var(--rd-border);
+  display: grid; place-items: center;
+  font-size: 12px; font-weight: 700;
+}
+.rd-label {
+  display: block;
+  margin-top: 4px;
+  font-size: var(--rd-label);
+  font-weight: 700;
+  letter-spacing: .2px;
+  opacity: .82;
+  white-space: nowrap;
+  text-align: center;
+}
+
+/* tool panel */
+.rd-panel {
+  position: fixed;               /* overlay near bottom-right; adjust as desired */
+  right: 24px;
+  bottom: calc(var(--rd-toggle-size) + var(--rd-face-gap) + 32px);
+  width: min(520px, 92vw);
+  max-height: 72vh;
+  background: var(--rd-bg);
+  color: var(--rd-text);
+  border: 1px solid var(--rd-border);
+  border-radius: 14px;
+  box-shadow: var(--rd-shadow-lg);
+  overflow: hidden;
+  pointer-events: auto;
+  z-index: 1600;                 /* above the wheel */
+}
+.rd-panel-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--rd-border);
+  font-weight: 700;
+  font-size: 13px;
+}
+.rd-panel-title { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.rd-panel-close {
+  border: 0; background: transparent; cursor: pointer;
+  font-size: 16px; color: var(--rd-text); opacity: .8;
+}
+.rd-panel-close:hover { opacity: 1; }
+.rd-panel-body {
+  padding: 12px;
+  max-height: calc(72vh - 44px);
+  overflow: auto;
+}
+
+/* mobile touch targets */
+@media (hover: none) and (pointer: coarse) {
+  :root { --rd-icon: 26px; --rd-label: 11px; }
+}

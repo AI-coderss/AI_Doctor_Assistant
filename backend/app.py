@@ -3458,7 +3458,159 @@ def lab_agent_rtc_connect():
     resp = Response(answer, status=200, mimetype="application/sdp")
     resp.headers["Cache-Control"] = "no-cache"
     return resp
+############## Highcharts endpoints #################
+# ===================== Highcharts Pie: helpers + endpoints =====================
 
+def _hc_pie_config(title: str, points: list[dict], decimals: int = 0) -> dict:
+    """Build a pretty Highcharts pie config for probabilities (0-100)."""
+    # sanitize + top-N + "Other"
+    clean = [
+        {"name": str(p.get("name") or p.get("label") or "").strip(),
+         "y": float(p.get("y") if p.get("y") is not None else p.get("value") or p.get("probability_percent") or 0)}
+        for p in (points or [])
+    ]
+    clean = [p for p in clean if p["name"] and p["y"] > 0]
+    clean.sort(key=lambda x: x["y"], reverse=True)
+    top = clean[:6]
+    if len(clean) > 6:
+        other = round(sum(p["y"] for p in clean[6:]), 2)
+        if other > 0:
+            top.append({"name": "Other", "y": other})
+
+    # normalize ~100 if needed (best effort; does not change ranking)
+    total = sum(p["y"] for p in top) or 0
+    if total and (total < 99 or total > 101):
+        for p in top:
+            p["y"] = round(p["y"] * 100.0 / total, 2)
+
+    return {
+        "chart": {"type": "pie", "backgroundColor": "transparent", "height": 360},
+        "title": {"text": title},
+        "tooltip": {"pointFormat": "<b>{point.percentage:.1f}%</b> ({point.y:.0f}%)"},
+        "plotOptions": {
+            "pie": {
+                "allowPointSelect": True,
+                "cursor": "pointer",
+                "dataLabels": {"enabled": True, "format": "{point.name}: {point.y:.0f}%"},
+                "showInLegend": True,
+                "borderWidth": 0
+            }
+        },
+        "series": [{
+            "name": "Probability",
+            "colorByPoint": True,
+            "data": top
+        }],
+        "credits": {"enabled": False},
+        "exporting": {"enabled": False}
+    }
+
+@app.route("/viz/pie-config", methods=["POST", "OPTIONS"])
+def viz_pie_config():
+    """
+    Body:
+      {
+        "title": "Differential diagnosis",
+        // EITHER:
+        "data": [ {"name":"Dx A","y":40}, {"name":"Dx B","y":30}, ... ]
+        // OR:
+        "labels": ["Dx A","Dx B",...],
+        "values": [40,30,...],
+        // Optional:
+        "decimals": 0,
+        "containerId": "optional-dom-id"     # used only to craft a tiny script string
+      }
+    Returns: { config, script }  # script is optional helper
+    """
+    if request.method == "OPTIONS":
+        return ("", 204)
+
+    payload = request.get_json(silent=True) or {}
+    title = (payload.get("title") or "Pie Chart").strip()
+    decimals = int(payload.get("decimals") or 0)
+
+    points = payload.get("data")
+    if not points and payload.get("labels") and payload.get("values"):
+        points = [{"name": n, "y": v} for n, v in zip(payload["labels"], payload["values"])]
+
+    cfg = _hc_pie_config(title, points or [], decimals=decimals)
+
+    container_id = (payload.get("containerId") or "chart-pie").strip()
+    # Optional tiny script string (use only if you intentionally eval on FE)
+    script = (
+        "(()=>{const cfg=%s;return function mount(el){"
+        "const id=(typeof el==='string')?el:el?.id||'%s';"
+        "if(!id) return; Highcharts.chart(id,cfg);} })()"
+        % (json.dumps(cfg), container_id)
+    )
+
+    return jsonify({"config": cfg, "script": script}), 200
+
+
+@app.route("/viz/pie-differential", methods=["POST", "OPTIONS"])
+def viz_pie_differential():
+    """
+    Body:
+      {
+        "session_id": "optional",
+        // Provide ONE of the two:
+        "differential": [ {"name":"Dx A","probability_percent":35}, ... ],
+        "context": "free text / transcript to extract differential via your RAG"
+        // Optional:
+        "title": "Differential diagnosis"
+      }
+    Returns: { config, points, script, source: "provided"|"rag" }
+    """
+    if request.method == "OPTIONS":
+        return ("", 204)
+
+    data = request.get_json(silent=True) or {}
+    session_id = data.get("session_id", str(uuid4()))
+    title = (data.get("title") or "Differential diagnosis").strip()
+
+    points = []
+    source = "provided"
+
+    if isinstance(data.get("differential"), list) and data["differential"]:
+        points = [
+            {"name": d.get("name"), "y": d.get("probability_percent")}
+            for d in data["differential"]
+        ]
+    else:
+        # RAG extraction path using your existing contract
+        source = "rag"
+        context = (data.get("context") or "").strip()
+        if not context:
+            return jsonify({"error": "Provide either 'differential' array or 'context' text."}), 400
+
+        instruction = (
+            "Return STRICT JSON ONLY:\n"
+            "{ \"differential_diagnosis\": ["
+            "{\"name\":\"STRING\",\"probability_percent\":35}, ... ] }\n"
+            "Rules: 4–8 items, integers 0–100 that sum ~100."
+        )
+        try:
+            resp = conversation_rag_chain.invoke({
+                "chat_history": chat_sessions.get(session_id, []),
+                "input": f"{instruction}\n\nCase:\n{context}"
+            })
+            raw = (resp.get("answer") or "").strip()
+            doc = _extract_json_dict(raw) or {}
+            diffs = doc.get("differential_diagnosis") or []
+            points = [{"name": d.get("name"), "y": d.get("probability_percent")} for d in diffs]
+        except Exception as e:
+            return jsonify({"error": f"RAG error: {e}"}), 502
+
+    cfg = _hc_pie_config(title, points)
+
+    script = (
+        "(()=>{const cfg=%s;return function mount(el){"
+        "const id=(typeof el==='string')?el:el?.id||'chart-pie';"
+        "if(!id) return; Highcharts.chart(id,cfg);} })()" % json.dumps(cfg)
+    )
+
+    return jsonify({"config": cfg, "points": points, "script": script, "source": source}), 200
+# =================== /Highcharts Pie endpoints (end) ===================
 
 if __name__ == "__main__":
     app.run(host="127.0.0.1", port=5050, debug=True)

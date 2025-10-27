@@ -25,6 +25,7 @@ import MedicationChecker from "./MedicationChecker";
 import useDosageStore from "../store/dosageStore";
 import CalculateDosageButton from "./CalculateDosageButton";
 import MedicalImageAnalyzer from "./MedicalImageAnalyzer";
+import ChatBubbleChart from "./ChatBubbleChart.jsx";
 import { Howl } from "howler";
 
 // 🧪 Lab Voice Agent (VAD, suggestions + approve)
@@ -34,6 +35,36 @@ let localStream;
 const BACKEND_BASE = "https://ai-doctor-assistant-backend-server.onrender.com"; // ✅ fixed accidental markdown link
 // ✅ one place to send context to both backends
 const VOICE_BASE = "https://ai-doctor-assistant-voice-mode-webrtc.onrender.com";
+// --- Highcharts Pie helpers ---
+async function requestPieFromDifferential({ sessionId, context, differential, title }) {
+  const path = differential ? '/viz/pie-config' : '/viz/pie-differential';
+  const body = differential
+    ? {
+      title: title || 'Differential diagnosis',
+      data: differential.map(d => ({
+        name: d.name,
+        y: d.probability_percent
+      }))
+    }
+    : {
+      session_id: sessionId,
+      context,
+      title: title || 'Differential diagnosis'
+    };
+
+  const res = await fetch(`${BACKEND_BASE}${path}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+    credentials: 'include',
+  });
+  if (!res.ok) throw new Error('Pie endpoint failed');
+  const json = await res.json();
+  return json.config; // Highcharts config
+}
+function wantsPieChart(text) {
+  return /\b(pie\s*chart|piechart|byechart|byechat)\b/i.test(text || '');
+}
 
 const pushContextToBackends = async (sessionId, text) => {
   if (!text || !text.trim()) return;
@@ -93,6 +124,17 @@ function normalizeMarkdown(input = "") {
     }
   }
   return collapsed.join("\n").trim();
+}
+function ChartLoader() {
+  return (
+    <div className="chart-loader">
+      <span className="chart-spinner" />
+      <div>
+        <div style={{ fontWeight: 700, marginBottom: 2 }}>Generating pie chart…</div>
+        <div style={{ opacity: 0.8, fontSize: 13 }}>AI is preparing the differential diagnosis visualization.</div>
+      </div>
+    </div>
+  );
 }
 
 /* ---------- Helpers for Second Opinion JSON extraction ---------- */
@@ -397,8 +439,8 @@ const Chat = () => {
     return id;
   });
 
-// Fresh, in-memory id just for Lab Orders (not in localStorage)
-const [labSessionId, setLabSessionId] = useState(() => crypto.randomUUID());
+  // Fresh, in-memory id just for Lab Orders (not in localStorage)
+  const [labSessionId, setLabSessionId] = useState(() => crypto.randomUUID());
 
   const liveText = useLiveTranscriptStore((s) => s.text);
   const isStreaming = useLiveTranscriptStore((s) => s.isStreaming);
@@ -427,19 +469,19 @@ const [labSessionId, setLabSessionId] = useState(() => crypto.randomUUID());
   // (Optional) Previously-approved labs loader removed from persistence; still safe to query server.
   // With fresh sessionId this will normally be empty, keeping table clean on refresh.
   useEffect(() => {
-  (async () => {
-    try {
-      const res = await fetch(`${BACKEND_BASE}/lab-agent/list?session_id=${encodeURIComponent(labSessionId)}`);
-      if (res.ok) {
-        const data = await res.json();
-        if (Array.isArray(data?.labs) && data.labs.length) {
-          setLabOrders((prev) => mergeByName(prev, data.labs));
-          ensureLabOrdersBubble();
+    (async () => {
+      try {
+        const res = await fetch(`${BACKEND_BASE}/lab-agent/list?session_id=${encodeURIComponent(labSessionId)}`);
+        if (res.ok) {
+          const data = await res.json();
+          if (Array.isArray(data?.labs) && data.labs.length) {
+            setLabOrders((prev) => mergeByName(prev, data.labs));
+            ensureLabOrdersBubble();
+          }
         }
-      }
-    } catch {}
-  })();
-}, [labSessionId]); // ⬅️ key change
+      } catch { }
+    })();
+  }, [labSessionId]); // ⬅️ key change
 
   // Live transcript bubble lifecycle
   useEffect(() => {
@@ -706,52 +748,98 @@ const [labSessionId, setLabSessionId] = useState(() => crypto.randomUUID());
   };
 
   // Hook for LabVoiceAgent -> when it approves a lab, update the unified table only (no extra bubbles)
- // Hook for LabVoiceAgent -> when it approves a lab, update the unified table only (no extra bubbles)
-const handleApproveLabFromAgent = (item) => {
-  // The LabVoiceAgent has *already* persisted this to the backend via approveFromTool.
-  // We just need to update our local UI state to match.
-  const clean = {
-    name: String(item?.name || "").trim(),
-    priority: String(item?.priority || "Low").trim(),
-    why: String(item?.why || "").trim(),
+  // Hook for LabVoiceAgent -> when it approves a lab, update the unified table only (no extra bubbles)
+  const handleApproveLabFromAgent = (item) => {
+    // The LabVoiceAgent has *already* persisted this to the backend via approveFromTool.
+    // We just need to update our local UI state to match.
+    const clean = {
+      name: String(item?.name || "").trim(),
+      priority: String(item?.priority || "Low").trim(),
+      why: String(item?.why || "").trim(),
+    };
+
+    if (!clean.name) return;
+
+    // Use the same merge logic to add the item to the table state
+    setLabOrders((prev) => {
+      const next = mergeByName(prev, [clean]);
+      return next;
+    });
+
+    // Ensure the table bubble is visible
+    ensureLabOrdersBubble();
   };
-
-  if (!clean.name) return;
-
-  // Use the same merge logic to add the item to the table state
-  setLabOrders((prev) => {
-    const next = mergeByName(prev, [clean]);
-    return next;
-  });
-
-  // Ensure the table bubble is visible
-  ensureLabOrdersBubble();
-};
   // 🔚 End Session: clear table & rotate session id (and optionally reset server state)
-const handleEndSession = async () => {
-  try {
-    // Reset labs for the CURRENT lab case only
-    await fetch(`${BACKEND_BASE}/lab-agent/reset`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ session_id: labSessionId }),
-    }).catch(() => {});
-  } finally {
-    setLabOrders([]);
-    setChats((p) => [...p, { who: "bot", msg: "🧹 Session ended. Starting a new one." }]);
+  const handleEndSession = async () => {
+    try {
+      // Reset labs for the CURRENT lab case only
+      await fetch(`${BACKEND_BASE}/lab-agent/reset`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ session_id: labSessionId }),
+      }).catch(() => { });
+    } finally {
+      setLabOrders([]);
+      setChats((p) => [...p, { who: "bot", msg: "🧹 Session ended. Starting a new one." }]);
 
-    // Start a brand-new, ephemeral Lab case id
-    setLabSessionId(crypto.randomUUID());
+      // Start a brand-new, ephemeral Lab case id
+      setLabSessionId(crypto.randomUUID());
 
-    setShowLabAgent(false);
-  }
-};
+      setShowLabAgent(false);
+    }
+  };
 
 
   // Text chat submit (includes small “add lab:” command)
   const handleNewMessage = async ({ text, skipEcho = false }) => {
     if (!text || !text.trim()) return;
+    if (!skipEcho) setChats((prev) => [...prev, { msg: text, who: "me" }]);
+    // --- Pie chart trigger (Highcharts) ---
+    if (wantsPieChart(text)) {
+      // Insert a temporary loader bubble, then replace it.
+      const placeholderId = crypto.randomUUID();
+      setChats((prev) => [
+        ...prev,
+        { who: 'bot', type: 'chart_pie_loading', id: placeholderId }
+      ]);
 
+      try {
+        // Prefer using a real differential from a second-opinion bubble if available:
+        // const latestDiff = [...chats].reverse().find(c => c?.type === 'secondOpinion')?.opinion?.differential_diagnosis;
+
+        const context = (typeof buildAgentContext === 'function' ? buildAgentContext() : '') || text;
+        const config = await requestPieFromDifferential({
+          sessionId,
+          // differential: latestDiff,                      // ⬅️ if you want to drive it from parsed Dx
+          context,                                         // ⬅️ or let the backend extract from context
+          title: 'Differential diagnosis',
+        });
+
+        // Ensure large size defaults (in case backend didn't set them)
+        config.chart = { height: 420, spacing: [16, 16, 16, 16], ...(config.chart || {}) };
+        config.plotOptions = {
+          pie: { size: '85%', ...(config.plotOptions?.pie || {}) },
+          ...(config.plotOptions || {})
+        };
+
+        setChats((prev) =>
+          prev.map((m) =>
+            m.id === placeholderId
+              ? { who: 'bot', type: 'chart_pie', highchartsConfig: config }
+              : m
+          )
+        );
+      } catch (e) {
+        setChats((prev) =>
+          prev.map((m) =>
+            m.id === placeholderId
+              ? { who: 'bot', msg: "Couldn't render the pie chart. Please try again." }
+              : m
+          )
+        );
+      }
+      return; // don't also send this message to /stream
+    }
     // Manual "add lab:" command
     const cmd = text.match(ADD_LAB_CMD_RE);
     if (cmd && cmd[1]) {
@@ -890,46 +978,46 @@ const handleEndSession = async () => {
     });
   };
 
-const handleAssistantContextTranscript = async (transcript) => {
-  try {
-    const t = (transcript || "").trim(); if (!t) return;
-
-    // 1) Preserve existing behavior: push raw transcript to both backends
-    await fetch(`${BACKEND_BASE}/set-context`, {
-      method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ session_id: sessionId, transcript: t }),
-    });
-
-    fetch("https://ai-doctor-assistant-voice-mode-webrtc.onrender.com/api/session-context", {
-      method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ session_id: sessionId, transcript: t }),
-    }).catch(() => { });
-
-    // 2) Keep local stores in sync (unchanged)
+  const handleAssistantContextTranscript = async (transcript) => {
     try {
-      const store = useDosageStore.getState();
-      store.setTranscript?.(t);
-      store.setSessionId?.(sessionId);
-    } catch { }
+      const t = (transcript || "").trim(); if (!t) return;
 
-    // 3) NEW: also push the *full* current context (transcript + second-opinion narrative + approved labs)
-    //     This keeps the realtime voice session and backend perfectly in sync with the UI state.
-    try {
-      const ctx = (typeof buildAgentContext === "function" ? buildAgentContext() : "").trim();
-      if (ctx) {
-        // Fire-and-forget to voice server (non-blocking), await app backend (same pattern as above)
-        await fetch(`${BACKEND_BASE}/set-context`, {
-          method: "POST", headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ session_id: sessionId, transcript: ctx }),
-        });
-        fetch("https://ai-doctor-assistant-voice-mode-webrtc.onrender.com/api/session-context", {
-          method: "POST", headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ session_id: sessionId, transcript: ctx }),
-        }).catch(() => { });
-      }
-    } catch { }
-  } catch (e) { console.error("Failed to send transcript context:", e); }
-};
+      // 1) Preserve existing behavior: push raw transcript to both backends
+      await fetch(`${BACKEND_BASE}/set-context`, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ session_id: sessionId, transcript: t }),
+      });
+
+      fetch("https://ai-doctor-assistant-voice-mode-webrtc.onrender.com/api/session-context", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ session_id: sessionId, transcript: t }),
+      }).catch(() => { });
+
+      // 2) Keep local stores in sync (unchanged)
+      try {
+        const store = useDosageStore.getState();
+        store.setTranscript?.(t);
+        store.setSessionId?.(sessionId);
+      } catch { }
+
+      // 3) NEW: also push the *full* current context (transcript + second-opinion narrative + approved labs)
+      //     This keeps the realtime voice session and backend perfectly in sync with the UI state.
+      try {
+        const ctx = (typeof buildAgentContext === "function" ? buildAgentContext() : "").trim();
+        if (ctx) {
+          // Fire-and-forget to voice server (non-blocking), await app backend (same pattern as above)
+          await fetch(`${BACKEND_BASE}/set-context`, {
+            method: "POST", headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ session_id: sessionId, transcript: ctx }),
+          });
+          fetch("https://ai-doctor-assistant-voice-mode-webrtc.onrender.com/api/session-context", {
+            method: "POST", headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ session_id: sessionId, transcript: ctx }),
+          }).catch(() => { });
+        }
+      } catch { }
+    } catch (e) { console.error("Failed to send transcript context:", e); }
+  };
 
   /** Specialty form streaming (if used elsewhere) */
   const handleFormStreamEvent = (evt) => {
@@ -1125,6 +1213,10 @@ const handleAssistantContextTranscript = async (transcript) => {
                   <SecondOpinionPanel data={chat.opinion} narrative={chat.narrative} onAddLab={handleAddLabToTable} />
                 ) : isLabOrders ? (
                   <LabOrdersTable rows={labOrders} onSend={sendLabOrdersToBackend} sending={sendingToLab} />
+                ) : chat?.type === 'chart_pie' && chat.highchartsConfig ? (
+                  <ChatBubbleChart config={chat.highchartsConfig} />
+                ) : chat?.type === 'chart_pie_loading' ? (
+                  <ChartLoader />
                 ) : (
                   <>
                     {renderMessageRich(chat.msg, index)}

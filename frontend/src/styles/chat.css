@@ -1243,3 +1243,30 @@
   white-space: pre-wrap;
   line-height: 1.45;
 }
+.chart-loader {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 14px;
+  border-radius: 12px;
+  background: var(--labs-prompt-bg, rgba(10,102,194,0.08));
+  border: 1px solid var(--labs-prompt-border, rgba(10,102,194,0.25));
+}
+
+.chart-spinner {
+  width: 22px;
+  height: 22px;
+  border: 3px solid rgba(0,0,0,0.15);
+  border-top-color: #0a66c2;
+  border-radius: 50%;
+  animation: chartspin 0.9s linear infinite;
+}
+
+@keyframes chartspin {
+  to { transform: rotate(360deg); }
+}
+
+/* Optional: give the chart bubble a comfortable width */
+.bubble-chart {
+  width: min(680px, 92vw);
+}

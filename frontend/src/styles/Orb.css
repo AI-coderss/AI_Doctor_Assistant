@@ -1,0 +1,17 @@
+/* Scoped, no global selectors */
+.orbfx-host {
+  position: relative;
+  overflow: hidden;     /* keep strokes inside */
+  /* size is controlled by parent or inline style prop */
+}
+
+.orbfx-canvas {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  background: transparent !important; /* force transparency */
+  pointer-events: none;               /* never block clicks */
+  display: block;
+  z-index: 0;
+}

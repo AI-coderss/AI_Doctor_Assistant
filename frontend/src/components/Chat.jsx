@@ -3,7 +3,7 @@
 /* eslint-disable no-useless-concat */
 /* eslint-disable no-loop-func */
 /* eslint-disable react-hooks/exhaustive-deps */
-import React, { useState, useEffect, useRef } from "react";
+import React, { useState, useEffect, useRef, useCallback } from "react";
 import ChatInputWidget from "./ChatInputWidget.jsx";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
@@ -423,6 +423,8 @@ const Chat = () => {
   const analyserRef = useRef(null);
   const { audioUrl, setAudioUrl, stopAudio } = useAudioStore();
   const { audioScale } = useAudioForVisualizerStore();
+  // ⬇️ Add near other refs/states at the top of Chat component
+  const seenIdsRef = useRef(new Set());
 
   const scrollAnchorRef = useRef(null);
   const audioPlayerRef = useRef(null);
@@ -791,72 +793,68 @@ const Chat = () => {
 
 
   // Text chat submit (includes small “add lab:” command)
-  const handleNewMessage = async ({ text, skipEcho = false }) => {
-    if (!text || !text.trim()) return;
-    if (!skipEcho) setChats((prev) => [...prev, { msg: text, who: "me" }]);
-    // --- Pie chart trigger (Highcharts) ---
-    if (wantsPieChart(text)) {
-      // Insert a temporary loader bubble, then replace it.
+  // ⬇️ Replace the whole handleNewMessage with this
+  const handleNewMessage = useCallback(async ({ text, skipEcho = false, id }) => {
+    const trimmed = (text || "").trim();
+    if (!trimmed) return;
+
+    // hard dedupe at entry using the id from ChatInputWidget
+    if (id) {
+      if (seenIdsRef.current.has(id)) return;
+      seenIdsRef.current.add(id);
+    }
+
+    // user bubble: exactly once
+    if (!skipEcho) {
+      setChats((prev) => [...prev, { id: id || `u-${Date.now()}`, msg: trimmed, who: "me" }]);
+    }
+
+    // --- Pie chart trigger ---
+    if (wantsPieChart(trimmed)) {
       const placeholderId = crypto.randomUUID();
       setChats((prev) => [
         ...prev,
-        { who: 'bot', type: 'chart_pie_loading', id: placeholderId }
+        { who: "bot", type: "chart_pie_loading", id: placeholderId }
       ]);
 
       try {
-        // Prefer using a real differential from a second-opinion bubble if available:
-        // const latestDiff = [...chats].reverse().find(c => c?.type === 'secondOpinion')?.opinion?.differential_diagnosis;
-
-        const context = (typeof buildAgentContext === 'function' ? buildAgentContext() : '') || text;
+        const context = (typeof buildAgentContext === 'function' ? buildAgentContext() : '') || trimmed;
         const config = await requestPieFromDifferential({
           sessionId,
-          // differential: latestDiff,                      // ⬅️ if you want to drive it from parsed Dx
-          context,                                         // ⬅️ or let the backend extract from context
+          context,
           title: 'Differential diagnosis',
         });
-
-        // Ensure large size defaults (in case backend didn't set them)
         config.chart = { height: 420, spacing: [16, 16, 16, 16], ...(config.chart || {}) };
         config.plotOptions = {
           pie: { size: '85%', ...(config.plotOptions?.pie || {}) },
           ...(config.plotOptions || {})
         };
 
-        setChats((prev) =>
-          prev.map((m) =>
-            m.id === placeholderId
-              ? { who: 'bot', type: 'chart_pie', highchartsConfig: config }
-              : m
-          )
-        );
-      } catch (e) {
-        setChats((prev) =>
-          prev.map((m) =>
-            m.id === placeholderId
-              ? { who: 'bot', msg: "Couldn't render the pie chart. Please try again." }
-              : m
-          )
-        );
+        setChats((prev) => prev.map((m) =>
+          m.id === placeholderId ? { who: 'bot', type: 'chart_pie', highchartsConfig: config } : m
+        ));
+      } catch {
+        setChats((prev) => prev.map((m) =>
+          m.id === placeholderId ? { who: 'bot', msg: "Couldn't render the pie chart. Please try again." } : m
+        ));
       }
-      return; // don't also send this message to /stream
+      return; // do not stream this text to /stream
     }
-    // Manual "add lab:" command
-    const cmd = text.match(ADD_LAB_CMD_RE);
+
+    // --- Manual "add lab:" command ---
+    const cmd = trimmed.match(ADD_LAB_CMD_RE);
     if (cmd && cmd[1]) {
       const raw = cmd[1].trim();
       const item = { name: raw.replace(/\s{2,}/g, " "), why: "(user requested via chat)", priority: "Low" };
       await handleAddLabToTable(item);
-      if (!skipEcho) setChats((prev) => [...prev, { msg: text, who: "me" }]);
-      // No confirmation bubble needed—the table updates visually.
-      return;
+      return; // ❗ no second echo here
     }
 
-    if (!skipEcho) setChats((prev) => [...prev, { msg: text, who: "me" }]);
-
+    // --- normal streaming call (no second user echo) ---
     const res = await fetch(`${BACKEND_BASE}/stream`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ message: text, session_id: sessionId }),
+      body: JSON.stringify({ message: trimmed, session_id: sessionId }),
     });
 
     if (!res.ok || !res.body) {
@@ -896,7 +894,7 @@ const Chat = () => {
       }
       return updated;
     });
-  };
+  }, [sessionId, setChats]);
 
   // Markdown renderer (kept as-is) w/ Mermaid support
   const renderMessage = (message) => {

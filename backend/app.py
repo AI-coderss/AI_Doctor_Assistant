@@ -16,6 +16,7 @@ from werkzeug.utils import secure_filename
 from typing import List, Dict, Any
 import os.path as osp
 import random
+from collections import defaultdict
 from dotenv import load_dotenv
 from flask import Flask, request, jsonify, Response, stream_with_context, make_response
 from flask_cors import CORS, cross_origin
@@ -37,7 +38,7 @@ if not OPENAI_API_KEY:
 # ===== Adaptive Specialty Templates (session-scoped) =====
 ACTIVE_TEMPLATES = {}  # session_id -> {"specialty": str, "template": dict, "activated_at": iso}
 OCR_SPACE_API_KEY = os.getenv("OCR_SPACE_API_KEY")
-
+SESSION_STORE = defaultdict(lambda: {"transcript": []})
 # Provider plan guard (per OCR.Space docs: Free≈1MB, PRO≈5MB, PRO PDF≈100MB+)
 # This is a best-effort early guard; the provider still enforces its own limits.
 PROVIDER_LIMIT_MB = int(os.getenv("OCR_PROVIDER_LIMIT_MB", "1"))  # 1|5|100
@@ -3611,6 +3612,109 @@ def viz_pie_differential():
 
     return jsonify({"config": cfg, "points": points, "script": script, "source": source}), 200
 # =================== /Highcharts Pie endpoints (end) ===================
+# --- [ADD new route] ---
+@app.post("/realtime/rtc-connect")
+def rtc_connect():
+    """Proxies the browser's SDP offer to OpenAI Realtime and returns the SDP answer."""
+    if not OPENAI_API_KEY:
+        return ("Missing OPENAI_API_KEY", 500)
+
+    offer_sdp = request.data.decode("utf-8")
+    model = request.args.get("model", "gpt-4o-realtime-preview-2024-12-17")
+
+    r = requests.post(
+        f"https://api.openai.com/v1/realtime?model={model}",
+        headers={
+            "Authorization": f"Bearer {OPENAI_API_KEY}",
+            "Content-Type": "application/sdp",
+            "OpenAI-Beta": "realtime=v1",
+        },
+        data=offer_sdp,
+        timeout=30,
+    )
+    return (r.text, r.status_code, {"Content-Type": "application/sdp"})
+# --- [ADD helper prompt templates] ---
+SUGGESTION_SYSTEM = (
+    "You are a real-time clinical suggestion engine. "
+    "Given the most recent slice of a live transcript, return a compact JSON with:\n"
+    " - chief_complaint (string; concise, evolving)\n"
+    " - provisional_diagnoses (array of {name, probability_percent, rationale}) -- max 6 entries\n"
+    " - suggestions (array of short actionable bullet points)\n"
+    "Keep it factual and avoid overclaiming. Use 0-100 integer probabilities. "
+)
+
+NOTES_SYSTEM = (
+    "You are a clinical scribe. From the cumulative transcript, produce a structured JSON:\n"
+    "{"
+    "  chief_complaint, history_of_present_illness, exam_findings, "
+    "  assessment, plan, prescriptions (array of {drug, dose, route, frequency, duration}), "
+    "  recommendations, differential_diagnosis (array of {name, probability_percent})"
+    "}\n"
+    "Be concise and clinically sound; omit sections you can't justify."
+)
+
+def _merge_text(session_id: str, text: str):
+    if text and text.strip():
+        SESSION_STORE[session_id]["transcript"].append(text.strip())
+
+# --- [ADD new route] ---
+@app.post("/rt/analyze_turn")
+def analyze_turn():
+    """
+    Receives the latest live transcript slice and returns evolving suggestions.
+    Body: {session_id: str, text: str}
+    """
+    d = request.get_json(force=True)
+    sid = d.get("session_id") or "default"
+    text = d.get("text", "")
+
+    _merge_text(sid, text)
+
+    # Responses API with JSON output
+    rsp = client.responses.create(
+        model="gpt-4o",  # fast + good reasoning for short JSON
+        input=[
+            {"role": "system", "content": SUGGESTION_SYSTEM},
+            {"role": "user", "content": f"Live transcript slice:\n{text[-2000:]}"},
+        ],
+        response_format={"type": "json_object"},
+    )
+
+    try:
+        payload = json.loads(rsp.output_text)
+    except Exception:
+        payload = {
+            "chief_complaint": "",
+            "provisional_diagnoses": [],
+            "suggestions": [],
+            "error": "Failed to parse suggestions",
+        }
+    return jsonify(payload)
+# --- [ADD new route] ---
+@app.post("/notes/generate")
+def generate_notes():
+    """
+    Builds structured notes from the accumulated transcript.
+    Body: {session_id: str}
+    """
+    d = request.get_json(force=True)
+    sid = d.get("session_id") or "default"
+    transcript = " ".join(SESSION_STORE[sid]["transcript"]).strip()
+
+    rsp = client.responses.create(
+        model="gpt-4o",
+        input=[
+            {"role": "system", "content": NOTES_SYSTEM},
+            {"role": "user", "content": f"Full transcript:\n{transcript[:20000]}"},
+        ],
+        response_format={"type": "json_object"},
+    )
+
+    try:
+        data = json.loads(rsp.output_text)
+    except Exception:
+        data = {"error": "Failed to parse notes"}
+    return jsonify(data)
 
 if __name__ == "__main__":
     app.run(host="127.0.0.1", port=5050, debug=True)

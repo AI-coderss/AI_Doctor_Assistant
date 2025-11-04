@@ -3,7 +3,7 @@
 /* eslint-disable no-useless-concat */
 /* eslint-disable no-loop-func */
 /* eslint-disable react-hooks/exhaustive-deps */
-import React, { useState, useEffect, useRef, useCallback } from "react";
+import React, { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import ChatInputWidget from "./ChatInputWidget.jsx";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
@@ -350,7 +350,156 @@ function SecondOpinionPanel({ data, narrative, onAddLab = () => { } }) {
     </div>
   );
 }
+// --- Real-time suggestions tab ---
+function RealTimeSuggestionsPanel({ rt }) {
+  const top = (rt?.diagnoses || []).slice(0, 5);
+  return (
+    <div className="ai-tab-panel">
+      <div className="ai-subtle-kv">
+        <span>Chief complaint:</span>
+        <b>{rt?.chiefComplaint || "—"}</b>
+      </div>
 
+      {top.length > 0 && (
+        <div className="ai-dx-list">
+          {top.map((d, i) => (
+            <div key={i} className="ai-dx-row">
+              <div className="ai-dx-name">{d.name}</div>
+              <div className="ai-dx-bar">
+                <div
+                  className="ai-dx-bar-fill"
+                  style={{ width: `${Math.max(0, Math.min(100, d.probability_percent || 0))}%` }}
+                />
+              </div>
+              <div className="ai-dx-pct">
+                {Math.round(d.probability_percent || 0)}%
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {rt?.bullets?.length > 0 && (
+        <ul className="ai-bullets">
+          {rt.bullets.map((b, i) => <li key={i}>{b}</li>)}
+        </ul>
+      )}
+
+      <div className="ai-updated">
+        {rt?.lastUpdated ? `Updated ${new Date(rt.lastUpdated).toLocaleTimeString()}` : ""}
+      </div>
+    </div>
+  );
+}
+
+// --- Clinical notes tab ---
+function ClinicalNotesPanel({ notes, onGenerate }) {
+  if (!notes) {
+    return (
+      <div className="ai-tab-panel">
+        <button className="ai-btn" onClick={onGenerate}>Generate clinical notes</button>
+        <p className="ai-help">Builds structured notes from the full running transcript.</p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="ai-tab-panel">
+      {notes._pieConfig && <ChatBubbleChart config={notes._pieConfig} />}
+
+      <div className="ai-notes">
+        {notes.chief_complaint && (
+          <p><b>Chief complaint:</b> {notes.chief_complaint}</p>
+        )}
+        {notes.history_of_present_illness && (
+          <p><b>HPI:</b> {notes.history_of_present_illness}</p>
+        )}
+        {notes.exam_findings && (
+          <p><b>Exam:</b> {notes.exam_findings}</p>
+        )}
+        {notes.assessment && (
+          <p><b>Assessment:</b> {notes.assessment}</p>
+        )}
+        {notes.plan && (
+          <p><b>Plan:</b> {notes.plan}</p>
+        )}
+
+        {Array.isArray(notes.prescriptions) && notes.prescriptions.length > 0 && (
+          <div>
+            <b>Prescriptions:</b>
+            <ul>
+              {notes.prescriptions.map((p, i) => (
+                <li key={i}>
+                  {p.drug} — {p.dose} {p.route}, {p.frequency} × {p.duration}
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
+
+        {notes.recommendations && (
+          <p><b>Recommendations:</b> {notes.recommendations}</p>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// --- Thin wrapper to reuse your existing SecondOpinionPanel without renaming it ---
+function SecondOpinionTabPanel({ data, narrative, onAddLab }) {
+  return (
+    <div className="ai-tab-panel">
+      {/* Use the original component exactly as you wrote it */}
+      <SecondOpinionPanel data={data} narrative={narrative} onAddLab={onAddLab} />
+    </div>
+  );
+}
+
+// --- Tabs container (uses the three panels above) ---
+function AnalysisTabs({
+  rt,
+  notes,
+  onGenerateNotes,
+  // Props for your existing SecondOpinionPanel:
+  soData,
+  soNarrative,
+  onAddLab
+}) {
+  const [tab, setTab] = React.useState(0); // 0: Real-time, 1: Notes, 2: Second Opinion
+
+  return (
+    <div className="ai-tabs">
+      <div className="ai-tab-headers">
+        <button className={`ai-tab-btn ${tab === 0 ? "active" : ""}`} onClick={() => setTab(0)}>
+          Real-time Suggestions
+        </button>
+        <button className={`ai-tab-btn ${tab === 1 ? "active" : ""}`} onClick={() => setTab(1)}>
+          Clinical Notes
+        </button>
+        <button className={`ai-tab-btn ${tab === 2 ? "active" : ""}`} onClick={() => setTab(2)}>
+          AI Second Opinion
+        </button>
+      </div>
+
+      {tab === 0 && <RealTimeSuggestionsPanel rt={rt} />}
+
+      {tab === 1 && (
+        <ClinicalNotesPanel
+          notes={notes}
+          onGenerate={onGenerateNotes}
+        />
+      )}
+
+      {tab === 2 && (
+        <SecondOpinionTabPanel
+          data={soData}
+          narrative={soNarrative}
+          onAddLab={onAddLab}
+        />
+      )}
+    </div>
+  );
+}
 /* ====== Lab Orders Table bubble (single instance) ====== */
 function LabOrdersTable({ rows = [], onSend, sending }) {
   const badge = (p) => {
@@ -425,11 +574,39 @@ const Chat = () => {
   const { audioScale } = useAudioForVisualizerStore();
   // ⬇️ Add near other refs/states at the top of Chat component
   const seenIdsRef = useRef(new Set());
-
+  const transcriptBufRef = useRef("");
   const scrollAnchorRef = useRef(null);
   const audioPlayerRef = useRef(null);
   const toggleSfxRef = useRef(null);
+  const [rt, setRt] = useState({
+    chiefComplaint: "",
+    diagnoses: [],      // [{name, probability_percent, rationale}]
+    bullets: [],        // string[]
+    lastUpdated: null
+  });
+  const [notes, setNotes] = useState(null); // structured notes JSON
+  const analysisTabsShownRef = useRef(false);
 
+  const ensureAnalysisTabsBubble = () => {
+    if (analysisTabsShownRef.current) return;
+    analysisTabsShownRef.current = true;
+    setChats((prev) => [...prev, { who: "bot", type: "analysisTabs" }]);
+  };
+
+  // helper: latest second-opinion message already produced by your existing flow
+  const lastSecondOpinion = useMemo(() => {
+    for (let i = chats.length - 1; i >= 0; i--) {
+      if (chats[i]?.type === "secondOpinion") return chats[i];
+    }
+    return null;
+  }, [chats]);
+
+  // simple debounce
+  const debouncedRef = useRef(null);
+  const debounce = (fn, ms = 600) => {
+    clearTimeout(debouncedRef.current);
+    debouncedRef.current = setTimeout(fn, ms);
+  };
   // ✅ Fresh session per mount (no localStorage persistence)
   // ✅ persistent across reloads (same behavior as the old working file)
   const [sessionId, setSessionId] = useState(() => {
@@ -580,6 +757,23 @@ const Chat = () => {
         pushContextToBackends(sessionId, buildAgentContext());
 
         if (localStream) localStream.getAudioTracks().forEach((track) => (track.enabled = true));
+        channel.send(JSON.stringify({
+          type: "session.update",
+          session: {
+            type: "transcription",
+            audio: {
+              input: {
+                transcription: {
+                  model: "gpt-4o-transcribe",   // official STT model
+                  language: "en"                // set a fixed language or detect on your side
+                },
+                // Optional server VAD to mark turns
+                turn_detection: { type: "server_vad", threshold: 0.5, prefix_padding_ms: 300, silence_duration_ms: 500 }
+              }
+            },
+            include: ["item.input_audio_transcription.logprobs"]
+          }
+        }));
       };
 
       channel.onclose = () => {
@@ -592,6 +786,48 @@ const Chat = () => {
         setIsMicActive(false);
       };
 
+
+
+      channel.onmessage = (e) => {
+        try {
+          const evt = JSON.parse(e.data);
+
+          // Live characters from Transcribe-4o
+          if (evt.type === "conversation.item.input_audio_transcription.delta") {
+            transcriptBufRef.current += (evt.delta || "");
+            ensureAnalysisTabsBubble();
+
+            // lightly throttle backend analysis to ~600ms
+            const slice = transcriptBufRef.current;
+            debounce(async () => {
+              try {
+                const res = await fetch(`${BACKEND_BASE}/rt/analyze_turn`, {
+                  method: "POST",
+                  headers: { "Content-Type": "application/json" },
+                  body: JSON.stringify({ session_id: sessionId, text: slice })
+                });
+                if (res.ok) {
+                  const j = await res.json();
+                  setRt({
+                    chiefComplaint: j?.chief_complaint || rt.chiefComplaint,
+                    diagnoses: Array.isArray(j?.provisional_diagnoses) ? j.provisional_diagnoses : rt.diagnoses,
+                    bullets: Array.isArray(j?.suggestions) ? j.suggestions : rt.bullets,
+                    lastUpdated: Date.now()
+                  });
+                }
+              } catch { /* no-op */ }
+            }, 600);
+          }
+
+          // When OpenAI marks a turn complete, you can optionally flush/commit
+          if (evt.type === "conversation.item.input_audio_transcription.completed") {
+            transcriptBufRef.current += " ";
+          }
+
+        } catch {
+          // ignore non-JSON control frames
+        }
+      };
       // ✅ Create offer, mutate THE SAME SDP, setLocalDescription(offer), and POST offer.sdp
       let offer = await pc.createOffer({ offerToReceiveAudio: true, offerToReceiveVideo: false });
       offer.sdp = offer.sdp.replace(
@@ -670,6 +906,31 @@ const Chat = () => {
   };
 
   /* ---------- Labs: unified workflow ---------- */
+  // --- [ADD inside Chat component] ---
+  const generateClinicalNotes = async () => {
+    try {
+      const res = await fetch(`${BACKEND_BASE}/notes/generate`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ session_id: sessionId })
+      });
+      if (!res.ok) return;
+      const j = await res.json();
+      // try to build a pie config if differential is present (reuse your chart util)
+      let pieConfig = null;
+      if (Array.isArray(j?.differential_diagnosis) && j.differential_diagnosis.length) {
+        const differential = j.differential_diagnosis.map(d => ({
+          diagnosis: d.name,
+          probability: Number(d.probability_percent || 0)
+        }));
+        try {
+          pieConfig = await requestPieFromDifferential({ differential, title: "Diagnosis Probabilities" });
+        } catch { }
+      }
+      setNotes({ ...j, _pieConfig: pieConfig });
+      ensureAnalysisTabsBubble();
+    } catch { }
+  };
 
   // Approve a lab via backend (idempotent behavior server-side)
   const approveLabViaAPI = async (item) => {
@@ -979,7 +1240,7 @@ const Chat = () => {
   const handleAssistantContextTranscript = async (transcript) => {
     try {
       const t = (transcript || "").trim(); if (!t) return;
-
+      ensureAnalysisTabsBubble();
       // 1) Preserve existing behavior: push raw transcript to both backends
       await fetch(`${BACKEND_BASE}/set-context`, {
         method: "POST", headers: { "Content-Type": "application/json" },
@@ -1207,23 +1468,44 @@ const Chat = () => {
               <div className="message-text">
                 {isLabCard ? (
                   <LabsPanel labs={chat.labs} meta={chat.meta} />
+
+                ) : chat?.type === "analysisTabs" ? (
+                  <AnalysisTabs
+                    rt={rt}
+                    notes={notes}
+                    onGenerateNotes={generateClinicalNotes}
+                    soData={lastSecondOpinion?.opinion || null}
+                    soNarrative={lastSecondOpinion?.narrative || ""}
+                    onAddLab={handleAddLabToTable}
+                  />
+
                 ) : isSecondOpinion ? (
-                  <SecondOpinionPanel data={chat.opinion} narrative={chat.narrative} onAddLab={handleAddLabToTable} />
+                  <SecondOpinionPanel
+                    data={chat.opinion}
+                    narrative={chat.narrative}
+                    onAddLab={handleAddLabToTable}
+                  />
+
                 ) : isLabOrders ? (
                   <LabOrdersTable rows={labOrders} onSend={sendLabOrdersToBackend} sending={sendingToLab} />
-                ) : chat?.type === 'chart_pie' && chat.highchartsConfig ? (
+
+                ) : chat?.type === "chart_pie" && chat.highchartsConfig ? (
                   <ChatBubbleChart config={chat.highchartsConfig} />
-                ) : chat?.type === 'chart_pie_loading' ? (
+
+                ) : chat?.type === "chart_pie_loading" ? (
                   <ChartLoader />
+
                 ) : (
                   <>
                     {renderMessageRich(chat.msg, index)}
                     {chat.streaming && <span className="typing-caret" />}
                   </>
                 )}
+
               </div>
             </div>
           );
+
         })}
         <div ref={scrollAnchorRef} />
       </div>

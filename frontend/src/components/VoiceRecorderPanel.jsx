@@ -104,8 +104,6 @@ const DEPARTMENTS = [
 ];
 
 const FLAT_DEPTS = DEPARTMENTS.flatMap((g) => g.items.map((value) => ({ value, group: g.group })));
-
-/* Utility */
 const normalize = (s) =>
   (s || "")
     .toString()
@@ -114,29 +112,40 @@ const normalize = (s) =>
     .toLowerCase()
     .trim();
 
-/**
- * VoiceRecorderPanel — Left Dock (outside drawer, not draggable)
- * Original behavior preserved; enhancements layered on top only.
- */
 const VoiceRecorderPanel = ({
   transcribeUrl = "/transcribe",
   opinionUrl = "/case_second_opinion_stream",
+  lastVisitLookupUrl = "/patient_last_visit",
   fileFieldName = "audio_data",
   onOpinion,
   onTranscriptReady,
 }) => {
-  // Left dock visibility (portal into <body>)
   const [dockOpen, setDockOpen] = useState(false);
 
   // Center pop-up (glassmorphic) gate
   const [showCaseForm, setShowCaseForm] = useState(false);
+  const [formMode, setFormMode] = useState("new"); // "new" | "existing"
   const [caseMetaSubmitted, setCaseMetaSubmitted] = useState(false);
-  const [caseMeta, setCaseMeta] = useState({
+
+  // NEW patient meta
+  const [newMeta, setNewMeta] = useState({
     patientName: "",
     fileNumber: "",
     age: "",
     department: "",
   });
+
+  // EXISTING patient meta
+  const [existingMeta, setExistingMeta] = useState({
+    fileNumber: "",
+    visitType: "Follow-up",
+    patientName: "",
+    age: "",
+    department: "",
+    lastVisitLoaded: false,
+    lastVisitDate: "",
+  });
+
   const [formErrors, setFormErrors] = useState({});
 
   // Recording state
@@ -157,23 +166,19 @@ const VoiceRecorderPanel = ({
     return id;
   });
 
-  /* ================= TIMER (anti-flicker) ================= */
+  /* ================= TIMER ================= */
   const [elapsedMs, setElapsedMs] = useState(0);
   const intervalRef = useRef(null);
   const startAtRef = useRef(0);
   const pausedAccumRef = useRef(0);
 
   const pad2 = (n) => (n < 10 ? "0" + n : String(n));
-
   const getParts = (ms) => {
     const hh = Math.floor(ms / 3600000);
     const mm = Math.floor((ms % 3600000) / 60000);
     const ss = Math.floor((ms % 60000) / 1000);
     const cs = Math.floor((ms % 1000) / 10);
-    const HH = pad2(hh),
-      MM = pad2(mm),
-      SS = pad2(ss),
-      CS = pad2(cs);
+    const HH = pad2(hh), MM = pad2(mm), SS = pad2(ss), CS = pad2(cs);
     return { HH, MM, SS, CS, aria: `${HH}:${MM}:${SS}:${CS}` };
   };
 
@@ -184,7 +189,6 @@ const VoiceRecorderPanel = ({
     }, 50);
   };
 
-  // Unmount cleanup without depending on closures
   useEffect(() => {
     return () => {
       if (intervalRef.current) clearInterval(intervalRef.current);
@@ -193,26 +197,41 @@ const VoiceRecorderPanel = ({
 
   /* ================= Drawer coordination ================= */
   const closeDrawer = () => {
-    try {
-      window.dispatchEvent(new CustomEvent("tools:close"));
-    } catch {}
+    try { window.dispatchEvent(new CustomEvent("tools:close")); } catch {}
   };
 
-  /* ================= form validation ================= */
-  const validateCaseMeta = () => {
+  /* ================= Persist / Rehydrate per-form ================= */
+  useEffect(() => {
+    try {
+      const rawNew = localStorage.getItem("vrp_case_meta_new");
+      if (rawNew) setNewMeta((s) => ({ ...s, ...JSON.parse(rawNew) }));
+      const rawExisting = localStorage.getItem("vrp_case_meta_existing");
+      if (rawExisting) setExistingMeta((s) => ({ ...s, ...JSON.parse(rawExisting) }));
+    } catch {}
+  }, []);
+
+  /* ================= Validation ================= */
+  const validateNew = () => {
     const errs = {};
-    if (!caseMeta.patientName.trim()) errs.patientName = "Required";
-    if (!caseMeta.fileNumber.trim()) errs.fileNumber = "Required";
-    if (!caseMeta.age.trim()) errs.age = "Required";
-    if (caseMeta.age && (Number.isNaN(+caseMeta.age) || +caseMeta.age <= 0)) errs.age = "Invalid";
-    if (!caseMeta.department.trim()) errs.department = "Required";
+    if (!newMeta.patientName.trim()) errs.patientName = "Required";
+    if (!newMeta.fileNumber.trim()) errs.fileNumber = "Required";
+    if (!newMeta.age.trim()) errs.age = "Required";
+    if (newMeta.age && (Number.isNaN(+newMeta.age) || +newMeta.age <= 0)) errs.age = "Invalid";
+    if (!newMeta.department.trim()) errs.department = "Required";
+    return errs;
+  };
+
+  const validateExisting = () => {
+    const errs = {};
+    if (!existingMeta.fileNumber.trim()) errs.fileNumber = "Required";
+    if (!existingMeta.visitType.trim()) errs.visitType = "Required";
     return errs;
   };
 
   /* ================= Controls ================= */
   const handleLauncherClick = () => {
     setDockOpen(true);
-    setShowCaseForm(true); // open gate form
+    setShowCaseForm(true);
     closeDrawer();
   };
 
@@ -224,7 +243,7 @@ const VoiceRecorderPanel = ({
   };
 
   const startRecording = () => {
-    if (!caseMetaSubmitted) return; // UI already disables; keep guard
+    if (!caseMetaSubmitted) return;
     transcriptRef.current = "";
     setIsPaused(false);
     setIsTranscriptReady(false);
@@ -266,6 +285,39 @@ const VoiceRecorderPanel = ({
     stopInterval();
   };
 
+  /* ============ Existing Patient: Load Last Visit (footer only) ============ */
+  const loadLastVisit = async () => {
+    if (!existingMeta.fileNumber.trim()) return;
+    try {
+      setLoading(true);
+      const resp = await fetch(lastVisitLookupUrl, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ file_number: existingMeta.fileNumber }),
+      });
+      if (!resp.ok) throw new Error(`Lookup failed: ${resp.status}`);
+      const data = await resp.json();
+
+      const patientName = data.patient_name ?? existingMeta.patientName ?? "";
+      const age = data.patient_age ?? existingMeta.age ?? "";
+      const department = data.department ?? existingMeta.department ?? "";
+      const lastVisitDate = data.last_visit_date ?? "";
+
+      setExistingMeta((s) => ({
+        ...s,
+        patientName,
+        age: String(age || ""),
+        department,
+        lastVisitLoaded: true,
+        lastVisitDate,
+      }));
+    } catch (e) {
+      console.error("Last visit lookup error:", e);
+    } finally {
+      setLoading(false);
+    }
+  };
+
   /* ================= Upload after stop => transcribe ================= */
   const onStop = async (recordedBlob) => {
     try {
@@ -275,11 +327,21 @@ const VoiceRecorderPanel = ({
       form.append(fileFieldName, audioFile);
       form.append("session_id", sessionId);
 
-      // append meta
-      form.append("patient_name", caseMeta.patientName);
-      form.append("patient_file_number", caseMeta.fileNumber);
-      form.append("patient_age", caseMeta.age);
-      form.append("patient_department", caseMeta.department);
+      if (formMode === "new") {
+        form.append("form_mode", "new");
+        form.append("patient_name", newMeta.patientName);
+        form.append("patient_file_number", newMeta.fileNumber);
+        form.append("patient_age", newMeta.age);
+        form.append("patient_department", newMeta.department);
+      } else {
+        form.append("form_mode", "existing");
+        form.append("patient_file_number", existingMeta.fileNumber);
+        form.append("visit_type", existingMeta.visitType);
+        if (existingMeta.patientName) form.append("patient_name", existingMeta.patientName);
+        if (existingMeta.age) form.append("patient_age", existingMeta.age);
+        if (existingMeta.department) form.append("patient_department", existingMeta.department);
+        if (existingMeta.lastVisitLoaded && existingMeta.lastVisitDate) form.append("last_visit_date", existingMeta.lastVisitDate);
+      }
 
       setLoading(true);
       const { data } = await axios.post(transcribeUrl, form, {
@@ -305,7 +367,11 @@ const VoiceRecorderPanel = ({
     if (!transcriptRef.current) return;
     closeDrawer();
 
-    const payload = { context: transcriptRef.current, session_id: sessionId, meta: caseMeta };
+    const payload =
+      formMode === "new"
+        ? { context: transcriptRef.current, session_id: sessionId, meta: { ...newMeta, form_mode: "new" } }
+        : { context: transcriptRef.current, session_id: sessionId, meta: { ...existingMeta, form_mode: "existing" } };
+
     try {
       setLoading(true);
       const resp = await fetch(opinionUrl, {
@@ -329,8 +395,7 @@ const VoiceRecorderPanel = ({
       }
       const reader = resp.body.getReader();
       const decoder = new TextDecoder("utf-8");
-      let done = false,
-        aggregated = "";
+      let done = false, aggregated = "";
       while (!done) {
         const { value, done: d } = await reader.read();
         done = d;
@@ -356,24 +421,21 @@ const VoiceRecorderPanel = ({
   );
 
   /* ================= Fixed-width digit renderer ================= */
-  const Digits = ({ value }) => {
-    return (
-      <span className="digits">
-        <span className="digit">{value[0]}</span>
-        <span className="digit">{value[1]}</span>
-      </span>
-    );
-  };
+  const Digits = ({ value }) => (
+    <span className="digits">
+      <span className="digit">{value[0]}</span>
+      <span className="digit">{value[1]}</span>
+    </span>
+  );
 
   /* ===================== Searchable Combobox ===================== */
-  function DepartmentCombobox({ value, onChange, error }) {
+  function DepartmentCombobox({ value, onChange, error, labelId = "vrp-dept", placeholder = "Search & select department…" }) {
     const [open, setOpen] = useState(false);
     const [query, setQuery] = useState(value || "");
     const [activeIndex, setActiveIndex] = useState(0);
     const rootRef = useRef(null);
     const listId = useId();
 
-    // Filter results by value OR group (FLAT_DEPTS is stable)
     const filtered = React.useMemo(() => {
       const q = normalize(query);
       if (!q) return FLAT_DEPTS;
@@ -382,12 +444,8 @@ const VoiceRecorderPanel = ({
       );
     }, [query]);
 
-    useEffect(() => {
-      // keep input in sync if external value changes
-      setQuery(value || "");
-    }, [value]);
+    useEffect(() => { setQuery(value || ""); }, [value]);
 
-    // Close on outside click
     useEffect(() => {
       const onDocClick = (e) => {
         if (!rootRef.current) return;
@@ -406,24 +464,24 @@ const VoiceRecorderPanel = ({
     };
 
     return (
-      <div className="vrp-field" ref={rootRef} style={{ position: "relative" }}>
-        <label htmlFor="vrp-dept">Department</label>
+      <div className="vrp-field vrp-field--combo" ref={rootRef}>
+        <label htmlFor={labelId}>Department</label>
 
         <input
-          id="vrp-dept"
+          id={labelId}
           type="text"
           role="combobox"
           aria-autocomplete="list"
           aria-expanded={open}
           aria-controls={listId}
           aria-activedescendant={open && filtered[activeIndex] ? `opt-${activeIndex}` : undefined}
-          placeholder="Search & select department…"
+          placeholder={placeholder}
           value={query}
           onChange={(e) => {
             setQuery(e.target.value);
             setOpen(true);
             setActiveIndex(0);
-            if (!e.target.value) onChange(""); // clear selection if cleared
+            if (!e.target.value) onChange("");
           }}
           onFocus={() => setOpen(true)}
           onKeyDown={(e) => {
@@ -449,24 +507,7 @@ const VoiceRecorderPanel = ({
         {error && <span className="vrp-err">{error}</span>}
 
         {open && filtered.length > 0 && (
-          <div
-            id={listId}
-            role="listbox"
-            style={{
-              position: "absolute",
-              zIndex: 2500,
-              left: 0,
-              right: 0,
-              top: "calc(100% + 6px)",
-              maxHeight: 260,
-              overflowY: "auto",
-              borderRadius: 12,
-              border: "1px solid rgba(15,18,24,0.10)",
-              background: "rgba(255,255,255,0.98)",
-              boxShadow: "0 14px 34px rgba(15,18,24,0.18), 0 1px 0 rgba(15,18,24,0.03) inset",
-              padding: 6,
-            }}
-          >
+          <div id={listId} role="listbox" className="vrp-combobox-panel">
             {(() => {
               let lastGroup = null;
               return filtered.map((opt, idx) => {
@@ -474,37 +515,15 @@ const VoiceRecorderPanel = ({
                 lastGroup = opt.group;
                 return (
                   <React.Fragment key={`${opt.group}-${opt.value}-${idx}`}>
-                    {showGroup && (
-                      <div
-                        aria-hidden
-                        style={{
-                          fontSize: 12,
-                          fontWeight: 800,
-                          letterSpacing: ".02em",
-                          margin: "8px 8px 4px",
-                          opacity: 0.9,
-                        }}
-                      >
-                        {opt.group}
-                      </div>
-                    )}
+                    {showGroup && <div aria-hidden className="vrp-combobox-group">{opt.group}</div>}
                     <div
                       id={`opt-${idx}`}
                       role="option"
                       aria-selected={idx === activeIndex}
                       onMouseEnter={() => setActiveIndex(idx)}
-                      onMouseDown={(e) => {
-                        e.preventDefault(); // prevent input blur before onClick
-                      }}
+                      onMouseDown={(e) => e.preventDefault()}
                       onClick={() => selectAt(idx)}
-                      style={{
-                        padding: "10px 12px",
-                        margin: "2px 6px",
-                        borderRadius: 10,
-                        cursor: "pointer",
-                        background: idx === activeIndex ? "rgba(99,102,241,0.12)" : "transparent",
-                        outline: idx === activeIndex ? "1px solid rgba(99,102,241,0.35)" : "none",
-                      }}
+                      className={`vrp-combobox-option ${idx === activeIndex ? "active" : ""}`}
                     >
                       {opt.value}
                     </div>
@@ -524,15 +543,36 @@ const VoiceRecorderPanel = ({
     : createPortal(
         <div className="vrp-modal-backdrop" role="dialog" aria-modal="true" aria-label="Case details">
           <div className="vrp-modal">
-            <div className="vrp-modal-head">
-              <h3>Case Details</h3>
+            {/* Topbar with RECT tabs (no header) */}
+            <div className="vrp-topbar">
+              <div className="vrp-tabs vrp-tabs--rect" role="tablist" aria-label="Form mode">
+                <button
+                  type="button"
+                  role="tab"
+                  aria-selected={formMode === "existing"}
+                  className={`vrp-tab ${formMode === "existing" ? "active" : ""}`}
+                  onClick={() => setFormMode("existing")}
+                  id="tab-existing"
+                >
+                  Existing Patient
+                </button>
+                <button
+                  type="button"
+                  role="tab"
+                  aria-selected={formMode === "new"}
+                  className={`vrp-tab ${formMode === "new" ? "active" : ""}`}
+                  onClick={() => setFormMode("new")}
+                  id="tab-new"
+                >
+                  New Patient
+                </button>
+              </div>
+
               <button
                 className="vrp-modal-close"
                 type="button"
-                aria-label="Cancel"
-                onClick={() => {
-                  setShowCaseForm(false);
-                }}
+                aria-label="Close"
+                onClick={() => { setShowCaseForm(false); }}
               >
                 ×
               </button>
@@ -542,70 +582,171 @@ const VoiceRecorderPanel = ({
               className="vrp-form"
               onSubmit={(e) => {
                 e.preventDefault();
-                const errs = validateCaseMeta();
-                setFormErrors(errs);
-                if (Object.keys(errs).length === 0) {
-                  setCaseMetaSubmitted(true);
-                  setShowCaseForm(false);
-                  try {
-                    localStorage.setItem("vrp_case_meta", JSON.stringify(caseMeta));
-                  } catch {}
+                if (formMode === "new") {
+                  const errs = validateNew();
+                  setFormErrors(errs);
+                  if (Object.keys(errs).length === 0) {
+                    setCaseMetaSubmitted(true);
+                    setShowCaseForm(false);
+                    try { localStorage.setItem("vrp_case_meta_new", JSON.stringify(newMeta)); } catch {}
+                  }
+                } else {
+                  const errs = validateExisting();
+                  setFormErrors(errs);
+                  if (Object.keys(errs).length === 0) {
+                    setCaseMetaSubmitted(true);
+                    setShowCaseForm(false);
+                    try { localStorage.setItem("vrp_case_meta_existing", JSON.stringify(existingMeta)); } catch {}
+                  }
                 }
               }}
             >
-              <div className="vrp-field">
-                <label htmlFor="vrp-patient-name">Patient Name</label>
-                <input
-                  id="vrp-patient-name"
-                  type="text"
-                  value={caseMeta.patientName}
-                  onChange={(e) => setCaseMeta({ ...caseMeta, patientName: e.target.value })}
-                  placeholder="e.g., Sarah Ahmed"
-                />
-                {formErrors.patientName && <span className="vrp-err">{formErrors.patientName}</span>}
-              </div>
+              <div className="vrp-form-body">
+                <motion.div
+                  key={formMode}
+                  initial={{ opacity: 0, y: 8 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={{ duration: 0.18, ease: "easeOut" }}
+                >
+                  {formMode === "new" ? (
+                    <>
+                      <div className="vrp-field">
+                        <label htmlFor="vrp-patient-name">Patient Name</label>
+                        <input
+                          id="vrp-patient-name"
+                          type="text"
+                          value={newMeta.patientName}
+                          onChange={(e) => setNewMeta({ ...newMeta, patientName: e.target.value })}
+                          placeholder="e.g., Sarah Ahmed"
+                        />
+                        {formErrors.patientName && <span className="vrp-err">{formErrors.patientName}</span>}
+                      </div>
 
-              <div className="vrp-field">
-                <label htmlFor="vrp-file-number">File Number</label>
-                <input
-                  id="vrp-file-number"
-                  type="text"
-                  value={caseMeta.fileNumber}
-                  onChange={(e) => setCaseMeta({ ...caseMeta, fileNumber: e.target.value })}
-                  placeholder="e.g., DSAH-12345"
-                />
-                {formErrors.fileNumber && <span className="vrp-err">{formErrors.fileNumber}</span>}
-              </div>
+                      <div className="vrp-field">
+                        <label htmlFor="vrp-file-number">File Number</label>
+                        <input
+                          id="vrp-file-number"
+                          type="text"
+                          value={newMeta.fileNumber}
+                          onChange={(e) => setNewMeta({ ...newMeta, fileNumber: e.target.value })}
+                          placeholder="e.g., DSAH-12345"
+                        />
+                        {formErrors.fileNumber && <span className="vrp-err">{formErrors.fileNumber}</span>}
+                      </div>
 
-              <div className="vrp-two-col">
-                <div className="vrp-field">
-                  <label htmlFor="vrp-age">Age</label>
-                  <input
-                    id="vrp-age"
-                    type="number"
-                    min="0"
-                    inputMode="numeric"
-                    value={caseMeta.age}
-                    onChange={(e) => setCaseMeta({ ...caseMeta, age: e.target.value })}
-                    placeholder="e.g., 42"
-                  />
-                  {formErrors.age && <span className="vrp-err">{formErrors.age}</span>}
-                </div>
+                      <div className="vrp-two-col">
+                        <div className="vrp-field">
+                          <label htmlFor="vrp-age">Age</label>
+                          <input
+                            id="vrp-age"
+                            type="number"
+                            min="0"
+                            inputMode="numeric"
+                            value={newMeta.age}
+                            onChange={(e) => setNewMeta({ ...newMeta, age: e.target.value })}
+                            placeholder="e.g., 42"
+                          />
+                          {formErrors.age && <span className="vrp-err">{formErrors.age}</span>}
+                        </div>
 
-                <DepartmentCombobox
-                  value={caseMeta.department}
-                  onChange={(val) => setCaseMeta({ ...caseMeta, department: val })}
-                  error={formErrors.department}
-                />
+                        <DepartmentCombobox
+                          value={newMeta.department}
+                          onChange={(val) => setNewMeta({ ...newMeta, department: val })}
+                          error={formErrors.department}
+                          labelId="vrp-dept-new"
+                        />
+                      </div>
+                    </>
+                  ) : (
+                    <>
+                      <div className="vrp-two-col">
+                        <div className="vrp-field">
+                          <label htmlFor="vrp-file-number-ex">File Number</label>
+                          <input
+                            id="vrp-file-number-ex"
+                            type="text"
+                            value={existingMeta.fileNumber}
+                            onChange={(e) => setExistingMeta({ ...existingMeta, fileNumber: e.target.value })}
+                            placeholder="e.g., DSAH-12345"
+                          />
+                          {formErrors.fileNumber && <span className="vrp-err">{formErrors.fileNumber}</span>}
+                        </div>
+
+                        <div className="vrp-field">
+                          <label htmlFor="vrp-visit-type">Visit Type</label>
+                          <select
+                            id="vrp-visit-type"
+                            value={existingMeta.visitType}
+                            onChange={(e) => setExistingMeta({ ...existingMeta, visitType: e.target.value })}
+                          >
+                            <option>Follow-up</option>
+                            <option>New Visit</option>
+                          </select>
+                          {formErrors.visitType && <span className="vrp-err">{formErrors.visitType}</span>}
+                        </div>
+                      </div>
+
+                      <div className="vrp-field">
+                        <label htmlFor="vrp-patient-name-ex">Patient Name</label>
+                        <input
+                          id="vrp-patient-name-ex"
+                          type="text"
+                          value={existingMeta.patientName}
+                          onChange={(e) => setExistingMeta({ ...existingMeta, patientName: e.target.value })}
+                          placeholder="(loaded from last visit or leave blank)"
+                        />
+                      </div>
+
+                      <div className="vrp-two-col">
+                        <div className="vrp-field">
+                          <label htmlFor="vrp-age-ex">Age</label>
+                          <input
+                            id="vrp-age-ex"
+                            type="number"
+                            min="0"
+                            inputMode="numeric"
+                            value={existingMeta.age}
+                            onChange={(e) => setExistingMeta({ ...existingMeta, age: e.target.value })}
+                            placeholder="(loaded or leave blank)"
+                          />
+                        </div>
+
+                        <DepartmentCombobox
+                          value={existingMeta.department}
+                          onChange={(val) => setExistingMeta({ ...existingMeta, department: val })}
+                          labelId="vrp-dept-ex"
+                          placeholder="Set department for this visit…"
+                        />
+                      </div>
+                    </>
+                  )}
+                </motion.div>
               </div>
 
               <div className="vrp-actions">
-                <button type="button" className="vrp-btn ghost" onClick={() => setShowCaseForm(false)}>
-                  Cancel
-                </button>
-                <button type="submit" className="vrp-btn primary">
-                  Save &amp; Continue
-                </button>
+                <div className="vrp-actions-left">
+                  <button type="button" className="vrp-btn ghost" onClick={() => setShowCaseForm(false)}>
+                    Cancel
+                  </button>
+
+                  {formMode === "existing" && (
+                    <button
+                      type="button"
+                      className="vrp-btn secondary"
+                      onClick={loadLastVisit}
+                      disabled={loading || !existingMeta.fileNumber.trim()}
+                      title="Load last visit details"
+                    >
+                      Load Last Visit
+                    </button>
+                  )}
+                </div>
+
+                <div className="vrp-actions-right">
+                  <button type="submit" className="vrp-btn primary">
+                    Save &amp; Continue
+                  </button>
+                </div>
               </div>
             </form>
           </div>
@@ -684,9 +825,7 @@ const VoiceRecorderPanel = ({
                     <div className={`button ${isRecording ? "square" : ""}`} />
                   </div>
 
-                  <h2 className="timeroutput sr-only" role="timer">
-                    {t.aria}
-                  </h2>
+                  <h2 className="timeroutput sr-only" role="timer">{t.aria}</h2>
 
                   <div className="timer-digits" aria-hidden="true">
                     <div className="time-group t-hours">
@@ -733,6 +872,10 @@ const VoiceRecorderPanel = ({
 };
 
 export default VoiceRecorderPanel;
+
+
+
+
 
 
 

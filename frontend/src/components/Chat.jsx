@@ -46,17 +46,17 @@ async function requestPieFromDifferential({
   const path = differential ? "/viz/pie-config" : "/viz/pie-differential";
   const body = differential
     ? {
-        title: title || "Differential diagnosis",
-        data: differential.map((d) => ({
-          name: d.name,
-          y: d.probability_percent,
-        })),
-      }
+      title: title || "Differential diagnosis",
+      data: differential.map((d) => ({
+        name: d.name,
+        y: d.probability_percent,
+      })),
+    }
     : {
-        session_id: sessionId,
-        context,
-        title: title || "Differential diagnosis",
-      };
+      session_id: sessionId,
+      context,
+      title: title || "Differential diagnosis",
+    };
 
   const res = await fetch(`${BACKEND_BASE}${path}`, {
     method: "POST",
@@ -80,7 +80,7 @@ const pushContextToBackends = async (sessionId, text) => {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ session_id: sessionId, transcript: text }),
     });
-  } catch {}
+  } catch { }
 
   try {
     await fetch(`${VOICE_BASE}/api/session-context`, {
@@ -88,7 +88,7 @@ const pushContextToBackends = async (sessionId, text) => {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ session_id: sessionId, transcript: text }),
     });
-  } catch {}
+  } catch { }
 };
 
 // tiny debounce so we don't spam context updates
@@ -261,7 +261,7 @@ function Donut({ value = 0, size = 140, stroke = 16, label = "" }) {
 }
 
 /* ---------- Second Opinion panel (with “Add” buttons) ---------- */
-function SecondOpinionPanel({ data, narrative, onAddLab = () => {} }) {
+function SecondOpinionPanel({ data, narrative, onAddLab = () => { } }) {
   const diffs = Array.isArray(data?.differential_diagnosis)
     ? data.differential_diagnosis
     : [];
@@ -512,7 +512,12 @@ const Chat = () => {
   const scrollAnchorRef = useRef(null);
   const audioPlayerRef = useRef(null);
   const toggleSfxRef = useRef(null);
-
+  // ⬇️ Add near other refs/states at the top of Chat component
+  const drgTriggeredRef = useRef(false);
+  const drgAnchorRef = useRef(null);
+  const drgBubbleRef = useRef(null);
+  const scrollToDrg = () =>
+    drgBubbleRef.current?.scrollIntoView({ behavior: "smooth", block: "center" });
   // ✅ Fresh session per mount (no localStorage persistence)
   // ✅ persistent across reloads (same behavior as the old working file)
   const [sessionId, setSessionId] = useState(() => {
@@ -542,7 +547,7 @@ const Chat = () => {
     return () => {
       try {
         toggleSfxRef.current?.unload();
-      } catch {}
+      } catch { }
     };
   }, []);
 
@@ -567,7 +572,13 @@ const Chat = () => {
     window.addEventListener("vrp:case-meta", onMeta);
     return () => window.removeEventListener("vrp:case-meta", onMeta);
   }, []);
-
+  useEffect(() => {
+    if (drgStore.open) {
+      requestAnimationFrame(() => {
+        drgAnchorRef.current?.scrollIntoView({ behavior: "smooth", block: "center" });
+      });
+    }
+  }, [drgStore.open]);
   // (Optional) Previously-approved labs loader removed from persistence; still safe to query server.
   // With fresh sessionId this will normally be empty, keeping table clean on refresh.
   useEffect(() => {
@@ -585,7 +596,7 @@ const Chat = () => {
             ensureLabOrdersBubble();
           }
         }
-      } catch {}
+      } catch { }
     })();
   }, [labSessionId]); // ⬅️ key change
 
@@ -701,7 +712,7 @@ const Chat = () => {
             })
           );
           channel.send(JSON.stringify({ type: "response.create" }));
-        } catch {}
+        } catch { }
 
         // ✅ PRIME the realtime session with the current chat context
         pushContextToBackends(sessionId, buildAgentContext());
@@ -730,7 +741,7 @@ const Chat = () => {
       offer.sdp = offer.sdp.replace(
         /a=rtpmap:\d+ opus\/48000\/2/g,
         "a=rtpmap:111 opus/48000/2\r\n" +
-          "a=fmtp:111 minptime=10;useinbandfec=1"
+        "a=fmtp:111 minptime=10;useinbandfec=1"
       );
       await pc.setLocalDescription(offer);
 
@@ -773,35 +784,35 @@ const Chat = () => {
   const closeVoiceSession = () => {
     try {
       stopAudio?.();
-    } catch {}
+    } catch { }
     try {
       const { setAudioScale } = useAudioForVisualizerStore.getState();
       setAudioScale(1);
-    } catch {}
+    } catch { }
     if (audioPlayerRef.current) {
       try {
         audioPlayerRef.current.pause();
-      } catch {}
+      } catch { }
       audioPlayerRef.current.srcObject = null;
       audioPlayerRef.current.src = "";
     }
     if (dataChannel && dataChannel.readyState !== "closed") {
       try {
         dataChannel.close();
-      } catch {}
+      } catch { }
     }
     if (peerConnection) {
       try {
         peerConnection.getSenders?.().forEach((s) => s.track?.stop());
-      } catch {}
+      } catch { }
       try {
         peerConnection.close();
-      } catch {}
+      } catch { }
     }
     if (localStream) {
       try {
         localStream.getTracks().forEach((t) => t.stop());
-      } catch {}
+      } catch { }
       localStream = null;
     }
     setDataChannel(null);
@@ -815,14 +826,14 @@ const Chat = () => {
     setIsVoiceMode(true);
     if (audioPlayerRef.current) {
       audioPlayerRef.current.muted = true;
-      audioPlayerRef.current.play().catch(() => {});
+      audioPlayerRef.current.play().catch(() => { });
     }
     try {
       if (toggleSfxRef.current) {
         toggleSfxRef.current.stop();
         toggleSfxRef.current.play();
       }
-    } catch {}
+    } catch { }
   };
 
   /* ---------- Labs: unified workflow ---------- */
@@ -941,7 +952,7 @@ const Chat = () => {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ session_id: labSessionId }),
-      }).catch(() => {});
+      }).catch(() => { });
     } finally {
       setLabOrders([]);
       setChats((p) => [
@@ -1017,9 +1028,9 @@ const Chat = () => {
             prev.map((m) =>
               m.id === placeholderId
                 ? {
-                    who: "bot",
-                    msg: "Couldn't render the pie chart. Please try again.",
-                  }
+                  who: "bot",
+                  msg: "Couldn't render the pie chart. Please try again.",
+                }
                 : m
             )
           );
@@ -1153,6 +1164,28 @@ const Chat = () => {
       }
       return updated;
     });
+    // keep store in sync (enables FAB logic, etc.)
+    try { drgStore.setSecondOpinion?.(ensureOpinionShape(tryParseJsonLoose(jsonRaw))); } catch { }
+    // run validation and scroll to the new bubble
+    try { drgStore.validateNow(BACKEND_BASE, sessionId); } catch { }
+    scrollToDrg();
+    // 🔗 DRG validator wiring (the piece that was missing)
+    if (shaped) {
+      try {
+        // 1) Provide the second opinion to the store so the FAB can appear
+        drgStore.setSecondOpinion(shaped);
+
+        // 2) Immediately run the validator once per generated opinion
+        if (!drgTriggeredRef.current && typeof drgStore.validateNow === "function") {
+          drgTriggeredRef.current = true;
+          drgStore.validateNow(BACKEND_BASE, sessionId);
+          // Optional: quick debug signal
+          console.debug("[DRG] validateNow() triggered after second opinion.");
+        }
+      } catch (e) {
+        console.error("DRG validator wiring failed:", e);
+      }
+    }
 
     opinionBufferRef.current = "";
     opinionStreamingRef.current = false;
@@ -1166,6 +1199,7 @@ const Chat = () => {
     const chunk = String(chunkOrFull || "");
     if (!opinionStreamingRef.current) {
       opinionStreamingRef.current = true;
+      drgTriggeredRef.current = false;
       opinionBufferRef.current = "";
       setChats((prev) => [...prev, { msg: "", who: "bot", streaming: true }]);
     }
@@ -1196,14 +1230,14 @@ const Chat = () => {
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ session_id: sessionId, transcript: t }),
         }
-      ).catch(() => {});
+      ).catch(() => { });
 
       // 2) Keep local stores in sync (unchanged)
       try {
         const store = useDosageStore.getState();
         store.setTranscript?.(t);
         store.setSessionId?.(sessionId);
-      } catch {}
+      } catch { }
 
       // 3) NEW: also push the *full* current context (transcript + second-opinion narrative + approved labs)
       //     This keeps the realtime voice session and backend perfectly in sync with the UI state.
@@ -1225,9 +1259,9 @@ const Chat = () => {
               headers: { "Content-Type": "application/json" },
               body: JSON.stringify({ session_id: sessionId, transcript: ctx }),
             }
-          ).catch(() => {});
+          ).catch(() => { });
         }
-      } catch {}
+      } catch { }
     } catch (e) {
       console.error("Failed to send transcript context:", e);
     }
@@ -1355,8 +1389,7 @@ const Chat = () => {
       labOrders
         .map(
           (l, i) =>
-            `${i + 1}. ${l.name}${l.priority ? ` [${l.priority}]` : ""}${
-              l.why ? ` — ${l.why}` : ""
+            `${i + 1}. ${l.name}${l.priority ? ` [${l.priority}]` : ""}${l.why ? ` — ${l.why}` : ""
             }`
         )
         .join("\n") || "None",
@@ -1472,9 +1505,8 @@ const Chat = () => {
           return (
             <div
               key={index}
-              className={`chat-message ${chat.who} ${chat.live ? "live" : ""} ${
-                chat.streaming ? "streaming" : ""
-              }`}
+              className={`chat-message ${chat.who} ${chat.live ? "live" : ""} ${chat.streaming ? "streaming" : ""
+                }`}
             >
               {chat.who === "bot" && (
                 <figure className="avatar">
@@ -1485,17 +1517,20 @@ const Chat = () => {
                 {isLabCard ? (
                   <LabsPanel labs={chat.labs} meta={chat.meta} />
                 ) : isSecondOpinion ? (
+
                   <SecondOpinionPanel
                     data={chat.opinion}
                     narrative={chat.narrative}
                     onAddLab={handleAddLabToTable}
                   />
+
                 ) : isLabOrders ? (
                   <LabOrdersTable
                     rows={labOrders}
                     onSend={sendLabOrdersToBackend}
                     sending={sendingToLab}
                   />
+
                 ) : chat?.type === "chart_pie" && chat.highchartsConfig ? (
                   <ChatBubbleChart config={chat.highchartsConfig} />
                 ) : chat?.type === "chart_pie_loading" ? (
@@ -1765,20 +1800,30 @@ const Chat = () => {
       {/* DRG Validator FAB + overlay */}
       {drgStore.iconVisible && (
         <button
-          className="drg-fab"
-          title="Open DRG Validator"
-          onClick={() => drgStore.validateNow(BACKEND_BASE, sessionId)}
+          className="drg-fab pulsing bouncing"
+          data-state={drgStore.open ? "open" : "closed"}
+          onClick={() => {
+            if (!drgStore.open) {
+              drgStore.validateNow?.(BACKEND_BASE, sessionId);
+              drgStore.toggleOpen?.(true);
+            } else {
+              drgStore.toggleOpen?.(false);
+            }
+          }}
+          title="DRG Validator"
+          aria-pressed={drgStore.open ? "true" : "false"}
         >
-          {/* Simple SVG badge */}
+          {/* Investigator / magnifier svg; inherits currentColor */}
           <svg viewBox="0 0 24 24" aria-hidden="true">
-            <path d="M12 2l3 3h5v5l3 3-3 3v5h-5l-3 3-3-3H4v-5l-3-3 3-3V5h5l3-3zM8 12a4 4 0 108 0 4 4 0 00-8 0z" />
+            <path d="M11 3a7 7 0 1 1-4.95 11.95l-3.4 3.4a1 1 0 0 1-1.41-1.42l3.4-3.4A7 7 0 0 1 11 3zm0 2a5 5 0 1 0 0 10 5 5 0 0 0 0-10zm7-3l1 3h-4l1-3h2z" />
+            <path d="M20.3 19.6l-3.2-3.2a1 1 0 1 1 1.4-1.4l3.2 3.2a1 1 0 1 1-1.4 1.4z" />
           </svg>
         </button>
       )}
 
-      {drgStore.open && (
-        <DRGValidator backendBase={BACKEND_BASE} sessionId={sessionId} />
-      )}
+      {/* DRG overlay lives globally; renders only when store.open is true */}
+      <DRGValidator backendBase={BACKEND_BASE} sessionId={sessionId} />
+
     </div>
   );
 };

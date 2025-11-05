@@ -1,6 +1,9 @@
 /* eslint-disable no-useless-concat */
 /* eslint-disable react-hooks/exhaustive-deps */
 // src/components/VoiceRecorderPanel.jsx
+/* eslint-disable no-useless-concat */
+/* eslint-disable react-hooks/exhaustive-deps */
+// src/components/VoiceRecorderPanel.jsx
 import React, { useRef, useState, useEffect, useId } from "react";
 import { createPortal } from "react-dom";
 import { ReactMic } from "react-mic";
@@ -11,8 +14,9 @@ import "../styles/VoiceRecorderPanel.css";
 /* =========================
    Config / Defaults
    ========================= */
-const API_BASE =  "https://ai-doctor-assistant-backend-server.onrender.com";
-const TRANSCRIPTION_BASE="https://test-medic-transcriber-latest.onrender.com"
+const API_BASE = "https://ai-doctor-assistant-backend-server.onrender.com";
+const TRANSCRIPTION_BASE = "https://test-medic-transcriber-latest.onrender.com";
+
 /* =========================
    Reference data (unchanged)
    ========================= */
@@ -32,6 +36,52 @@ const DEPARTMENTS = [
 const FLAT_DEPTS = DEPARTMENTS.flatMap(g => g.items.map(value => ({ value, group: g.group })));
 const normalize = (s) =>
   (s || "").toString().normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().trim();
+
+/* =========================
+   Helpers for JSON extraction (for DRG trigger)
+   ========================= */
+function extractJsonBlock(text = "") {
+  const fence = /```json([\s\S]*?)```/i.exec(text);
+  if (fence && fence[1]) return fence[1].trim();
+  const firstBrace = text.indexOf("{");
+  const lastBrace = text.lastIndexOf("}");
+  if (firstBrace !== -1 && lastBrace !== -1 && lastBrace > firstBrace) {
+    return text.slice(firstBrace, lastBrace + 1);
+  }
+  return null;
+}
+function tryParseJsonLoose(raw) {
+  if (!raw) return null;
+  let s = raw;
+  s = s
+    .replace(/[\u201C\u201D\u201E\u201F\u2033\u2036]/g, '"')
+    .replace(/[\u2018\u2019]/g, "'");
+  s = s.replace(/,\s*}/g, "}").replace(/,\s*]/g, "]");
+  try {
+    return JSON.parse(s);
+  } catch {
+    s = s.replace(/^\uFEFF/, "").replace(/```/g, "");
+    try { return JSON.parse(s); } catch { return null; }
+  }
+}
+function ensureOpinionShape(obj) {
+  if (!obj || typeof obj !== "object") return null;
+  const out = {
+    primary_diagnosis: obj.primary_diagnosis || null,
+    differential_diagnosis: Array.isArray(obj.differential_diagnosis) ? obj.differential_diagnosis : [],
+    recommended_labs: Array.isArray(obj.recommended_labs) ? obj.recommended_labs : [],
+    imaging: Array.isArray(obj.imaging) ? obj.imaging : [],
+    prescriptions: Array.isArray(obj.prescriptions) ? obj.prescriptions : [],
+    recommendations: Array.isArray(obj.recommendations) ? obj.recommendations : [],
+    treatment_plan: Array.isArray(obj.treatment_plan) ? obj.treatment_plan : [],
+    services: Array.isArray(obj.services) ? obj.services : [],
+  };
+  out.differential_diagnosis = out.differential_diagnosis.map((d) => {
+    const p = Math.max(0, Math.min(100, Math.round(Number(d?.probability_percent || 0))));
+    return { name: d?.name || "Unknown", probability_percent: p, icd10: d?.icd10 ? String(d.icd10) : null };
+  });
+  return out;
+}
 
 /* Debounce helper */
 function useDebounceTimer() {
@@ -370,7 +420,7 @@ const VoiceRecorderPanel = ({
 
         // Push final transcript into realtime analysis store for Notes generation
         try {
-          await fetch(rtAnalyzeUrl, {
+          await fetch(`${API_BASE}/rt/analyze_turn`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ session_id: sessionId, text: txt })
@@ -459,9 +509,18 @@ const VoiceRecorderPanel = ({
         const text = await resp.text();
         onOpinion && onOpinion(text, true);
         emit("vrp:second-opinion-ready", { text });
+
+        // 🔔 NEW: emit parsed JSON to trigger DRG FAB later in Chat.jsx
+        const rawJson = extractJsonBlock(text);
+        const shaped = ensureOpinionShape(tryParseJsonLoose(rawJson));
+        if (shaped) {
+          emit("vrp:second-opinion-json", { shaped, raw: rawJson, sessionId, fullText: text });
+        }
+
         setLoading(false);
         return;
       }
+
       const reader = resp.body.getReader();
       const dec = new TextDecoder("utf-8");
       let done = false, acc = "";
@@ -476,6 +535,13 @@ const VoiceRecorderPanel = ({
       }
       onOpinion && onOpinion(acc, true);
       emit("vrp:second-opinion-ready", { text: acc });
+
+      // 🔔 NEW: emit parsed JSON to trigger DRG FAB later in Chat.jsx
+      const rawJson = extractJsonBlock(acc);
+      const shaped = ensureOpinionShape(tryParseJsonLoose(rawJson));
+      if (shaped) {
+        emit("vrp:second-opinion-json", { shaped, raw: rawJson, sessionId, fullText: acc });
+      }
     } catch (e) {
       console.error("analyzeCase error:", e);
     } finally {
@@ -484,7 +550,6 @@ const VoiceRecorderPanel = ({
   };
 
   /* ================= Clinical Notes (callable by Chat.jsx) ================= */
-  // If you need to trigger this from here, wire a button or keep it event-driven from Chat.jsx.
   const generateNotes = async () => {
     if (!isTranscriptReady) return;
     try {
@@ -825,17 +890,3 @@ const VoiceRecorderPanel = ({
 };
 
 export default VoiceRecorderPanel;
-
-
-
-
-
-
-
-
-
-
-
-
-
-

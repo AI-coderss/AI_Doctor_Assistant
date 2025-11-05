@@ -1276,20 +1276,29 @@
 .ai-help { color: #6b7280; }
 /* =========================================
    DRG Validator — right dock (mirrors VoiceRecorderPanel)
-   Uses the same width/height variables so dimensions match exactly.
    ========================================= */
+
+/* Micro-size tokens for status & submit */
+:root{
+  --drg-pill-font: 9.5px;   /* status/nphies text size */
+  --drg-pill-py: 3px;       /* vertical padding */
+  --drg-pill-px: 8px;       /* horizontal padding */
+
+  --drg-submit-font: 10px;  /* Submit text size */
+  --drg-submit-py: 5px;     /* vertical padding */
+  --drg-submit-px: 10px;    /* horizontal padding */
+}
 
 /* Right dock container (same vertical bounds & width as VRP) */
 .drg-aside{
   position: fixed;
-  right: 16px;                                       /* mirror VRP left: 16px */
-  top: var(--dock-top, 80px);                        /* same vertical bounds */
+  right: 16px;
+  top: var(--dock-top, 80px);
   bottom: var(--dock-bottom, 120px);
-  width: var(--va-width, clamp(360px, 28vw, 450px)); /* EXACT same width */
+  width: var(--va-width, clamp(360px, 28vw, 450px));
   max-width: var(--va-width, clamp(360px, 28vw, 450px));
   z-index: 910;
 
-  /* slide in/out */
   transform: translateX(calc(100% + 24px));
   opacity: 0; visibility: hidden; pointer-events: none;
   transition: transform .25s ease, opacity .25s ease, visibility 0s linear .25s;
@@ -1353,10 +1362,11 @@
   width:100%; table-layout:fixed; border-collapse:separate; border-spacing:0;
   font-size:.88rem;
 }
+/* Make table headings very small */
 .drg-table thead th{
   position:sticky; top:0; z-index:1;
-  background:#f8fafc; text-align:left; padding:8px 10px;
-  border-bottom:1px solid #e5e7eb; font-weight:800; font-size:.78rem;
+  background:#f8fafc; text-align:left; padding:6px 8px;       /* tighter */
+  border-bottom:1px solid #e5e7eb; font-weight:800; font-size:.66rem; /* smaller */
 }
 .drg-table tbody td{
   padding:7px 10px; vertical-align:top; overflow-wrap:anywhere;
@@ -1374,29 +1384,39 @@
 
 /* DRG label compact (two lines) */
 .drg-code{ display:grid; gap:1px; }
-.drg-code-code{ font-weight:900; font-size:.86rem; line-height:1.05; }
+.drg-code-code{ font-weight:900; font-size:.82rem; line-height:1.05; }
 .drg-code-label{
-  font-size:.76rem; line-height:1.05; opacity:.80;
- 
+  font-size:.70rem; line-height:1.05; opacity:.80;
+  
 }
 
-/* Pills — extra small */
+/* ---------- Status/NPHIES pills — small text + comfy padding ---------- */
 .status-pill, .nphies-pill{
-  display:inline-block; padding:3px 6px; border-radius:9999px;
-  font-size:10.5px; font-weight:900; line-height:1; text-transform:uppercase; letter-spacing:.02em;
+  display:inline-block;
+  padding: var(--drg-pill-py) var(--drg-pill-px);
+  border-radius:9999px;
+  font-size: var(--drg-pill-font);
+  font-weight:900; line-height:1;
+  text-transform:uppercase; letter-spacing:.02em;
 }
 .status-pill.validated, .nphies-pill.ready{ background:#22c55e; color:#fff; }
 .status-pill.review, .nphies-pill.review{ background:#f59e0b; color:#0f1218; }
 .status-pill.flagged, .nphies-pill.denied{ background:#ef4444; color:#fff; }
 .nphies-pill.risk{ background:#f43f5e; color:#fff; }
 
-/* Actions — extra small but padded */
+/* ---------- Actions: small; Submit tuned with “well padding” ---------- */
 .drg-actions{ display:flex; gap:6px; flex-wrap:wrap; }
 .act-btn{
-  padding:4px 8px; border-radius:8px; border:0; cursor:pointer;
-  font-size:11px; font-weight:900; line-height:1;
+  padding:3px 6px; border-radius:8px; border:0; cursor:pointer;
+  font-size:10px; font-weight:900; line-height:1;
 }
-.act-btn.submit{ background:var(--primary, #6366f1); color:#fff; }
+.act-btn.submit{
+  /* keep text small but give better hit area */
+  font-size: var(--drg-submit-font);
+  padding: var(--drg-submit-py) var(--drg-submit-px);
+  border-radius: 9px;
+  background: var(--primary, #6366f1); color:#fff;
+}
 .act-btn.optimize{ background:#0ea5e9; color:#fff; }
 .act-btn.fix{ background:#22c55e; color:#fff; }
 
@@ -1465,7 +1485,6 @@
 /* =========================================
    Pulsing rectangular launcher button (replaces icon FAB)
    ========================================= */
-
 @keyframes drg-pulse {
   0%{ transform:translateY(0) scale(1); }
   50%{ transform:translateY(-1px) scale(1.06); }
@@ -1505,7 +1524,7 @@
   min-width: 160px;
   padding: 10px 16px;
   border: 0;
-  border-radius: 10px;              /* rectangular (not pill) */
+  border-radius: 10px;
   font-weight: 800;
   font-size: 0.95rem;
   letter-spacing: .02em;
@@ -1516,62 +1535,19 @@
   transition: transform .18s ease, box-shadow .18s ease, opacity .18s ease;
   animation: drg-pulse 2.2s infinite ease-in-out, drg-radiation 2.6s infinite ease-out;
 }
+.drg-fab .btn-label{ line-height:1; user-select:none; }
 
-/* Label inside the button */
-.drg-fab .btn-label{
-  line-height: 1;
-  user-select: none;
-}
-
-/* Hover lift */
 .drg-fab > button:hover,
 .drg-fab .btn:hover{
   transform: translateY(-1px) scale(1.03);
 }
-
-/* Active state tint (if you want visual toggle when panel open) */
 .drg-fab[data-state="active"] > button{
   background: linear-gradient(45deg, #10b981, #22c55e);
   box-shadow: 0 10px 22px rgba(34,197,94,.25);
 }
 
-/* Dark mode tiny tweak */
-:root[data-theme="dark"] .drg-fab > button{
-  box-shadow: 0 10px 22px rgba(99,102,241,.25);
-}
-
 /* =========================================
-   Extra-small typography asks (headers/status/actions even smaller)
-   ========================================= */
-
-/* Table headers — smaller & tighter */
-.drg-table thead th{
-  font-size: .68rem;     /* was .78rem */
-  padding: 6px 8px;
-  letter-spacing: .01em;
-}
-
-/* DRG block even tighter */
-.drg-code-code{ font-size: .82rem; }
-.drg-code-label{ font-size: .70rem; }
-
-/* Status/NPHIES pills — smaller text */
-.status-pill,
-.nphies-pill{
-  font-size: 9px;         /* down from ~10.5px */
-  padding: 2px 6px;
-}
-
-/* Actions — smaller text & buttons */
-.drg-actions{ gap: 5px; }
-.act-btn{
-  font-size: 10px;        /* down from 11px */
-  padding: 3px 6px;
-  border-radius: 7px;
-}
-
-/* =========================================
-   Responsive (optional mirror of VRP)
+   Responsive
    ========================================= */
 @media (max-width: 768px){
   .drg-aside{

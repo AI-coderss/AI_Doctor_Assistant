@@ -27,7 +27,8 @@ import CalculateDosageButton from "./CalculateDosageButton";
 import MedicalImageAnalyzer from "./MedicalImageAnalyzer";
 import ChatBubbleChart from "./ChatBubbleChart.jsx";
 import { Howl } from "howler";
-
+import useDRGValidatorStore from "../store/useDRGValidatorStore";
+import DRGValidator from "./DRGValidator";
 // 🧪 Lab Voice Agent (VAD, suggestions + approve)
 import LabVoiceAgent from "./LabVoiceAgent.jsx";
 
@@ -36,34 +37,39 @@ const BACKEND_BASE = "https://ai-doctor-assistant-backend-server.onrender.com"; 
 // ✅ one place to send context to both backends
 const VOICE_BASE = "https://ai-doctor-assistant-voice-mode-webrtc.onrender.com";
 // --- Highcharts Pie helpers ---
-async function requestPieFromDifferential({ sessionId, context, differential, title }) {
-  const path = differential ? '/viz/pie-config' : '/viz/pie-differential';
+async function requestPieFromDifferential({
+  sessionId,
+  context,
+  differential,
+  title,
+}) {
+  const path = differential ? "/viz/pie-config" : "/viz/pie-differential";
   const body = differential
     ? {
-      title: title || 'Differential diagnosis',
-      data: differential.map(d => ({
-        name: d.name,
-        y: d.probability_percent
-      }))
-    }
+        title: title || "Differential diagnosis",
+        data: differential.map((d) => ({
+          name: d.name,
+          y: d.probability_percent,
+        })),
+      }
     : {
-      session_id: sessionId,
-      context,
-      title: title || 'Differential diagnosis'
-    };
+        session_id: sessionId,
+        context,
+        title: title || "Differential diagnosis",
+      };
 
   const res = await fetch(`${BACKEND_BASE}${path}`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body),
-    credentials: 'include',
+    credentials: "include",
   });
-  if (!res.ok) throw new Error('Pie endpoint failed');
+  if (!res.ok) throw new Error("Pie endpoint failed");
   const json = await res.json();
   return json.config; // Highcharts config
 }
 function wantsPieChart(text) {
-  return /\b(pie\s*chart|piechart|byechart|byechat)\b/i.test(text || '');
+  return /\b(pie\s*chart|piechart|byechart|byechat)\b/i.test(text || "");
 }
 
 const pushContextToBackends = async (sessionId, text) => {
@@ -74,7 +80,7 @@ const pushContextToBackends = async (sessionId, text) => {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ session_id: sessionId, transcript: text }),
     });
-  } catch { }
+  } catch {}
 
   try {
     await fetch(`${VOICE_BASE}/api/session-context`, {
@@ -82,7 +88,7 @@ const pushContextToBackends = async (sessionId, text) => {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ session_id: sessionId, transcript: text }),
     });
-  } catch { }
+  } catch {}
 };
 
 // tiny debounce so we don't spam context updates
@@ -93,7 +99,6 @@ const useDebounced = () => {
     t.current = setTimeout(fn, ms);
   };
 };
-
 
 // 🧪 manual “add lab” chat command
 const ADD_LAB_CMD_RE = /^(?:add|order)\s+(?:lab|test)s?\s*[:\-]\s*(.+)$/i; // ✅ fixed char class
@@ -130,8 +135,12 @@ function ChartLoader() {
     <div className="chart-loader">
       <span className="chart-spinner" />
       <div>
-        <div style={{ fontWeight: 700, marginBottom: 2 }}>Generating pie chart…</div>
-        <div style={{ opacity: 0.8, fontSize: 13 }}>AI is preparing the differential diagnosis visualization.</div>
+        <div style={{ fontWeight: 700, marginBottom: 2 }}>
+          Generating pie chart…
+        </div>
+        <div style={{ opacity: 0.8, fontSize: 13 }}>
+          AI is preparing the differential diagnosis visualization.
+        </div>
       </div>
     </div>
   );
@@ -152,7 +161,9 @@ function extractJsonBlock(text = "") {
 function tryParseJsonLoose(raw) {
   if (!raw) return null;
   let s = raw;
-  s = s.replace(/[\u201C\u201D\u201E\u201F\u2033\u2036]/g, '"').replace(/[\u2018\u2019]/g, "'");
+  s = s
+    .replace(/[\u201C\u201D\u201E\u201F\u2033\u2036]/g, '"')
+    .replace(/[\u2018\u2019]/g, "'");
   s = s.replace(/,\s*}/g, "}").replace(/,\s*]/g, "]");
   try {
     return JSON.parse(s);
@@ -170,16 +181,25 @@ function ensureOpinionShape(obj) {
   if (!obj || typeof obj !== "object") return null;
   const out = {
     primary_diagnosis: obj.primary_diagnosis || null,
-    differential_diagnosis: Array.isArray(obj.differential_diagnosis) ? obj.differential_diagnosis : [],
-    recommended_labs: Array.isArray(obj.recommended_labs) ? obj.recommended_labs : [],
+    differential_diagnosis: Array.isArray(obj.differential_diagnosis)
+      ? obj.differential_diagnosis
+      : [],
+    recommended_labs: Array.isArray(obj.recommended_labs)
+      ? obj.recommended_labs
+      : [],
     imaging: Array.isArray(obj.imaging) ? obj.imaging : [],
     prescriptions: Array.isArray(obj.prescriptions) ? obj.prescriptions : [],
-    recommendations: Array.isArray(obj.recommendations) ? obj.recommendations : [],
+    recommendations: Array.isArray(obj.recommendations)
+      ? obj.recommendations
+      : [],
     treatment_plan: Array.isArray(obj.treatment_plan) ? obj.treatment_plan : [],
     services: Array.isArray(obj.services) ? obj.services : [],
   };
   out.differential_diagnosis = out.differential_diagnosis.map((d) => {
-    const p = Math.max(0, Math.min(100, Math.round(Number(d?.probability_percent || 0))));
+    const p = Math.max(
+      0,
+      Math.min(100, Math.round(Number(d?.probability_percent || 0)))
+    );
     return {
       name: d?.name || "Unknown",
       probability_percent: p,
@@ -199,8 +219,21 @@ function Donut({ value = 0, size = 140, stroke = 16, label = "" }) {
     cy = size / 2;
 
   return (
-    <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`} role="img" aria-label={`${label} ${v}%`}>
-      <circle cx={cx} cy={cy} r={r} strokeWidth={stroke} stroke="var(--donut-track)" fill="none" />
+    <svg
+      width={size}
+      height={size}
+      viewBox={`0 0 ${size} ${size}`}
+      role="img"
+      aria-label={`${label} ${v}%`}
+    >
+      <circle
+        cx={cx}
+        cy={cy}
+        r={r}
+        strokeWidth={stroke}
+        stroke="var(--donut-track)"
+        fill="none"
+      />
       <circle
         cx={cx}
         cy={cy}
@@ -212,7 +245,15 @@ function Donut({ value = 0, size = 140, stroke = 16, label = "" }) {
         transform={`rotate(-90 ${cx} ${cy})`}
         fill="none"
       />
-      <text x="50%" y="50%" dominantBaseline="central" textAnchor="middle" fontSize="18" fontWeight="800" fill="var(--donut-text)">
+      <text
+        x="50%"
+        y="50%"
+        dominantBaseline="central"
+        textAnchor="middle"
+        fontSize="18"
+        fontWeight="800"
+        fill="var(--donut-text)"
+      >
         {v}%
       </text>
     </svg>
@@ -220,8 +261,10 @@ function Donut({ value = 0, size = 140, stroke = 16, label = "" }) {
 }
 
 /* ---------- Second Opinion panel (with “Add” buttons) ---------- */
-function SecondOpinionPanel({ data, narrative, onAddLab = () => { } }) {
-  const diffs = Array.isArray(data?.differential_diagnosis) ? data.differential_diagnosis : [];
+function SecondOpinionPanel({ data, narrative, onAddLab = () => {} }) {
+  const diffs = Array.isArray(data?.differential_diagnosis)
+    ? data.differential_diagnosis
+    : [];
   const primary = data?.primary_diagnosis;
 
   return (
@@ -231,7 +274,11 @@ function SecondOpinionPanel({ data, narrative, onAddLab = () => { } }) {
           <div className="so-title">AI Second Opinion</div>
           {primary?.name && (
             <div className="so-sub">
-              Primary diagnosis: <span className="so-chip">{primary.name}{primary.icd10 ? ` • ${primary.icd10}` : ""}</span>
+              Primary diagnosis:{" "}
+              <span className="so-chip">
+                {primary.name}
+                {primary.icd10 ? ` • ${primary.icd10}` : ""}
+              </span>
             </div>
           )}
         </div>
@@ -239,15 +286,21 @@ function SecondOpinionPanel({ data, narrative, onAddLab = () => { } }) {
 
       {diffs.length > 0 && (
         <div className="so-section" style={{ marginBottom: 12 }}>
-          <div className="so-sec-title">Differential diagnosis (probabilities)</div>
+          <div className="so-sec-title">
+            Differential diagnosis (probabilities)
+          </div>
           <div className="so-diffs">
             {diffs.map((d, i) => (
               <div className="so-diff-item" key={i}>
                 <Donut value={d.probability_percent} label={d.name} />
                 <div className="so-diff-meta">
                   <div className="so-diff-name">{d.name}</div>
-                  <div className="so-diff-sub">Probability: <b>{d.probability_percent}%</b></div>
-                  <div className="so-diff-sub">ICD-10: <code>{d.icd10 || "—"}</code></div>
+                  <div className="so-diff-sub">
+                    Probability: <b>{d.probability_percent}%</b>
+                  </div>
+                  <div className="so-diff-sub">
+                    ICD-10: <code>{d.icd10 || "—"}</code>
+                  </div>
                 </div>
               </div>
             ))}
@@ -270,7 +323,9 @@ function SecondOpinionPanel({ data, narrative, onAddLab = () => { } }) {
               {diffs.map((d, i) => (
                 <tr key={i}>
                   <td>{d.name}</td>
-                  <td><code>{d.icd10 || "—"}</code></td>
+                  <td>
+                    <code>{d.icd10 || "—"}</code>
+                  </td>
                   <td>{d.probability_percent}%</td>
                 </tr>
               ))}
@@ -282,7 +337,9 @@ function SecondOpinionPanel({ data, narrative, onAddLab = () => { } }) {
       <div className="so-grid" style={{ marginBottom: 12 }}>
         {data?.recommended_labs?.length > 0 && (
           <div className="so-section">
-            <div className="so-sec-title">Recommended lab tests & investigations</div>
+            <div className="so-sec-title">
+              Recommended lab tests & investigations
+            </div>
             <ul style={{ margin: 0, paddingLeft: 0 }}>
               {data.recommended_labs.map((t, i) => (
                 <li key={i} className="lab-rec-item">
@@ -290,7 +347,9 @@ function SecondOpinionPanel({ data, narrative, onAddLab = () => { } }) {
                   <button
                     className="add-lab-btn"
                     title="Add to Approved Lab Tests"
-                    onClick={() => onAddLab({ name: t, priority: "Low", why: "" })}
+                    onClick={() =>
+                      onAddLab({ name: t, priority: "Low", why: "" })
+                    }
                   >
                     <FaPlus /> Add
                   </button>
@@ -303,7 +362,9 @@ function SecondOpinionPanel({ data, narrative, onAddLab = () => { } }) {
           <div className="so-section">
             <div className="so-sec-title">Imaging / Radiology</div>
             <ul style={{ margin: 0, paddingLeft: 18 }}>
-              {data.imaging.map((t, i) => <li key={i}>{t}</li>)}
+              {data.imaging.map((t, i) => (
+                <li key={i}>{t}</li>
+              ))}
             </ul>
           </div>
         )}
@@ -311,7 +372,9 @@ function SecondOpinionPanel({ data, narrative, onAddLab = () => { } }) {
           <div className="so-section">
             <div className="so-sec-title">Drug prescriptions</div>
             <ul style={{ margin: 0, paddingLeft: 18 }}>
-              {data.prescriptions.map((t, i) => <li key={i}>{t}</li>)}
+              {data.prescriptions.map((t, i) => (
+                <li key={i}>{t}</li>
+              ))}
             </ul>
           </div>
         )}
@@ -319,7 +382,9 @@ function SecondOpinionPanel({ data, narrative, onAddLab = () => { } }) {
           <div className="so-section">
             <div className="so-sec-title">Recommendations to the doctor</div>
             <ul style={{ margin: 0, paddingLeft: 18 }}>
-              {data.recommendations.map((t, i) => <li key={i}>{t}</li>)}
+              {data.recommendations.map((t, i) => (
+                <li key={i}>{t}</li>
+              ))}
             </ul>
           </div>
         )}
@@ -327,7 +392,9 @@ function SecondOpinionPanel({ data, narrative, onAddLab = () => { } }) {
           <div className="so-section">
             <div className="so-sec-title">Treatment plan</div>
             <ul style={{ margin: 0, paddingLeft: 18 }}>
-              {data.treatment_plan.map((t, i) => <li key={i}>{t}</li>)}
+              {data.treatment_plan.map((t, i) => (
+                <li key={i}>{t}</li>
+              ))}
             </ul>
           </div>
         )}
@@ -335,7 +402,9 @@ function SecondOpinionPanel({ data, narrative, onAddLab = () => { } }) {
           <div className="so-section">
             <div className="so-sec-title">Services / Referrals</div>
             <ul style={{ margin: 0, paddingLeft: 18 }}>
-              {data.services.map((t, i) => <li key={i}>{t}</li>)}
+              {data.services.map((t, i) => (
+                <li key={i}>{t}</li>
+              ))}
             </ul>
           </div>
         )}
@@ -343,7 +412,9 @@ function SecondOpinionPanel({ data, narrative, onAddLab = () => { } }) {
 
       {narrative && (
         <div className="so-narrative">
-          <div className="so-sec-title" style={{ marginBottom: 6 }}>Narrative</div>
+          <div className="so-sec-title" style={{ marginBottom: 6 }}>
+            Narrative
+          </div>
           <ReactMarkdown remarkPlugins={[remarkGfm]}>{narrative}</ReactMarkdown>
         </div>
       )}
@@ -356,7 +427,8 @@ function LabOrdersTable({ rows = [], onSend, sending }) {
   const badge = (p) => {
     const s = String(p || "").toLowerCase();
     if (s === "high") return <span className="prio-pill prio-high">High</span>;
-    if (s === "medium") return <span className="prio-pill prio-medium">Medium</span>;
+    if (s === "medium")
+      return <span className="prio-pill prio-medium">Medium</span>;
     return <span className="prio-pill prio-low">Low</span>;
   };
 
@@ -375,7 +447,11 @@ function LabOrdersTable({ rows = [], onSend, sending }) {
         </thead>
         <tbody>
           {rows.length === 0 ? (
-            <tr><td colSpan={3} style={{ padding: "14px" }}><em>No tests added yet.</em></td></tr>
+            <tr>
+              <td colSpan={3} style={{ padding: "14px" }}>
+                <em>No tests added yet.</em>
+              </td>
+            </tr>
           ) : (
             rows.map((r, i) => (
               <tr key={`${r.name}-${i}`}>
@@ -389,7 +465,11 @@ function LabOrdersTable({ rows = [], onSend, sending }) {
       </table>
 
       <div className="send-lab-wrap">
-        <button className="send-lab-btn" disabled={!rows.length || sending} onClick={onSend}>
+        <button
+          className="send-lab-btn"
+          disabled={!rows.length || sending}
+          onClick={onSend}
+        >
           <FaPaperPlane /> {sending ? "Sending…" : "Send to Lab"}
         </button>
       </div>
@@ -399,7 +479,10 @@ function LabOrdersTable({ rows = [], onSend, sending }) {
 
 const Chat = () => {
   const [chats, setChats] = useState([
-    { msg: "Hi there! How can I assist you today with your Medical questions?", who: "bot" },
+    {
+      msg: "Hi there! How can I assist you today with your Medical questions?",
+      who: "bot",
+    },
   ]);
 
   // Single source of truth for approved labs in UI
@@ -425,7 +508,7 @@ const Chat = () => {
   const { audioScale } = useAudioForVisualizerStore();
   // ⬇️ Add near other refs/states at the top of Chat component
   const seenIdsRef = useRef(new Set());
-
+  const drgStore = useDRGValidatorStore();
   const scrollAnchorRef = useRef(null);
   const audioPlayerRef = useRef(null);
   const toggleSfxRef = useRef(null);
@@ -451,8 +534,16 @@ const Chat = () => {
   const finalizeTimerRef = useRef(null);
 
   useEffect(() => {
-    toggleSfxRef.current = new Howl({ src: ["/assistant.mp3"], volume: 0.2, preload: true });
-    return () => { try { toggleSfxRef.current?.unload(); } catch { } };
+    toggleSfxRef.current = new Howl({
+      src: ["/assistant.mp3"],
+      volume: 0.2,
+      preload: true,
+    });
+    return () => {
+      try {
+        toggleSfxRef.current?.unload();
+      } catch {}
+    };
   }, []);
 
   useEffect(() => {
@@ -467,13 +558,26 @@ const Chat = () => {
       setIsMicActive(false);
     };
   }, [dataChannel, micStream, peerConnection]);
+  // Listen for case metadata updates
+  useEffect(() => {
+    const onMeta = (e) => {
+      if (!e?.detail?.patientId) return;
+      drgStore.setPatientId(e.detail.patientId);
+    };
+    window.addEventListener("vrp:case-meta", onMeta);
+    return () => window.removeEventListener("vrp:case-meta", onMeta);
+  }, []);
 
   // (Optional) Previously-approved labs loader removed from persistence; still safe to query server.
   // With fresh sessionId this will normally be empty, keeping table clean on refresh.
   useEffect(() => {
     (async () => {
       try {
-        const res = await fetch(`${BACKEND_BASE}/lab-agent/list?session_id=${encodeURIComponent(labSessionId)}`);
+        const res = await fetch(
+          `${BACKEND_BASE}/lab-agent/list?session_id=${encodeURIComponent(
+            labSessionId
+          )}`
+        );
         if (res.ok) {
           const data = await res.json();
           if (Array.isArray(data?.labs) && data.labs.length) {
@@ -481,7 +585,7 @@ const Chat = () => {
             ensureLabOrdersBubble();
           }
         }
-      } catch { }
+      } catch {}
     })();
   }, [labSessionId]); // ⬅️ key change
 
@@ -498,16 +602,24 @@ const Chat = () => {
     if (isStreaming && liveIdxRef.current !== null) {
       setChats((prev) => {
         const arr = [...prev];
-        arr[liveIdxRef.current] = { ...arr[liveIdxRef.current], msg: liveText || "" };
+        arr[liveIdxRef.current] = {
+          ...arr[liveIdxRef.current],
+          msg: liveText || "",
+        };
         return arr;
       });
     }
-    if (!isStreaming && liveIdxRef.current !== null && !finalizeTimerRef.current) {
+    if (
+      !isStreaming &&
+      liveIdxRef.current !== null &&
+      !finalizeTimerRef.current
+    ) {
       finalizeTimerRef.current = setTimeout(() => {
         setChats((prev) => {
           const arr = [...prev];
           const idx = liveIdxRef.current;
-          if (arr[idx]) arr[idx] = { msg: liveText || arr[idx].msg || "", who: "me" };
+          if (arr[idx])
+            arr[idx] = { msg: liveText || arr[idx].msg || "", who: "me" };
           return arr;
         });
         liveIdxRef.current = null;
@@ -535,7 +647,9 @@ const Chat = () => {
       setMicStream(stream);
       stream.getAudioTracks().forEach((track) => (track.enabled = true));
 
-      const pc = new RTCPeerConnection({ iceServers: [{ urls: "stun:stun.l.google.com:19302" }] });
+      const pc = new RTCPeerConnection({
+        iceServers: [{ urls: "stun:stun.l.google.com:19302" }],
+      });
       setPeerConnection(pc); // ✅ persist
 
       pc.ontrack = (event) => {
@@ -544,7 +658,9 @@ const Chat = () => {
         audioPlayerRef.current.srcObject = s;
         setAudioUrl(s);
         audioPlayerRef.current.muted = false;
-        audioPlayerRef.current.play().catch((err) => console.error("live stream play failed:", err));
+        audioPlayerRef.current
+          .play()
+          .catch((err) => console.error("live stream play failed:", err));
       };
       pc.oniceconnectionstatechange = () => {
         if (pc.iceConnectionState === "failed") {
@@ -555,13 +671,18 @@ const Chat = () => {
       };
       pc.onicecandidateerror = (e) => console.error("ICE candidate error:", e);
       pc.onconnectionstatechange = () => {
-        if (pc.connectionState === "closed" || pc.connectionState === "failed") {
+        if (
+          pc.connectionState === "closed" ||
+          pc.connectionState === "failed"
+        ) {
           setConnectionStatus("error");
           setIsMicActive(false);
         }
       };
 
-      stream.getAudioTracks().forEach((track) => pc.addTrack(track, localStream));
+      stream
+        .getAudioTracks()
+        .forEach((track) => pc.addTrack(track, localStream));
 
       const channel = pc.createDataChannel("response");
       setDataChannel(channel); // ✅ persist
@@ -569,17 +690,26 @@ const Chat = () => {
         setConnectionStatus("connected");
         setIsMicActive(true);
         try {
-          channel.send(JSON.stringify({
-            type: "conversation.item.create",
-            item: { type: "message", role: "user", content: [{ type: "input_text", text: "hola" }] },
-          }));
+          channel.send(
+            JSON.stringify({
+              type: "conversation.item.create",
+              item: {
+                type: "message",
+                role: "user",
+                content: [{ type: "input_text", text: "hola" }],
+              },
+            })
+          );
           channel.send(JSON.stringify({ type: "response.create" }));
-        } catch { }
+        } catch {}
 
         // ✅ PRIME the realtime session with the current chat context
         pushContextToBackends(sessionId, buildAgentContext());
 
-        if (localStream) localStream.getAudioTracks().forEach((track) => (track.enabled = true));
+        if (localStream)
+          localStream
+            .getAudioTracks()
+            .forEach((track) => (track.enabled = true));
       };
 
       channel.onclose = () => {
@@ -593,18 +723,30 @@ const Chat = () => {
       };
 
       // ✅ Create offer, mutate THE SAME SDP, setLocalDescription(offer), and POST offer.sdp
-      let offer = await pc.createOffer({ offerToReceiveAudio: true, offerToReceiveVideo: false });
+      let offer = await pc.createOffer({
+        offerToReceiveAudio: true,
+        offerToReceiveVideo: false,
+      });
       offer.sdp = offer.sdp.replace(
         /a=rtpmap:\d+ opus\/48000\/2/g,
-        "a=rtpmap:111 opus/48000/2\r\n" + "a=fmtp:111 minptime=10;useinbandfec=1"
+        "a=rtpmap:111 opus/48000/2\r\n" +
+          "a=fmtp:111 minptime=10;useinbandfec=1"
       );
       await pc.setLocalDescription(offer);
 
       const res = await fetch(
         `https://ai-doctor-assistant-voice-mode-webrtc.onrender.com/api/rtc-connect?session_id=${sessionId}`,
-        { method: "POST", headers: { "Content-Type": "application/sdp", "X-Session-Id": sessionId }, body: offer.sdp }
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/sdp",
+            "X-Session-Id": sessionId,
+          },
+          body: offer.sdp,
+        }
       );
-      if (!res.ok) throw new Error(`Server responded with status ${res.status}`);
+      if (!res.ok)
+        throw new Error(`Server responded with status ${res.status}`);
       const answer = await res.text();
       await pc.setRemoteDescription({ type: "answer", sdp: answer });
     } catch (error) {
@@ -622,30 +764,44 @@ const Chat = () => {
     if (connectionStatus === "connected" && localStream) {
       const newMicState = !isMicActive;
       setIsMicActive(newMicState);
-      localStream.getAudioTracks().forEach((track) => (track.enabled = newMicState));
+      localStream
+        .getAudioTracks()
+        .forEach((track) => (track.enabled = newMicState));
     }
   };
 
   const closeVoiceSession = () => {
-    try { stopAudio?.(); } catch { }
+    try {
+      stopAudio?.();
+    } catch {}
     try {
       const { setAudioScale } = useAudioForVisualizerStore.getState();
       setAudioScale(1);
-    } catch { }
+    } catch {}
     if (audioPlayerRef.current) {
-      try { audioPlayerRef.current.pause(); } catch { }
+      try {
+        audioPlayerRef.current.pause();
+      } catch {}
       audioPlayerRef.current.srcObject = null;
       audioPlayerRef.current.src = "";
     }
     if (dataChannel && dataChannel.readyState !== "closed") {
-      try { dataChannel.close(); } catch { }
+      try {
+        dataChannel.close();
+      } catch {}
     }
     if (peerConnection) {
-      try { peerConnection.getSenders?.().forEach((s) => s.track?.stop()); } catch { }
-      try { peerConnection.close(); } catch { }
+      try {
+        peerConnection.getSenders?.().forEach((s) => s.track?.stop());
+      } catch {}
+      try {
+        peerConnection.close();
+      } catch {}
     }
     if (localStream) {
-      try { localStream.getTracks().forEach((t) => t.stop()); } catch { }
+      try {
+        localStream.getTracks().forEach((t) => t.stop());
+      } catch {}
       localStream = null;
     }
     setDataChannel(null);
@@ -659,14 +815,14 @@ const Chat = () => {
     setIsVoiceMode(true);
     if (audioPlayerRef.current) {
       audioPlayerRef.current.muted = true;
-      audioPlayerRef.current.play().catch(() => { });
+      audioPlayerRef.current.play().catch(() => {});
     }
     try {
       if (toggleSfxRef.current) {
         toggleSfxRef.current.stop();
         toggleSfxRef.current.play();
       }
-    } catch { }
+    } catch {}
   };
 
   /* ---------- Labs: unified workflow ---------- */
@@ -694,10 +850,16 @@ const Chat = () => {
         body: JSON.stringify({ session_id: labSessionId, items: labOrders }),
       });
       if (!res.ok) throw new Error(`/lab-agent/send ${res.status}`);
-      setChats((prev) => [...prev, { who: "bot", msg: "✅ Lab orders sent successfully." }]);
+      setChats((prev) => [
+        ...prev,
+        { who: "bot", msg: "✅ Lab orders sent successfully." },
+      ]);
     } catch (e) {
       console.error("sendLabOrdersToBackend error:", e);
-      setChats((prev) => [...prev, { who: "bot", msg: "⚠️ Failed to send lab orders. Please try again." }]);
+      setChats((prev) => [
+        ...prev,
+        { who: "bot", msg: "⚠️ Failed to send lab orders. Please try again." },
+      ]);
     } finally {
       setSendingToLab(false);
     }
@@ -779,10 +941,13 @@ const Chat = () => {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ session_id: labSessionId }),
-      }).catch(() => { });
+      }).catch(() => {});
     } finally {
       setLabOrders([]);
-      setChats((p) => [...p, { who: "bot", msg: "🧹 Session ended. Starting a new one." }]);
+      setChats((p) => [
+        ...p,
+        { who: "bot", msg: "🧹 Session ended. Starting a new one." },
+      ]);
 
       // Start a brand-new, ephemeral Lab case id
       setLabSessionId(crypto.randomUUID());
@@ -791,110 +956,143 @@ const Chat = () => {
     }
   };
 
-
   // Text chat submit (includes small “add lab:” command)
   // ⬇️ Replace the whole handleNewMessage with this
-  const handleNewMessage = useCallback(async ({ text, skipEcho = false, id }) => {
-    const trimmed = (text || "").trim();
-    if (!trimmed) return;
+  const handleNewMessage = useCallback(
+    async ({ text, skipEcho = false, id }) => {
+      const trimmed = (text || "").trim();
+      if (!trimmed) return;
 
-    // hard dedupe at entry using the id from ChatInputWidget
-    if (id) {
-      if (seenIdsRef.current.has(id)) return;
-      seenIdsRef.current.add(id);
-    }
+      // hard dedupe at entry using the id from ChatInputWidget
+      if (id) {
+        if (seenIdsRef.current.has(id)) return;
+        seenIdsRef.current.add(id);
+      }
 
-    // user bubble: exactly once
-    if (!skipEcho) {
-      setChats((prev) => [...prev, { id: id || `u-${Date.now()}`, msg: trimmed, who: "me" }]);
-    }
+      // user bubble: exactly once
+      if (!skipEcho) {
+        setChats((prev) => [
+          ...prev,
+          { id: id || `u-${Date.now()}`, msg: trimmed, who: "me" },
+        ]);
+      }
 
-    // --- Pie chart trigger ---
-    if (wantsPieChart(trimmed)) {
-      const placeholderId = crypto.randomUUID();
-      setChats((prev) => [
-        ...prev,
-        { who: "bot", type: "chart_pie_loading", id: placeholderId }
-      ]);
+      // --- Pie chart trigger ---
+      if (wantsPieChart(trimmed)) {
+        const placeholderId = crypto.randomUUID();
+        setChats((prev) => [
+          ...prev,
+          { who: "bot", type: "chart_pie_loading", id: placeholderId },
+        ]);
 
-      try {
-        const context = (typeof buildAgentContext === 'function' ? buildAgentContext() : '') || trimmed;
-        const config = await requestPieFromDifferential({
-          sessionId,
-          context,
-          title: 'Differential diagnosis',
-        });
-        config.chart = { height: 420, spacing: [16, 16, 16, 16], ...(config.chart || {}) };
-        config.plotOptions = {
-          pie: { size: '85%', ...(config.plotOptions?.pie || {}) },
-          ...(config.plotOptions || {})
+        try {
+          const context =
+            (typeof buildAgentContext === "function"
+              ? buildAgentContext()
+              : "") || trimmed;
+          const config = await requestPieFromDifferential({
+            sessionId,
+            context,
+            title: "Differential diagnosis",
+          });
+          config.chart = {
+            height: 420,
+            spacing: [16, 16, 16, 16],
+            ...(config.chart || {}),
+          };
+          config.plotOptions = {
+            pie: { size: "85%", ...(config.plotOptions?.pie || {}) },
+            ...(config.plotOptions || {}),
+          };
+
+          setChats((prev) =>
+            prev.map((m) =>
+              m.id === placeholderId
+                ? { who: "bot", type: "chart_pie", highchartsConfig: config }
+                : m
+            )
+          );
+        } catch {
+          setChats((prev) =>
+            prev.map((m) =>
+              m.id === placeholderId
+                ? {
+                    who: "bot",
+                    msg: "Couldn't render the pie chart. Please try again.",
+                  }
+                : m
+            )
+          );
+        }
+        return; // do not stream this text to /stream
+      }
+
+      // --- Manual "add lab:" command ---
+      const cmd = trimmed.match(ADD_LAB_CMD_RE);
+      if (cmd && cmd[1]) {
+        const raw = cmd[1].trim();
+        const item = {
+          name: raw.replace(/\s{2,}/g, " "),
+          why: "(user requested via chat)",
+          priority: "Low",
         };
-
-        setChats((prev) => prev.map((m) =>
-          m.id === placeholderId ? { who: 'bot', type: 'chart_pie', highchartsConfig: config } : m
-        ));
-      } catch {
-        setChats((prev) => prev.map((m) =>
-          m.id === placeholderId ? { who: 'bot', msg: "Couldn't render the pie chart. Please try again." } : m
-        ));
-      }
-      return; // do not stream this text to /stream
-    }
-
-    // --- Manual "add lab:" command ---
-    const cmd = trimmed.match(ADD_LAB_CMD_RE);
-    if (cmd && cmd[1]) {
-      const raw = cmd[1].trim();
-      const item = { name: raw.replace(/\s{2,}/g, " "), why: "(user requested via chat)", priority: "Low" };
-      await handleAddLabToTable(item);
-      return; // ❗ no second echo here
-    }
-
-    // --- normal streaming call (no second user echo) ---
-    const res = await fetch(`${BACKEND_BASE}/stream`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ message: trimmed, session_id: sessionId }),
-    });
-
-    if (!res.ok || !res.body) {
-      setChats((prev) => [...prev, { msg: "Something went wrong.", who: "bot" }]);
-      return;
-    }
-
-    const reader = res.body.getReader();
-    const decoder = new TextDecoder();
-    let message = "";
-    let isFirstChunk = true;
-
-    while (true) {
-      const { value, done } = await reader.read();
-      if (done) break;
-      const chunk = decoder.decode(value, { stream: true });
-
-      if (isFirstChunk) {
-        setChats((prev) => [...prev, { msg: "", who: "bot", streaming: true }]);
-        isFirstChunk = false;
+        await handleAddLabToTable(item);
+        return; // ❗ no second echo here
       }
 
-      message += chunk;
+      // --- normal streaming call (no second user echo) ---
+      const res = await fetch(`${BACKEND_BASE}/stream`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ message: trimmed, session_id: sessionId }),
+      });
+
+      if (!res.ok || !res.body) {
+        setChats((prev) => [
+          ...prev,
+          { msg: "Something went wrong.", who: "bot" },
+        ]);
+        return;
+      }
+
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+      let message = "";
+      let isFirstChunk = true;
+
+      while (true) {
+        const { value, done } = await reader.read();
+        if (done) break;
+        const chunk = decoder.decode(value, { stream: true });
+
+        if (isFirstChunk) {
+          setChats((prev) => [
+            ...prev,
+            { msg: "", who: "bot", streaming: true },
+          ]);
+          isFirstChunk = false;
+        }
+
+        message += chunk;
+        setChats((prev) => {
+          const updated = [...prev];
+          updated[updated.length - 1].msg = message;
+          return updated;
+        });
+      }
+
       setChats((prev) => {
         const updated = [...prev];
-        updated[updated.length - 1].msg = message;
+        const last = updated[updated.length - 1];
+        if (last && last.streaming) {
+          last.streaming = false;
+          last.msg = normalizeMarkdown(last.msg);
+        }
         return updated;
       });
-    }
-
-    setChats((prev) => {
-      const updated = [...prev];
-      const last = updated[updated.length - 1];
-      if (last && last.streaming) {
-        last.streaming = false;
-        last.msg = normalizeMarkdown(last.msg);
-      }
-      return updated;
-    });
-  }, [sessionId, setChats]);
+    },
+    [sessionId, setChats]
+  );
 
   // Markdown renderer (kept as-is) w/ Mermaid support
   const renderMessage = (message) => {
@@ -940,7 +1138,10 @@ const Chat = () => {
         updated.pop();
       }
       if (shaped) {
-        const prose = full.replace(jsonRaw || "", "").replace(/```json[\s\S]*?```/i, "").trim();
+        const prose = full
+          .replace(jsonRaw || "", "")
+          .replace(/```json[\s\S]*?```/i, "")
+          .trim();
         updated.push({
           who: "bot",
           type: "secondOpinion",
@@ -978,44 +1179,67 @@ const Chat = () => {
 
   const handleAssistantContextTranscript = async (transcript) => {
     try {
-      const t = (transcript || "").trim(); if (!t) return;
+      const t = (transcript || "").trim();
+      if (!t) return;
 
       // 1) Preserve existing behavior: push raw transcript to both backends
       await fetch(`${BACKEND_BASE}/set-context`, {
-        method: "POST", headers: { "Content-Type": "application/json" },
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ session_id: sessionId, transcript: t }),
       });
 
-      fetch("https://ai-doctor-assistant-voice-mode-webrtc.onrender.com/api/session-context", {
-        method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ session_id: sessionId, transcript: t }),
-      }).catch(() => { });
+      fetch(
+        "https://ai-doctor-assistant-voice-mode-webrtc.onrender.com/api/session-context",
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ session_id: sessionId, transcript: t }),
+        }
+      ).catch(() => {});
 
       // 2) Keep local stores in sync (unchanged)
       try {
         const store = useDosageStore.getState();
         store.setTranscript?.(t);
         store.setSessionId?.(sessionId);
-      } catch { }
+      } catch {}
 
       // 3) NEW: also push the *full* current context (transcript + second-opinion narrative + approved labs)
       //     This keeps the realtime voice session and backend perfectly in sync with the UI state.
       try {
-        const ctx = (typeof buildAgentContext === "function" ? buildAgentContext() : "").trim();
+        const ctx = (
+          typeof buildAgentContext === "function" ? buildAgentContext() : ""
+        ).trim();
         if (ctx) {
           // Fire-and-forget to voice server (non-blocking), await app backend (same pattern as above)
           await fetch(`${BACKEND_BASE}/set-context`, {
-            method: "POST", headers: { "Content-Type": "application/json" },
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ session_id: sessionId, transcript: ctx }),
           });
-          fetch("https://ai-doctor-assistant-voice-mode-webrtc.onrender.com/api/session-context", {
-            method: "POST", headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ session_id: sessionId, transcript: ctx }),
-          }).catch(() => { });
+          fetch(
+            "https://ai-doctor-assistant-voice-mode-webrtc.onrender.com/api/session-context",
+            {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ session_id: sessionId, transcript: ctx }),
+            }
+          ).catch(() => {});
         }
-      } catch { }
-    } catch (e) { console.error("Failed to send transcript context:", e); }
+      } catch {}
+    } catch (e) {
+      console.error("Failed to send transcript context:", e);
+    }
   };
+  function handleSecondOpinionFinal(fullText) {
+    const raw = extractJsonBlock(fullText);
+    const parsed = tryParseJsonLoose(raw);
+    const shaped = ensureOpinionShape(parsed);
+    if (shaped) {
+      drgStore.setSecondOpinion(shaped); // enables the FAB
+    }
+  }
 
   /** Specialty form streaming (if used elsewhere) */
   const handleFormStreamEvent = (evt) => {
@@ -1032,7 +1256,8 @@ const Chat = () => {
         if (!updated[lastIdx] || updated[lastIdx].who !== "bot") {
           updated.push({ msg: "", who: "bot", streaming: true });
         }
-        updated[updated.length - 1].msg = (updated[updated.length - 1].msg || "") + chunk;
+        updated[updated.length - 1].msg =
+          (updated[updated.length - 1].msg || "") + chunk;
         return updated;
       });
       return;
@@ -1065,7 +1290,12 @@ const Chat = () => {
 
   function wantsLabs(text) {
     const t = (text || "").toLowerCase();
-    return t.includes("upload lab") || t.includes("attach lab") || t.includes("upload the lab") || t.includes("[request_labs]");
+    return (
+      t.includes("upload lab") ||
+      t.includes("attach lab") ||
+      t.includes("upload the lab") ||
+      t.includes("[request_labs]")
+    );
   }
 
   const LABS_TOKEN_RE = /\[request_labs\]/i;
@@ -1075,7 +1305,11 @@ const Chat = () => {
     setChats((prev) => {
       const arr = [...prev];
       const target = arr[bubbleIdx];
-      if (target && typeof target.msg === "string" && LABS_TOKEN_RE.test(target.msg)) {
+      if (
+        target &&
+        typeof target.msg === "string" &&
+        LABS_TOKEN_RE.test(target.msg)
+      ) {
         target.msg = target.msg.replace(LABS_TOKEN_RE_GLOBAL, "");
       }
       return arr;
@@ -1084,7 +1318,10 @@ const Chat = () => {
 
   const handleParsedLabs = (labs, meta) => {
     if (!Array.isArray(labs) || labs.length === 0) return;
-    setChats((prev) => [...prev, { who: "bot", type: "labs", labs, meta: meta || null }]);
+    setChats((prev) => [
+      ...prev,
+      { who: "bot", type: "labs", labs, meta: meta || null },
+    ]);
   };
 
   /* ===================== Medication checker streaming ===================== */
@@ -1097,7 +1334,10 @@ const Chat = () => {
     const transcript = useDosageStore.getState()?.transcript || "";
     const lastNarrative = (() => {
       for (let i = chats.length - 1; i >= 0; i--) {
-        if (chats[i]?.type === "secondOpinion" && typeof chats[i].narrative === "string") {
+        if (
+          chats[i]?.type === "secondOpinion" &&
+          typeof chats[i].narrative === "string"
+        ) {
           return chats[i].narrative;
         }
       }
@@ -1112,24 +1352,46 @@ const Chat = () => {
       lastNarrative,
       "",
       "### Approved Lab Tests so far",
-      labOrders.map((l, i) => `${i + 1}. ${l.name}${l.priority ? ` [${l.priority}]` : ""}${l.why ? ` — ${l.why}` : ""}`).join("\n") || "None",
+      labOrders
+        .map(
+          (l, i) =>
+            `${i + 1}. ${l.name}${l.priority ? ` [${l.priority}]` : ""}${
+              l.why ? ` — ${l.why}` : ""
+            }`
+        )
+        .join("\n") || "None",
     ].join("\n");
   };
 
   if (isVoiceMode) {
     return (
       <div className="voice-assistant-wrapper">
-        <audio ref={audioPlayerRef} playsInline style={{ display: "none" }} controls={false} autoPlay onError={(e) => console.error("Audio error:", e.target.error)} />
+        <audio
+          ref={audioPlayerRef}
+          playsInline
+          style={{ display: "none" }}
+          controls={false}
+          autoPlay
+          onError={(e) => console.error("Audio error:", e.target.error)}
+        />
         <div className="voice-stage-orb">
           <BaseOrb audioScale={audioScale} />
         </div>
         <div className="mic-controls">
-          {connectionStatus === "connecting" && <div className="connection-status connecting">🔄 Connecting...</div>}
+          {connectionStatus === "connecting" && (
+            <div className="connection-status connecting">🔄 Connecting...</div>
+          )}
           <div>
-            <button className={`mic-icon-btn ${isMicActive ? "active" : ""}`} onClick={toggleMic} disabled={connectionStatus === "connecting"}>
+            <button
+              className={`mic-icon-btn ${isMicActive ? "active" : ""}`}
+              onClick={toggleMic}
+              disabled={connectionStatus === "connecting"}
+            >
               <FaMicrophoneAlt />
             </button>
-            <button className="closed-btn" onClick={closeVoiceSession}>✖</button>
+            <button className="closed-btn" onClick={closeVoiceSession}>
+              ✖
+            </button>
           </div>
         </div>
       </div>
@@ -1145,7 +1407,10 @@ const Chat = () => {
 
     const nodes = [];
     pieces.forEach((seg, idx) => {
-      if (seg) nodes.push(<div key={`seg-${bubbleIdx}-${idx}`}>{renderMessage(seg)}</div>);
+      if (seg)
+        nodes.push(
+          <div key={`seg-${bubbleIdx}-${idx}`}>{renderMessage(seg)}</div>
+        );
       if (idx < pieces.length - 1) {
         nodes.push(
           <InlineLabsCard
@@ -1156,7 +1421,10 @@ const Chat = () => {
               if (!labsStreamingRef.current) {
                 labsStreamingRef.current = true;
                 labsBufferRef.current = "";
-                setChats((prev) => [...prev, { msg: "", who: "bot", streaming: true }]);
+                setChats((prev) => [
+                  ...prev,
+                  { msg: "", who: "bot", streaming: true },
+                ]);
               }
               labsBufferRef.current += String(chunk || "");
               setChats((prev) => {
@@ -1179,7 +1447,10 @@ const Chat = () => {
                     return updated;
                   }
                 }
-                return [...updated, { msg: normalizeMarkdown(fullText || ""), who: "bot" }];
+                return [
+                  ...updated,
+                  { msg: normalizeMarkdown(fullText || ""), who: "bot" },
+                ];
               });
             }}
           />
@@ -1195,10 +1466,16 @@ const Chat = () => {
       <div className="chat-content">
         {chats.map((chat, index) => {
           const isLabCard = chat?.type === "labs" && Array.isArray(chat.labs);
-          const isSecondOpinion = chat?.type === "secondOpinion" && chat.opinion;
+          const isSecondOpinion =
+            chat?.type === "secondOpinion" && chat.opinion;
           const isLabOrders = chat?.type === "labOrders";
           return (
-            <div key={index} className={`chat-message ${chat.who} ${chat.live ? "live" : ""} ${chat.streaming ? "streaming" : ""}`}>
+            <div
+              key={index}
+              className={`chat-message ${chat.who} ${chat.live ? "live" : ""} ${
+                chat.streaming ? "streaming" : ""
+              }`}
+            >
               {chat.who === "bot" && (
                 <figure className="avatar">
                   <img src="/av.gif" alt="avatar" />
@@ -1208,12 +1485,20 @@ const Chat = () => {
                 {isLabCard ? (
                   <LabsPanel labs={chat.labs} meta={chat.meta} />
                 ) : isSecondOpinion ? (
-                  <SecondOpinionPanel data={chat.opinion} narrative={chat.narrative} onAddLab={handleAddLabToTable} />
+                  <SecondOpinionPanel
+                    data={chat.opinion}
+                    narrative={chat.narrative}
+                    onAddLab={handleAddLabToTable}
+                  />
                 ) : isLabOrders ? (
-                  <LabOrdersTable rows={labOrders} onSend={sendLabOrdersToBackend} sending={sendingToLab} />
-                ) : chat?.type === 'chart_pie' && chat.highchartsConfig ? (
+                  <LabOrdersTable
+                    rows={labOrders}
+                    onSend={sendLabOrdersToBackend}
+                    sending={sendingToLab}
+                  />
+                ) : chat?.type === "chart_pie" && chat.highchartsConfig ? (
                   <ChatBubbleChart config={chat.highchartsConfig} />
-                ) : chat?.type === 'chart_pie_loading' ? (
+                ) : chat?.type === "chart_pie_loading" ? (
                   <ChartLoader />
                 ) : (
                   <>
@@ -1232,7 +1517,9 @@ const Chat = () => {
         <ChatInputWidget onSendMessage={handleNewMessage} />
       </div>
 
-      <button className="voice-toggle-button" onClick={handleEnterVoiceMode}>🎙️</button>
+      <button className="voice-toggle-button" onClick={handleEnterVoiceMode}>
+        🎙️
+      </button>
 
       {/* Drawer with tools */}
       <DrawComponent>
@@ -1264,8 +1551,12 @@ const Chat = () => {
                 }}
               >
                 <div style={{ display: "grid", gap: 2 }}>
-                  <div style={{ fontWeight: 700, fontSize: 13 }}>Lab results requested</div>
-                  <div style={{ fontSize: 12, opacity: 0.8 }}>Attach a PDF/image to interpret instantly.</div>
+                  <div style={{ fontWeight: 700, fontSize: 13 }}>
+                    Lab results requested
+                  </div>
+                  <div style={{ fontSize: 12, opacity: 0.8 }}>
+                    Attach a PDF/image to interpret instantly.
+                  </div>
                 </div>
                 <button
                   style={{
@@ -1306,7 +1597,10 @@ const Chat = () => {
                 if (!labsStreamingRef.current) {
                   labsStreamingRef.current = true;
                   labsBufferRef.current = "";
-                  setChats((prev) => [...prev, { msg: "", who: "bot", streaming: true }]);
+                  setChats((prev) => [
+                    ...prev,
+                    { msg: "", who: "bot", streaming: true },
+                  ]);
                 }
                 labsBufferRef.current += String(chunk || "");
                 setChats((prev) => {
@@ -1317,7 +1611,11 @@ const Chat = () => {
                 });
               }}
               onAIResponse={(payload) => {
-                const full = payload?.text ?? (typeof payload === "string" ? payload : JSON.stringify(payload));
+                const full =
+                  payload?.text ??
+                  (typeof payload === "string"
+                    ? payload
+                    : JSON.stringify(payload));
                 setChats((prev) => {
                   const updated = [...prev];
                   if (labsStreamingRef.current) {
@@ -1329,7 +1627,10 @@ const Chat = () => {
                       return updated;
                     }
                   }
-                  return [...updated, { msg: normalizeMarkdown(full || ""), who: "bot" }];
+                  return [
+                    ...updated,
+                    { msg: normalizeMarkdown(full || ""), who: "bot" },
+                  ];
                 });
               }}
             />
@@ -1347,7 +1648,10 @@ const Chat = () => {
                 if (!medsStreamingRef.current) {
                   medsStreamingRef.current = true;
                   medsBufferRef.current = "";
-                  setChats((prev) => [...prev, { msg: "", who: "bot", streaming: true }]);
+                  setChats((prev) => [
+                    ...prev,
+                    { msg: "", who: "bot", streaming: true },
+                  ]);
                 }
                 medsBufferRef.current += String(chunk || "");
                 setChats((prev) => {
@@ -1375,7 +1679,11 @@ const Chat = () => {
                 ].join("\n")
               }
               onAIResponse={(payload) => {
-                const full = payload?.text ?? (typeof payload === "string" ? payload : JSON.stringify(payload));
+                const full =
+                  payload?.text ??
+                  (typeof payload === "string"
+                    ? payload
+                    : JSON.stringify(payload));
                 setChats((prev) => {
                   const updated = [...prev];
                   if (medsStreamingRef.current) {
@@ -1387,14 +1695,19 @@ const Chat = () => {
                       return updated;
                     }
                   }
-                  return [...updated, { msg: normalizeMarkdown(full || ""), who: "bot" }];
+                  return [
+                    ...updated,
+                    { msg: normalizeMarkdown(full || ""), who: "bot" },
+                  ];
                 });
               }}
             />
           </div>
         </div>
 
-        <div className="tool-wrapper"><CalculateDosageButton /></div>
+        <div className="tool-wrapper">
+          <CalculateDosageButton />
+        </div>
 
         <div className="tool-wrapper">
           <MedicalImageAnalyzer
@@ -1404,7 +1717,14 @@ const Chat = () => {
                 {
                   who: "bot",
                   msg: normalizeMarkdown(
-                    ["**Medical Image Analysis (Vision)**", meta?.filename ? `*Source:* ${meta.filename}` : null, "", text].filter(Boolean).join("\n")
+                    [
+                      "**Medical Image Analysis (Vision)**",
+                      meta?.filename ? `*Source:* ${meta.filename}` : null,
+                      "",
+                      text,
+                    ]
+                      .filter(Boolean)
+                      .join("\n")
                   ),
                 },
               ]);
@@ -1439,8 +1759,25 @@ const Chat = () => {
           backendBase={BACKEND_BASE}
           context={buildAgentContext()}
           onApproveLab={handleApproveLabFromAgent}
-          onEndSession={handleEndSession}   // ✅ wire End Session
+          onEndSession={handleEndSession} // ✅ wire End Session
         />
+      )}
+      {/* DRG Validator FAB + overlay */}
+      {drgStore.iconVisible && (
+        <button
+          className="drg-fab"
+          title="Open DRG Validator"
+          onClick={() => drgStore.validateNow(BACKEND_BASE, sessionId)}
+        >
+          {/* Simple SVG badge */}
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <path d="M12 2l3 3h5v5l3 3-3 3v5h-5l-3 3-3-3H4v-5l-3-3 3-3V5h5l3-3zM8 12a4 4 0 108 0 4 4 0 00-8 0z" />
+          </svg>
+        </button>
+      )}
+
+      {drgStore.open && (
+        <DRGValidator backendBase={BACKEND_BASE} sessionId={sessionId} />
       )}
     </div>
   );
@@ -1458,7 +1795,6 @@ const DrawComponent = ({ children }) => {
     return () => window.removeEventListener("tools:close", handleToolsClose);
   }, []);
 
-
   // ✅ Listen for Lab Agent’s “close” event only
   useEffect(() => {
     const onClose = () => setIsOpen(false);
@@ -1467,7 +1803,9 @@ const DrawComponent = ({ children }) => {
   }, []);
 
   return (
-    <div style={{ position: "fixed", bottom: "25px", left: "25px", zIndex: 100 }}>
+    <div
+      style={{ position: "fixed", bottom: "25px", left: "25px", zIndex: 100 }}
+    >
       <AnimatePresence>
         {isOpen && (
           <motion.div
@@ -1498,7 +1836,10 @@ const CollapsibleDiagram = ({ chart }) => {
   const [isOpen, setIsOpen] = useState(false);
   return (
     <div className="collapsible-diagram">
-      <div className="collapsible-header" onClick={() => setIsOpen((prev) => !prev)}>
+      <div
+        className="collapsible-header"
+        onClick={() => setIsOpen((prev) => !prev)}
+      >
         <span className="toggle-icon">{isOpen ? "–" : "+"}</span> View Diagram
       </div>
       <AnimatePresence initial={false}>
@@ -1523,8 +1864,13 @@ const CollapsibleDiagram = ({ chart }) => {
 function LabsPanel({ labs = [], meta }) {
   const valid = (Array.isArray(labs) ? labs : []).filter((l) => {
     const v = toNum(l?.value);
-    const hasRange = Number.isFinite(toNum(l?.low)) && Number.isFinite(toNum(l?.high));
-    const hasAI = l?.status && ["normal", "borderline", "abnormal"].includes(String(l.status).toLowerCase());
+    const hasRange =
+      Number.isFinite(toNum(l?.low)) && Number.isFinite(toNum(l?.high));
+    const hasAI =
+      l?.status &&
+      ["normal", "borderline", "abnormal"].includes(
+        String(l.status).toLowerCase()
+      );
     return Number.isFinite(v) && (hasRange || hasAI);
   });
 
@@ -1534,11 +1880,15 @@ function LabsPanel({ labs = [], meta }) {
         <div className="labs-panel__header">
           <div>
             <div className="labs-panel__title">Lab Summary</div>
-            {meta?.filename && <div className="labs-panel__meta">Source: {meta.filename}</div>}
+            {meta?.filename && (
+              <div className="labs-panel__meta">Source: {meta.filename}</div>
+            )}
           </div>
         </div>
         <div className="labs-panel__body">
-          <div style={{ opacity: 0.7, fontSize: 13 }}>No parsable lab values were found in this upload.</div>
+          <div style={{ opacity: 0.7, fontSize: 13 }}>
+            No parsable lab values were found in this upload.
+          </div>
         </div>
       </div>
     );
@@ -1549,7 +1899,9 @@ function LabsPanel({ labs = [], meta }) {
       <div className="labs-panel__header">
         <div>
           <div className="labs-panel__title">Lab Summary</div>
-          {meta?.filename && <div className="labs-panel__meta">Source: {meta.filename}</div>}
+          {meta?.filename && (
+            <div className="labs-panel__meta">Source: {meta.filename}</div>
+          )}
         </div>
         <div className="labs-panel__legend">
           <span className="chip chip--green" /> Normal
@@ -1588,7 +1940,9 @@ function LabRow({ lab }) {
     band = 0.2;
   }
   const clamp = (x) => Math.min(Math.max(x, min), max);
-  const posPct = Number.isFinite(value) ? ((clamp(value) - min) / (max - min)) * 100 : 50;
+  const posPct = Number.isFinite(value)
+    ? ((clamp(value) - min) / (max - min)) * 100
+    : 50;
 
   let redL = 0,
     yellowL = 0,
@@ -1601,7 +1955,7 @@ function LabRow({ lab }) {
     const rightYellowBeg = Math.max(high - band, low);
     const rightRedStart = Math.min(high + band, max);
 
-    const total = (max - min) || 1;
+    const total = max - min || 1;
     redL = ((leftRedEnd - min) / total) * 100;
     yellowL = ((leftYellowEnd - leftRedEnd) / total) * 100;
     green = ((rightYellowBeg - leftYellowEnd) / total) * 100;
@@ -1621,10 +1975,16 @@ function LabRow({ lab }) {
   }
 
   let status = "neutral";
-  if (["normal", "borderline", "abnormal"].includes(aiStatus)) status = aiStatus;
-  else if (Number.isFinite(low) && Number.isFinite(high) && Number.isFinite(value)) {
+  if (["normal", "borderline", "abnormal"].includes(aiStatus))
+    status = aiStatus;
+  else if (
+    Number.isFinite(low) &&
+    Number.isFinite(high) &&
+    Number.isFinite(value)
+  ) {
     if (value < low || value > high) status = "abnormal";
-    else if (Math.abs(value - low) <= band || Math.abs(value - high) <= band) status = "borderline";
+    else if (Math.abs(value - low) <= band || Math.abs(value - high) <= band)
+      status = "borderline";
     else status = "normal";
   }
 
@@ -1634,7 +1994,9 @@ function LabRow({ lab }) {
         <div className="lab-row__name">{name}</div>
         <div className="lab-row__range">
           {Number.isFinite(low) && Number.isFinite(high) ? (
-            <>Normal range: {low} – {high} {unit}</>
+            <>
+              Normal range: {low} – {high} {unit}
+            </>
           ) : (
             <em>Normal range: unknown</em>
           )}
@@ -1643,14 +2005,35 @@ function LabRow({ lab }) {
 
       <div className="lab-row__bar">
         <div className="range-label" aria-hidden>
-          {Number.isFinite(low) && Number.isFinite(high) ? `NORMAL RANGE ${low} – ${high} ${unit}` : ""}
+          {Number.isFinite(low) && Number.isFinite(high)
+            ? `NORMAL RANGE ${low} – ${high} ${unit}`
+            : ""}
         </div>
         <div className="bar">
-          {redL > 0 && <div className="seg seg--red" style={{ flexBasis: `${redL}%` }} />}
-          {yellowL > 0 && <div className="seg seg--yellow" style={{ flexBasis: `${yellowL}%` }} />}
-          {green > 0 && <div className="seg seg--green" style={{ flexBasis: `${green}%` }} />}
-          {yellowR > 0 && <div className="seg seg--yellow" style={{ flexBasis: `${yellowR}%` }} />}
-          {redR > 0 && <div className="seg seg--red" style={{ flexBasis: `${redR}%` }} />}
+          {redL > 0 && (
+            <div className="seg seg--red" style={{ flexBasis: `${redL}%` }} />
+          )}
+          {yellowL > 0 && (
+            <div
+              className="seg seg--yellow"
+              style={{ flexBasis: `${yellowL}%` }}
+            />
+          )}
+          {green > 0 && (
+            <div
+              className="seg seg--green"
+              style={{ flexBasis: `${green}%` }}
+            />
+          )}
+          {yellowR > 0 && (
+            <div
+              className="seg seg--yellow"
+              style={{ flexBasis: `${yellowR}%` }}
+            />
+          )}
+          {redR > 0 && (
+            <div className="seg seg--red" style={{ flexBasis: `${redR}%` }} />
+          )}
           <div className="indicator" style={{ left: `${posPct}%` }} />
         </div>
       </div>
@@ -1666,8 +2049,18 @@ function InlineLabsCard({ onStreamToken, onComplete, onParsedLabs }) {
   const localRef = useRef(null);
 
   return (
-    <div style={{ margin: "10px 0", padding: "10px 12px", borderRadius: 12, background: "rgba(10,102,194,0.08)", border: "1px solid rgba(10,102,194,0.25)" }}>
-      <div style={{ fontWeight: 700, fontSize: 13, marginBottom: 6 }}>Please upload the lab results (PDF/Image)</div>
+    <div
+      style={{
+        margin: "10px 0",
+        padding: "10px 12px",
+        borderRadius: 12,
+        background: "rgba(10,102,194,0.08)",
+        border: "1px solid rgba(10,102,194,0.25)",
+      }}
+    >
+      <div style={{ fontWeight: 700, fontSize: 13, marginBottom: 6 }}>
+        Please upload the lab results (PDF/Image)
+      </div>
       <LabResultsUploader
         ref={localRef}
         autoSend={true}
@@ -1689,7 +2082,9 @@ function InlineLabsCard({ onStreamToken, onComplete, onParsedLabs }) {
         }
         onAIStreamToken={onStreamToken}
         onAIResponse={(payload) => {
-          const full = payload?.text ?? (typeof payload === "string" ? payload : JSON.stringify(payload));
+          const full =
+            payload?.text ??
+            (typeof payload === "string" ? payload : JSON.stringify(payload));
           onComplete(full);
         }}
       />

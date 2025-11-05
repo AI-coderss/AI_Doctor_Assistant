@@ -634,12 +634,14 @@ const VoiceRecorderPanel = ({
               setFormErrors(errs);
               if (!Object.keys(errs).length) {
                 setCaseMetaSubmitted(true); setShowCaseForm(false);
+                emit("vrp:case-meta",{sessionId,patientId: formMode === "new" ? newMeta.fileNumber : existingMeta.fileNumber});
                 try { localStorage.setItem("vrp_case_meta_new", JSON.stringify(newMeta)); } catch {}
               }
             } else {
               const errs = validateExisting(); setFormErrors(errs);
               if (!Object.keys(errs).length) {
                 setCaseMetaSubmitted(true); setShowCaseForm(false);
+                emit("vrp:case-meta",{sessionId,patientId: formMode === "new" ? newMeta.fileNumber : existingMeta.fileNumber});
                 try { localStorage.setItem("vrp_case_meta_existing", JSON.stringify(existingMeta)); } catch {}
               }
             }

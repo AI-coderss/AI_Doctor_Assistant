@@ -247,6 +247,28 @@ CORS(
             "supports_credentials": True,
             "max_age": 86400,
         },
+                r"/drg/validate": {
+            "origins": [
+                "https://ai-doctor-assistant-app-dev.onrender.com",
+                "http://localhost:3000",
+            ],
+            "methods": ["POST", "OPTIONS"],
+            "allow_headers": ["Content-Type", "Authorization", "Accept", "X-Requested-With", "X-Session-Id"],
+            "expose_headers": ["Content-Type"],
+            "supports_credentials": True,
+            "max_age": 86400,
+        },
+        r"/drg/fix": {
+            "origins": [
+                "https://ai-doctor-assistant-app-dev.onrender.com",
+                "http://localhost:3000",
+            ],
+            "methods": ["POST", "OPTIONS"],
+            "allow_headers": ["Content-Type", "Authorization", "Accept", "X-Requested-With", "X-Session-Id"],
+            "expose_headers": ["Content-Type"],
+            "supports_credentials": True,
+            "max_age": 86400,
+        },
 
     },
 )
@@ -357,6 +379,58 @@ def _extract_json_dict(text: str):
                     return obj
             except Exception:
                 pass
+    return None
+def _build_drg_validation_prompt(second_json: dict, patient_id: str):
+    """
+    Ask the model (through RAG) to validate against the DRG master embedded in Qdrant.
+    Return STRICT JSON ONLY with the exact table schema the UI expects.
+    """
+    return (
+        "DRG VALIDATOR (STRICT JSON ONLY)\n"
+        "You are validating Diagnosis-Related Group (DRG) coding using knowledge retrieved from the DRG master "
+        "embedded in the vector store (Qdrant). Compare the AI Second Opinion's diagnoses with the DRG master.\n\n"
+        "Return STRICT JSON with this schema (no prose):\n"
+        "{\n"
+        '  "rows": [\n'
+        '    {\n'
+        '      "patient_id": "string",\n'
+        '      "drg_code": {"code":"string","label":"string"},\n'
+        '      "status": "VALIDATED" | "REVIEW" | "FLAGGED",\n'
+        '      "nphies": "Ready" | "Review" | "Denied" | "Risk",\n'
+        '      "actions": ["Submit" | "Optimize" | "Fix"],\n'
+        '      "reasons_md": ["bullet point markdown strings ..."],\n'
+        '      "suggested_fixes_md": ["bullet point markdown strings ..."]\n'
+        "    }\n"
+        "  ],\n"
+        '  "summary": {"validated": int, "review": int, "flagged": int}\n'
+        "}\n\n"
+        "Notes:\n"
+        "- If documentation is incomplete, prefer status=REVIEW with action=['Optimize'] and explain in reasons_md.\n"
+        "- Obvious mismatches => FLAGGED with action=['Fix'] and concrete suggested_fixes_md.\n"
+        "- When correct & sufficient => VALIDATED with nphies='Ready' and action=['Submit'].\n"
+        "- Prefer the most appropriate DRG; include the human-readable label.\n\n"
+        f"Patient ID: {patient_id}\n"
+        "AI Second Opinion JSON:\n"
+        f"{json.dumps(second_json, ensure_ascii=False)}\n"
+    )
+
+def _build_drg_fix_prompt(row: dict, transcript: str | None = None):
+    return (
+        "DRG FIX SUGGESTIONS (STRICT JSON ONLY)\n"
+        "Given the flagged/review row and optional transcript, propose improved documentation or code changes.\n"
+        "Return STRICT JSON: {\"suggested_fixes_md\": [\"...\",\"...\"], \"optimized_drg\": {\"code\":\"string\",\"label\":\"string\"}}\n\n"
+        f"Row: {json.dumps(row, ensure_ascii=False)}\n"
+        f"Transcript (optional): {transcript or ''}\n"
+    )
+
+def _json_or_first_block(text: str):
+    try:
+        return json.loads(re.sub(r"```json|```", "", (text or "").strip(), flags=re.I))
+    except Exception:
+        m = re.search(r"\{[\s\S]*\}", text or "")
+        if m:
+            try: return json.loads(m.group(0))
+            except Exception: pass
     return None
 
 
@@ -3715,6 +3789,61 @@ def generate_notes():
     except Exception:
         data = {"error": "Failed to parse notes"}
     return jsonify(data)
+@app.route("/drg/validate", methods=["POST", "OPTIONS"])
+def drg_validate():
+    if request.method == "OPTIONS":
+        return make_response(("", 204))
+    data = request.get_json(silent=True) or {}
+    session_id = data.get("session_id", str(uuid4()))
+    patient_id = (data.get("patient_id") or "").strip()
+    second = data.get("second_opinion_json") or data.get("second_opinion_text")
+    if not (patient_id and second):
+        return jsonify({"error": "Missing patient_id or second opinion"}), 400
+
+    # Robustly accept JSON or text with JSON block
+    if isinstance(second, str):
+        second_json = _json_or_first_block(second)
+    else:
+        second_json = second
+    if not isinstance(second_json, dict):
+        return jsonify({"error": "Invalid second_opinion_json"}), 400
+
+    prompt = _build_drg_validation_prompt(second_json, patient_id)
+
+    try:
+        # Use your existing LangChain RAG chain (retrieves from Qdrant)
+        resp = conversation_rag_chain.invoke(
+            {"chat_history": chat_sessions.get(session_id, []), "input": prompt}
+        )
+        raw = (resp.get("answer") or "").strip()
+        parsed = _json_or_first_block(raw) or {}
+        rows = parsed.get("rows") or []
+        summary = parsed.get("summary") or {"validated": 0, "review": 0, "flagged": 0}
+        return jsonify({"rows": rows, "summary": summary, "session_id": session_id}), 200
+    except Exception as e:
+        return jsonify({"error": f"Server error: {str(e)}"}), 500
+
+
+@app.route("/drg/fix", methods=["POST", "OPTIONS"])
+def drg_fix():
+    if request.method == "OPTIONS":
+        return make_response(("", 204))
+    data = request.get_json(silent=True) or {}
+    session_id = data.get("session_id", str(uuid4()))
+    row = data.get("row")
+    transcript = (data.get("transcript") or (session_context.get(session_id, {}) or {}).get("transcript") or "").strip()
+
+    if not isinstance(row, dict):
+        return jsonify({"error": "Invalid row"}), 400
+
+    try:
+        prompt = _build_drg_fix_prompt(row, transcript)
+        resp = conversation_rag_chain.invoke({"chat_history": [], "input": prompt})
+        raw = (resp.get("answer") or "").strip()
+        parsed = _json_or_first_block(raw) or {}
+        return jsonify(parsed), 200
+    except Exception as e:
+        return jsonify({"error": f"Server error: {str(e)}"}), 500
 
 if __name__ == "__main__":
     app.run(host="127.0.0.1", port=5050, debug=True)

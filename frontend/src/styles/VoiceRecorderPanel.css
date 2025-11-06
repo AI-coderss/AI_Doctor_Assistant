@@ -1282,3 +1282,266 @@
   border-radius: 6px;
 }
 .vrp-combobox-panel::-webkit-scrollbar-track { background: rgba(148,163,184,.15); }
+/* ==== Buttons: smaller text, equal sizing, tidy layout (append) ==== */
+.recorder-buttons {
+  grid-auto-rows: 40px;                 /* equal height */
+}
+
+.recorder-buttons button {
+  font-size: 0.82rem;                   /* smaller text */
+  padding: 0.5rem 0.85rem;              /* compact padding */
+  white-space: nowrap;                  /* prevent wrapping */
+  letter-spacing: .01em;
+  min-height: 40px;                     /* enforce same height */
+}
+
+.recorder-buttons .analyze {
+  min-height: 40px;                     /* match others */
+}
+
+/* ==== Mic source row (under waveform) ==== */
+.vrp-mic-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 6px;
+  font-size: 0.86rem;
+}
+
+.vrp-mic-label {
+  opacity: .75;
+}
+
+.vrp-mic-current {
+  font-weight: 700;
+  max-width: 60%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.vrp-mic-change {
+  margin-left: auto;
+  appearance: none;
+  border: 1px solid rgba(79,70,229,.30);
+  background: rgba(99,102,241,.10);
+  color: #3730a3;
+  border-radius: 10px;
+  padding: 6px 10px;
+  font-size: 0.82rem;
+  cursor: pointer;
+  transition: background .12s ease, transform .12s ease, box-shadow .12s ease;
+}
+.vrp-mic-change:hover {
+  background: rgba(99,102,241,.16);
+  transform: translateY(-1px);
+  box-shadow: 0 8px 18px rgba(15,18,24,.10);
+}
+
+/* ==== Device picker overlay (wider modal + dropdown) ==== */
+.vrp-device-modal {
+  width: min(560px, 96vw);              /* a bit wider as requested */
+}
+
+.vrp-device-select {
+  height: 42px;
+  padding: 8px 10px;
+  border-radius: 12px;
+  border: 1px solid rgba(79,70,229,.24);
+  background: rgba(255,255,255,.96);
+  color: #0f1218;
+  font-size: 0.95rem;
+  outline: none;
+  transition: border-color .12s ease, box-shadow .12s ease;
+}
+
+.vrp-device-select:focus {
+  border-color: rgba(79,70,229,.55);
+  box-shadow: 0 0 0 3px rgba(79,70,229,.18);
+}
+
+.vrp-device-hint {
+  margin-top: 6px;
+  font-size: 0.82rem;
+  opacity: .8;
+}
+/* === Mic source tiles (three options) === */
+.vrp-mic-tiles {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 10px;
+  margin: 4px 0 6px 0;
+  border: 0;
+  padding: 0;
+}
+
+@media (min-width: 640px) {
+  .vrp-mic-tiles {
+    grid-template-columns: 1fr 1fr 1fr;
+  }
+}
+
+.vrp-mic-tile {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px;
+  border: 1px solid rgba(148,163,184,.45);
+  background: linear-gradient(180deg, rgba(255,255,255,.10), rgba(255,255,255,.16));
+  -webkit-backdrop-filter: blur(10px) saturate(150%);
+  backdrop-filter: blur(10px) saturate(150%);
+  border-radius: 10px;
+  cursor: pointer;
+  user-select: none;
+  transition: transform .12s ease, box-shadow .12s ease, border-color .12s ease, background .12s ease;
+}
+
+.vrp-mic-tile input {
+  appearance: none;
+  width: 18px;
+  height: 18px;
+  border-radius: 6px;
+  border: 2px solid rgba(99,102,241,.55);
+  display: grid;
+  place-items: center;
+  background: #fff;
+  flex: 0 0 18px;
+  margin: 0;
+}
+
+.vrp-mic-tile.checked input {
+  background: var(--primary);
+  border-color: var(--primary);
+}
+
+.vrp-mic-tile:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 10px 22px rgba(15,18,24,.10);
+}
+
+.vrp-mic-tile.disabled {
+  opacity: .5;
+  cursor: not-allowed;
+}
+
+.vrp-mic-tile-body {
+  display: grid;
+  gap: 2px;
+}
+
+.vrp-mic-tile-title {
+  font-weight: 800;
+  letter-spacing: .01em;
+}
+
+.vrp-mic-tile-sub {
+  font-size: .82rem;
+  opacity: .8;
+}
+
+/* Head inside selector/blocks */
+.vrp-modal-head h3 {
+  margin: 0 0 8px 0;
+  font-size: 1.02rem;
+  font-weight: 800;
+}
+
+/* Gate hint under buttons (consistent size) */
+.vrp-gate-hint {
+  margin-top: 6px;
+  font-size: .86rem;
+  opacity: .85;
+}
+/* ==== White modal variant for mic selector ==== */
+.vrp-modal.mic-white {
+  background: #ffffff !important;
+  border: 1px solid #e5e7eb !important; /* slate-200 */
+  box-shadow: 0 24px 60px rgba(15,18,24,0.18) !important;
+  -webkit-backdrop-filter: none !important;
+  backdrop-filter: none !important;
+}
+
+.mic-white-body {
+  background: #ffffff !important;
+  border: 1px solid #e5e7eb !important;
+  -webkit-backdrop-filter: none !important;
+  backdrop-filter: none !important;
+}
+
+/* ==== Radio list options (simple, white) ==== */
+.vrp-mic-list {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 10px;
+  margin: 4px 0 10px 0;
+  border: 0;
+  padding: 0;
+}
+
+.vrp-mic-option {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 12px;
+  border: 1px solid #e5e7eb;           /* slate-200 */
+  background: #ffffff;                  /* solid white */
+  border-radius: 10px;
+  cursor: pointer;
+  user-select: none;
+  transition: border-color .12s ease, box-shadow .12s ease, transform .12s ease, background .12s ease;
+}
+
+.vrp-mic-option:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 10px 22px rgba(15,18,24,.08);
+  border-color: #d1d5db;                /* slate-300 */
+}
+
+.vrp-mic-option input[type="radio"] {
+  appearance: none;
+  width: 18px;
+  height: 18px;
+  margin-top: 2px;
+  border-radius: 50%;
+  border: 2px solid #6366f1;           /* indigo-500 */
+  position: relative;
+}
+
+.vrp-mic-option input[type="radio"]::after {
+  content: "";
+  position: absolute;
+  inset: 3px;
+  border-radius: 50%;
+  background: transparent;
+}
+
+.vrp-mic-option.checked input[type="radio"] {
+  border-color: #4f46e5;               /* indigo-600 */
+}
+.vrp-mic-option.checked input[type="radio"]::after {
+  background: #4f46e5;
+}
+
+.vrp-mic-option.disabled {
+  opacity: .55;
+  cursor: not-allowed;
+}
+
+.vrp-mic-option-text .title {
+  font-weight: 800;
+  letter-spacing: .01em;
+  color: #0f1218;
+}
+.vrp-mic-option-text .sub {
+  font-size: .85rem;
+  opacity: .8;
+}
+
+/* Keep the hint readable on white */
+.vrp-device-hint {
+  margin-top: 6px;
+  font-size: 0.86rem;
+  color: #374151; /* slate-700 */
+  opacity: .95;
+}

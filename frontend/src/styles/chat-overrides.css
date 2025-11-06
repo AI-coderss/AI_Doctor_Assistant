@@ -1557,3 +1557,310 @@
     max-width: none;
   }
 }
+
+/* =========================================
+   DRG Validator — right dock (mirrors VoiceRecorderPanel)
+   ========================================= */
+
+/* Micro-size tokens for status & submit + no-wrap defaults */
+:root{
+  --drg-pill-font: 9px;      /* status/nphies text size (smaller) */
+  --drg-pill-py: 2px;        /* vertical padding (tighter) */
+  --drg-pill-px: 7px;        /* horizontal padding */
+
+  --drg-submit-font: 10px;   /* Submit text size (small) */
+  --drg-submit-py: 6px;      /* vertical padding (comfy) */
+  --drg-submit-px: 10px;     /* horizontal padding */
+
+  --drg-action-gap: 6px;     /* spacing between action buttons */
+}
+
+/* Right dock container (same vertical bounds & width as VRP) */
+.drg-aside{
+  position: fixed;
+  right: 16px;
+  top: var(--dock-top, 80px);
+  bottom: var(--dock-bottom, 120px);
+  width: var(--va-width, clamp(360px, 28vw, 450px));
+  max-width: var(--va-width, clamp(360px, 28vw, 450px));
+  z-index: 910;
+
+  transform: translateX(calc(100% + 24px));
+  opacity: 0; visibility: hidden; pointer-events: none;
+  transition: transform .25s ease, opacity .25s ease, visibility 0s linear .25s;
+}
+.drg-aside.open{
+  transform: translateX(0);
+  opacity: 1; visibility: visible; pointer-events: auto;
+  transition: transform .25s ease, opacity .25s ease, visibility 0s;
+}
+
+/* Box mirrors recorder panel (no inner gap) */
+.drg-panel{
+  height: 100%;
+  background: var(--dock-bg, #ffffff);
+  color: var(--ink, #0f1218);
+  border: 1px solid #e5e7eb;
+  border-radius: 14px;
+  box-shadow: 0 8px 18px rgba(0,0,0,.12);
+  padding: 12px;
+
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  margin: 0;
+}
+
+/* ---------- Header / Toolbar ---------- */
+.drg-panel-head{
+  display:flex; align-items:center; justify-content:space-between; gap:10px;
+  padding:6px 6px 10px 6px; border-bottom:1px solid #e5e7eb;
+}
+.drg-title{ font-weight:800; font-size:.92rem; }
+.drg-title .count{ opacity:.75; font-weight:600; }
+.drg-close{
+  width:30px; height:30px; border-radius:8px; border:0; cursor:pointer;
+  background:#f1f5f9; color:inherit;
+}
+
+.drg-toolbar{
+  display:flex; align-items:center; gap:8px;
+  padding:8px 0 10px 0; border-bottom:1px solid #e5e7eb;
+}
+.drg-search{
+  flex:1 1 auto; max-width:72%;
+  height:34px; padding:7px 10px 7px 34px;
+  border:1px solid #d1d5db; border-radius:10px; outline:none;
+  background:
+    url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="%239aa" viewBox="0 0 24 24"><path d="M21 20.3 16.7 16a7.5 7.5 0 1 0-1.7 1.7L20.3 22 21 20.3ZM4.5 10.5a6 6 0 1 1 12 0 6 6 0 0 1-12 0Z"/></svg>')
+    no-repeat 10px center / 16px 16px;
+}
+.drg-search:focus{ border-color:var(--primary, #6366f1); box-shadow:0 0 0 3px rgba(99,102,241,.18); }
+.drg-clear{
+  height:34px; padding:0 10px; border-radius:8px; border:1px solid #e5e7eb; background:#fff; cursor:pointer;
+}
+
+/* ---------- Scroll area ---------- */
+.drg-table-wrap{ flex:1 1 auto; overflow-y:auto; overflow-x:hidden; }
+
+/* ---------- Compact table ---------- */
+.drg-table{
+  width:100%; table-layout:fixed; border-collapse:separate; border-spacing:0;
+  font-size:.88rem;
+}
+/* Make table headings very small */
+.drg-table thead th{
+  position:sticky; top:0; z-index:1;
+  background:#f8fafc; text-align:left; padding:6px 8px;           /* tighter */
+  border-bottom:1px solid #e5e7eb; font-weight:800; font-size:.66rem; /* smaller */
+  white-space: nowrap;                                              /* no wrap headings */
+}
+.drg-table tbody td{
+  padding:7px 10px; vertical-align:top; overflow-wrap:anywhere;
+  border-top:1px solid #eef2f7; font-size:.86rem;
+}
+/* subtle column separators */
+.drg-table th + th, .drg-table td + td{ border-left:1px solid #eef2f7; }
+
+/* Narrow/specific widths (override inline widths without touching JSX) */
+.drg-table thead th:nth-child(1){ width:14% !important; }  /* Patient ID */
+.drg-table thead th:nth-child(2){ width:44% !important; }  /* DRG block */
+.drg-table thead th:nth-child(3){ width:14% !important; }  /* Status */
+.drg-table thead th:nth-child(4){ width:12% !important; }  /* NPHIES */
+.drg-table thead th:nth-child(5){ width:16% !important; }  /* Actions */
+
+/* DRG label compact (two lines) */
+.drg-code{ display:grid; gap:1px; }
+.drg-code-code{ font-weight:900; font-size:.82rem; line-height:1.05; }
+.drg-code-label{
+  font-size:.70rem; line-height:1.05; opacity:.80;
+ 
+}
+
+/* ---------- Status/NPHIES pills — smaller, single-line, no-wrap ---------- */
+.status-pill, .nphies-pill{
+  display:inline-block;
+  padding: var(--drg-pill-py) var(--drg-pill-px);
+  border-radius:9999px;
+  font-size: var(--drg-pill-font);
+  font-weight:700;                      /* “normal” strong, less chunky than 900 */
+  line-height: 1;
+  text-transform:uppercase;
+  letter-spacing:.02em;
+  white-space: nowrap;                  /* prevent wrapping */
+  overflow: hidden;
+  text-overflow: ellipsis;              /* safe fallback if extremely narrow */
+  vertical-align: middle;
+}
+.status-pill.validated, .nphies-pill.ready{ background:#22c55e; color:#fff; }
+.status-pill.review, .nphies-pill.review{ background:#f59e0b; color:#0f1218; }
+.status-pill.flagged, .nphies-pill.denied{ background:#ef4444; color:#fff; }
+.nphies-pill.risk{ background:#f43f5e; color:#fff; }
+
+/* ---------- Actions: equal distribution, single-line, comfy padding ---------- */
+/* Use grid so buttons share width equally across the available cell space */
+.drg-actions{
+  display: grid;
+  grid-auto-flow: column;
+  grid-auto-columns: 1fr;      /* equal width per button */
+  gap: var(--drg-action-gap);
+  align-items: center;
+}
+.act-btn{
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;                 /* make each button fill its grid column */
+  padding: var(--drg-submit-py) var(--drg-submit-px);
+  border-radius: 9px;
+  border: 0;
+  cursor: pointer;
+  font-size: var(--drg-submit-font);
+  font-weight: 800;
+  line-height: 1;
+  white-space: nowrap;         /* no wrapping */
+  overflow: hidden;
+  text-overflow: ellipsis;     /* safe fallback */
+}
+.act-btn.submit{   background: var(--primary, #6366f1); color:#fff; }
+.act-btn.optimize{ background:#0ea5e9; color:#fff; }
+.act-btn.fix{      background:#22c55e; color:#fff; }
+
+/* Summary row */
+.drg-summary{
+  display:flex; align-items:center; gap:10px;
+  padding:8px 10px; border-top:1px solid #e5e7eb; background:#f8fafc;
+}
+.drg-summary .sum{ font-size:12px; }
+
+/* ---------- Full-screen detail overlay (popup) ---------- */
+.drg-pop{
+  position:fixed; inset:0; z-index:1200;
+  background: rgba(10,14,20,.45);
+  -webkit-backdrop-filter: blur(6px);
+  backdrop-filter: blur(6px);
+  display:flex; flex-direction:column;
+  padding:18px; overflow:auto;
+}
+.drg-pop-head{
+  display:flex; align-items:center; justify-content:space-between; gap:10px;
+  max-width: min(1100px, 96vw); margin: 0 auto 10px auto; color:#fff;
+}
+.drg-pop-title{ font-weight:900; font-size:1rem; }
+.drg-pop-close{
+  width:34px; height:34px; border-radius:10px; border:1px solid rgba(255,255,255,.35);
+  background: rgba(255,255,255,.12); color:#fff; cursor:pointer;
+}
+.drg-pop-body{
+  max-width: min(1100px, 96vw); width:100%;
+  margin:0 auto;
+  background:#ffffff; color:#0f1218; border-radius:12px; border:1px solid #e5e7eb;
+  box-shadow:0 20px 50px rgba(0,0,0,.25);
+  padding:14px; display:grid; gap:12px;
+}
+
+/* ---------- Dark mode (true black/white) ---------- */
+:root[data-theme="dark"] .drg-panel{
+  background:#000; color:#fff; border-color:rgba(255,255,255,.15);
+}
+:root[data-theme="dark"] .drg-panel-head,
+:root[data-theme="dark"] .drg-toolbar,
+:root[data-theme="dark"] .drg-summary{
+  border-color:rgba(255,255,255,.15); background:rgba(255,255,255,.04);
+}
+:root[data-theme="dark"] .drg-search{
+  background:rgba(255,255,255,.08); color:#fff; border-color:rgba(255,255,255,.22);
+}
+:root[data-theme="dark"] .drg-clear{
+  background:rgba(255,255,255,.06); color:#fff; border-color:rgba(255,255,255,.18);
+}
+:root[data-theme="dark"] .drg-table thead th{
+  background:rgba(255,255,255,.06); border-color:rgba(255,255,255,.15);
+}
+:root[data-theme="dark"] .drg-table tbody td{
+  border-top-color:rgba(255,255,255,.10);
+}
+:root[data-theme="dark"] .drg-table th + th,
+:root[data-theme="dark"] .drg-table td + td{
+  border-left-color:rgba(255,255,255,.10);
+}
+:root[data-theme="dark"] .drg-pop-body{
+  background:#0b0e14; color:#fff; border-color:rgba(255,255,255,.15);
+}
+
+/* =========================================
+   Pulsing rectangular launcher button (replaces icon FAB)
+   ========================================= */
+@keyframes drg-pulse {
+  0%{ transform:translateY(0) scale(1); }
+  50%{ transform:translateY(-1px) scale(1.06); }
+  100%{ transform:translateY(0) scale(1); }
+}
+@keyframes drg-radiation {
+  0%{
+    box-shadow:
+      0 0 0 0 rgba(57,85,236,.40),
+      0 0 0 10px rgba(57,85,236,.12),
+      0 0 0 20px rgba(57,85,236,.06);
+  }
+  100%{
+    box-shadow:
+      0 0 0 10px rgba(57,85,236,0),
+      0 0 0 20px rgba(57,85,236,0),
+      0 0 0 30px rgba(57,85,236,0);
+  }
+}
+
+/* Launcher container (same baseline as other screen buttons) */
+.drg-fab{
+  position: fixed;
+  right: 16px;
+  bottom: 24px;
+  z-index: 3001;
+}
+
+/* Rectangular button with text */
+.drg-fab > button,
+.drg-fab .fab,
+.drg-fab .btn{
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: 44px;
+  min-width: 160px;
+  padding: 10px 16px;
+  border: 0;
+  border-radius: 10px;
+  font-weight: 800;
+  font-size: 0.95rem;
+  letter-spacing: .02em;
+  color: #fff;
+  background: linear-gradient(45deg, var(--primary, #6366f1), rgba(79,70,229,1));
+  box-shadow: 0 10px 22px rgba(57,81,218,.25);
+  cursor: pointer;
+  transition: transform .18s ease, box-shadow .18s ease, opacity .18s ease;
+  animation: drg-pulse 2.2s infinite ease-in-out, drg-radiation 2.6s infinite ease-out;
+  white-space: nowrap;             /* keep label on one line */
+}
+.drg-fab .btn-label{ line-height:1; user-select:none; }
+
+.drg-fab > button:hover,
+.drg-fab .btn:hover{
+  transform: translateY(-1px) scale(1.03);
+}
+.drg-fab[data-state="active"] > button{
+  background: linear-gradient(45deg, #10b981, #22c55e);
+  box-shadow: 0 10px 22px rgba(34,197,94,.25);
+}
+
+/* =========================================
+   Responsive
+   ========================================= */
+@media (max-width: 768px){
+  .drg-aside{
+    right: 12px;
+    left: 12px;
+    width: auto;
+    max-width: none;
+  }
+}

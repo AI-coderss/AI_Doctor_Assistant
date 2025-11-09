@@ -3,7 +3,7 @@ import tempfile
 import ast
 from uuid import uuid4
 import base64, uuid, json
-from datetime import datetime
+from datetime import datetime,timezone
 import json
 import logging
 import requests
@@ -269,7 +269,39 @@ CORS(
             "supports_credentials": True,
             "max_age": 86400,
         },
-
+        r"/clinical-notes/soap-stream": {
+            "origins": [
+                "https://ai-doctor-assistant-app-dev.onrender.com",
+                "http://localhost:3000",
+            ],
+            "methods": ["POST", "OPTIONS"],
+            "allow_headers": ["Content-Type", "Authorization", "Accept", "X-Requested-With", "X-Session-Id"],
+            "expose_headers": ["Content-Type"],
+            "supports_credentials": True,
+            "max_age": 86400,
+        },
+        r"/api/clinical-notes/save": {
+            "origins": [
+                "https://ai-doctor-assistant-app-dev.onrender.com",
+                "http://localhost:3000",
+            ],
+            "methods": ["POST", "OPTIONS"],
+            "allow_headers": ["Content-Type", "Authorization", "Accept", "X-Requested-With", "X-Session-Id"],
+            "expose_headers": ["Content-Type"],
+            "supports_credentials": True,
+            "max_age": 86400,
+        },
+        r"/api/clinical-notes/load": {
+            "origins": [
+                "https://ai-doctor-assistant-app-dev.onrender.com",
+                "http://localhost:3000",
+            ],
+            "methods": ["POST", "OPTIONS"],
+            "allow_headers": ["Content-Type", "Authorization", "Accept", "X-Requested-With", "X-Session-Id"],
+            "expose_headers": ["Content-Type"],
+            "supports_credentials": True,
+            "max_age": 86400,
+        },
     },
 )
 
@@ -3844,6 +3876,222 @@ def drg_fix():
         return jsonify(parsed), 200
     except Exception as e:
         return jsonify({"error": f"Server error: {str(e)}"}), 500
+# Defensive access to existing globals (won't overwrite if already defined)
+try:
+    chat_sessions
+except NameError:
+    from collections import defaultdict
+    chat_sessions = defaultdict(list)
+
+try:
+    ACTIVE_TEMPLATES
+except NameError:
+    ACTIVE_TEMPLATES = {}
+
+try:
+    session_context
+except NameError:
+    session_context = {}
+
+# ---------- Defaults & helpers ----------
+
+SOAP_DEFAULT_SECTIONS = [
+    {"key": "subjective", "title": "Subjective"},
+    {"key": "objective",  "title": "Objective"},
+    {"key": "assessment", "title": "Assessment"},
+    {"key": "plan",       "title": "Plan"},
+]
+
+def _soap_system_prompt(template: dict | None, mode: str = "markdown") -> str:
+    """
+    Build strict SOAP instructions. If a session template is active, we enforce its section order & field names.
+    mode: 'markdown' (default) or 'json' (strict JSON object with {subjective, objective, assessment, plan})
+    """
+    if template and isinstance(template, dict) and template.get("sections"):
+        sec_titles = [s.get("title", "") for s in template.get("sections", []) if s.get("title")]
+        fields_map = {s.get("title",""): s.get("fields", []) for s in template.get("sections", [])}
+        followups = template.get("follow_up_questions", [])
+        style = template.get("style", {})
+
+        if mode == "json":
+            return (
+                "You are a clinical scribe. RETURN STRICT JSON ONLY (no prose, no fences).\n"
+                "Schema:\n"
+                "{\n"
+                '  "subjective": "string",\n'
+                '  "objective": "string",\n'
+                '  "assessment": "string",\n'
+                '  "plan": "string"\n'
+                "}\n"
+                "Rules:\n"
+                f"- Use these section titles (in order): {sec_titles}\n"
+                "- Populate fields when possible using bullets; if unknown, write '—'.\n"
+                f"- Preferred tone: {style.get('tone','concise, clinical')}. Bullets allowed: {bool(style.get('bullets', True))}.\n"
+                f"- If information is missing, consider asking 1–2 of: {followups[:6]}\n"
+                "- No PHI; concise."
+            )
+
+        # markdown mode
+        sec_md = "\n".join([f"## {t}" for t in sec_titles])
+        return (
+            "You are a clinical scribe. Produce SOAP notes in Markdown using EXACTLY these headings in order:\n"
+            f"{sec_md}\n\n"
+            "Populate fields for each section when possible. If unknown, write '—'.\n"
+            f"Style: {style.get('tone', 'concise, clinical')}. Use short bullets if helpful.\n"
+            "Keep PHI generic. Be precise. No extra sections beyond those headings.\n"
+        )
+
+    # default template (no active specialty)
+    if mode == "json":
+        return (
+            "You are a clinical scribe. RETURN STRICT JSON ONLY (no prose, no fences).\n"
+            "Schema: {\"subjective\":\"string\",\"objective\":\"string\",\"assessment\":\"string\",\"plan\":\"string\"}\n"
+            "Use concise bullets inside strings; if unknown write '—'. No PHI."
+        )
+
+    # markdown default
+    return (
+        "You are a clinical scribe. Produce SOAP notes in Markdown with EXACT headings:\n"
+        "## Subjective\n"
+        "## Objective\n"
+        "## Assessment\n"
+        "## Plan\n\n"
+        "Use short, factual bullets. If information is unknown, write '—'. Keep PHI generic."
+    )
+
+def _soap_user_block(transcript: str, rag_snippets: list[str] | None = None) -> str:
+    transcript = (transcript or "").strip()
+    rag_block = ""
+    if rag_snippets:
+        rag_block = "\n\nRetrieved high-confidence context:\n" + "\n".join(f"• {s}" for s in rag_snippets)
+    return f"Dialogue transcript (may be partial):\n\n{transcript}{rag_block}"
+
+def _safe_json_obj(text: str):
+    try:
+        return json.loads(re.sub(r"```json|```", "", (text or "").strip(), flags=re.I))
+    except Exception:
+        m = re.search(r"\{[\s\S]*\}", text or "")
+        if m:
+            try:
+                return json.loads(m.group(0))
+            except Exception:
+                pass
+    return None
+
+def _sess_active_template(session_id: str) -> dict | None:
+    act = ACTIVE_TEMPLATES.get(session_id)
+    if act and isinstance(act, dict):
+        return act.get("template")
+    return None
+
+# If your file has _ensure_context and _rag_snippets, we will use them.
+def _rag_snippets_fallback(transcript: str) -> list[str]:
+    """
+    Best-effort: if your app exposes a retriever helper, use it.
+    Otherwise, return an empty list; conversation_rag_chain still does the heavy lifting.
+    """
+    try:
+        # If your app has _rag_snippets, calling it will work; else we fallback.
+        return _rag_snippets(transcript)  # type: ignore  # noqa
+    except Exception:
+        return []
+
+# ---------- Endpoints ----------
+
+@app.post("/api/clinical-notes/soap-stream")
+def clinical_notes_soap_stream():
+    """
+    Body: { session_id?: str, transcript?: str, mode?: 'markdown'|'json' }
+    Streams SOAP clinical notes (RAG-backed) as text/plain.
+    - If mode='json', the model is instructed to emit strict JSON (we still stream raw text).
+    - If an ACTIVE specialty template is set for this session, its sections & fields are enforced.
+    """
+    data = request.get_json(silent=True) or {}
+    session_id = data.get("session_id", str(uuid4()))
+    transcript = (data.get("transcript") or "").strip()
+    mode = (data.get("mode") or "markdown").lower()
+
+    # Ensure context if your extractor exists
+    try:
+        ctx = _ensure_context(session_id, transcript=transcript)  # type: ignore  # noqa
+    except Exception:
+        ctx = {"transcript": transcript}
+
+    if not transcript and ctx.get("transcript"):
+        transcript = ctx["transcript"] or ""
+
+    if not transcript:
+        return Response("No transcript provided", status=400, mimetype="text/plain")
+
+    template = _sess_active_template(session_id)
+    system = _soap_system_prompt(template, mode=mode)
+
+    # Optional: include brief retrieved snippets inside the user block (makes notes more factual)
+    try:
+        rags = _rag_snippets_fallback(transcript)
+    except Exception:
+        rags = []
+    user = _soap_user_block(transcript, rags)
+
+    # Stream via your RAG chain so retrieval is active
+    def generate():
+        acc = ""
+        try:
+            for chunk in conversation_rag_chain.stream(
+                {"chat_history": chat_sessions.get(session_id, []), "input": f"{system}\n\n{user}"}
+            ):
+                token = chunk.get("answer", "")
+                acc += token
+                yield token
+        except Exception as e:
+            yield f"\n[Vector error: {str(e)}]"
+
+        # Append to history
+        chat_sessions.setdefault(session_id, [])
+        chat_sessions[session_id].append({"role": "user", "content": "[Clinical Notes SOAP]"})
+        chat_sessions[session_id].append({"role": "assistant", "content": acc})
+
+    return Response(stream_with_context(generate()), mimetype="text/plain")
+
+
+@app.post("/api/clinical-notes/save")
+def clinical_notes_save():
+    """
+    Body: { session_id: str, note_markdown?: str, note_json?: {...} }
+    Stores the latest approved/edited note for the session.
+    """
+    data = request.get_json(silent=True) or {}
+    session_id = data.get("session_id")
+    note_md = (data.get("note_markdown") or "").strip()
+    note_json = data.get("note_json")
+    if not session_id:
+        return jsonify({"error": "Missing session_id"}), 400
+    if not note_md and not note_json:
+        return jsonify({"error": "Provide note_markdown or note_json"}), 400
+
+    # lightweight in-memory store (attach to session_context to keep single source)
+    sess = session_context.get(session_id, {}) if isinstance(session_context, dict) else {}
+    sess = {**sess, "clinical_note_markdown": note_md or sess.get("clinical_note_markdown"), "clinical_note_json": note_json or sess.get("clinical_note_json")}
+    session_context[session_id] = sess
+    return jsonify({"ok": True, "session_id": session_id, "saved": {"markdown": bool(note_md), "json": bool(note_json)}}), 200
+
+
+@app.get("/api/clinical-notes/load")
+def clinical_notes_load():
+    """
+    Query: ?session_id=...
+    Returns the last saved clinical note (if any).
+    """
+    session_id = request.args.get("session_id", "")
+    if not session_id:
+        return jsonify({"error": "Missing session_id"}), 400
+    sess = session_context.get(session_id, {}) if isinstance(session_context, dict) else {}
+    return jsonify({
+        "ok": True,
+        "session_id": session_id,
+        "note_markdown": sess.get("clinical_note_markdown") or "",
+        "note_json": sess.get("clinical_note_json") or None
+    }), 200
 
 if __name__ == "__main__":
     app.run(host="127.0.0.1", port=5050, debug=True)

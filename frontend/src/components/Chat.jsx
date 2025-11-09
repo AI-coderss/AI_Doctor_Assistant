@@ -29,6 +29,9 @@ import ChatBubbleChart from "./ChatBubbleChart.jsx";
 import { Howl } from "howler";
 import useDRGValidatorStore from "../store/useDRGValidatorStore";
 import DRGValidator from "./DRGValidator";
+import ClinicalNotes from "./ClinicalNotes.jsx";
+import "../styles/clinical-notes.css";
+
 // 🧪 Lab Voice Agent (VAD, suggestions + approve)
 import LabVoiceAgent from "./LabVoiceAgent.jsx";
 
@@ -474,6 +477,63 @@ function LabOrdersTable({ rows = [], onSend, sending }) {
         </button>
       </div>
     </div>
+  );
+}
+/* ---------- Bubble Tabs (for Clinical Notes) ---------- */
+function BubbleTabs({ tabs, active, onChange }) {
+  return (
+    <div className="cn-toolbar" style={{ marginTop: 6, marginBottom: 10 }}>
+      {Object.keys(tabs).map(key => (
+        <button
+          key={key}
+          className={`cn-chip ${active === key ? 'active' : ''}`}
+          onClick={() => onChange(key)}
+        >
+          {tabs[key].label}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+function SecondOpinionTabbedBubble({
+  opinion,
+  narrative,
+  sessionId,
+  handleAddLabToTable,
+  buildAgentContext,
+}) {
+  const [activeTab, setActiveTab] = React.useState("opinion");
+
+  // Reuse your existing transcript/context
+  const transcript =
+    typeof buildAgentContext === "function"
+      ? buildAgentContext()
+      : (useDosageStore.getState()?.transcript || "");
+
+  const tabs = {
+    opinion: { label: "Second Opinion" },
+    notes: { label: "Clinical Notes" },
+  };
+
+  return (
+    <>
+      <BubbleTabs tabs={tabs} active={activeTab} onChange={setActiveTab} />
+
+      {activeTab === "opinion" ? (
+        <SecondOpinionPanel
+          data={opinion}
+          narrative={narrative}
+          onAddLab={handleAddLabToTable}
+        />
+      ) : (
+        <ClinicalNotes
+          sessionId={sessionId}
+          transcript={transcript}
+          autostart={true}
+        />
+      )}
+    </>
   );
 }
 
@@ -1517,13 +1577,13 @@ const Chat = () => {
                 {isLabCard ? (
                   <LabsPanel labs={chat.labs} meta={chat.meta} />
                 ) : isSecondOpinion ? (
-
-                  <SecondOpinionPanel
-                    data={chat.opinion}
+                  <SecondOpinionTabbedBubble
+                    opinion={chat.opinion}
                     narrative={chat.narrative}
-                    onAddLab={handleAddLabToTable}
+                    sessionId={sessionId}
+                    handleAddLabToTable={handleAddLabToTable}
+                    buildAgentContext={typeof buildAgentContext === "function" ? buildAgentContext : null}
                   />
-
                 ) : isLabOrders ? (
                   <LabOrdersTable
                     rows={labOrders}

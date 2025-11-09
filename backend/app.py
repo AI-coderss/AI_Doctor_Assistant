@@ -313,7 +313,7 @@ CORS(
             "supports_credentials": True,
             "max_age": 86400,
         },
-         r"/helper-agent/*": {
+         r"/api/helper-agent/rtc-connect": {
         "origins": [
             "https://ai-doctor-assistant-app-dev.onrender.com",
             "http://localhost:3000",
@@ -322,7 +322,17 @@ CORS(
         "methods": ["GET", "POST", "OPTIONS"],
         "allow_headers": ["Content-Type", "Authorization", "X-Session-Id"]
     }
-    },
+    ,
+    r"/api/helper-agent/context": {
+        "origins": [
+            "https://ai-doctor-assistant-app-dev.onrender.com",
+            "http://localhost:3000",
+            "http://127.0.0.1:3000",
+        ],
+        "methods": ["GET", "POST", "OPTIONS"],
+        "allow_headers": ["Content-Type", "Authorization", "X-Session-Id"]
+    }
+    }
 )
 
 # Optional: hard cap request size (mirrors OCR_MAX_BYTES)

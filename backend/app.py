@@ -186,6 +186,17 @@ CORS(
             "supports_credentials": True,
             "max_age": 86400,
        },
+       r"api/share/generate-message" :{
+           "origins": [
+                "https://ai-doctor-assistant-app-dev.onrender.com",
+                "http://localhost:3000",
+            ],
+            "methods": ["POST", "OPTIONS"],
+            "allow_headers": ["Content-Type", "Authorization", "Accept", "X-Requested-With", "X-Session-Id"],
+            "expose_headers": ["Content-Type"],
+            "supports_credentials": True,
+            "max_age": 86400,
+       },
         r"/meds/parse": {
             "origins": [
                 "https://ai-doctor-assistant-app-dev.onrender.com",
@@ -4750,15 +4761,29 @@ def clinical_notes_icd10_search():
 # Share / Compose & Send
 # =======================
 
-def _build_share_compose_prompt(note_markdown: str, patient: dict, ctx: dict, to_email: str | None):
+def _build_share_compose_prompt(
+    note_markdown: str,
+    patient: dict,
+    ctx: dict,
+    to_email: str | None,
+):
     """
     Returns an instruction that makes GPT return STRICT JSON ONLY for an email draft.
     The JSON must include: subject, body, summary.
+
+    This version asks for:
+    - A concise dashboard-level summary.
+    - A BODY that is still short, but clearly structured:
+        * "Summary of case:"
+        * "Clinical rationale and interpretation:"
+        * "Requested actions / next steps:" (instructions for the secretary)
+    and uses the clinical context (ctx) as much as possible.
     """
     patient_name = (patient or {}).get("name") or ""
     patient_id = (patient or {}).get("id") or ""
     condition = (ctx or {}).get("condition") or ""
     desc = (ctx or {}).get("description") or ""
+    ctx_brief = (ctx or {}).get("summary") or (ctx or {}).get("plan") or ""
 
     return (
         "You are a clinical communications assistant. Return STRICT JSON ONLY with keys:\n"
@@ -4766,18 +4791,29 @@ def _build_share_compose_prompt(note_markdown: str, patient: dict, ctx: dict, to
         "Rules:\n"
         "- English only. Professional, concise, courteous.\n"
         "- Address to a clinic secretary; do not include PHI beyond patient name/ID.\n"
-        "- Subject <= 90 chars. Body <= 170 words. Keep it readable, short paragraphs.\n"
-        "- Include brief case context and the purpose of the attachment (clinical note PDF).\n"
-        "- If patient name/ID missing, gracefully omit.\n"
-        "- No Markdown code-fences. No extra keys.\n\n"
+        "- Subject <= 90 chars.\n"
+        "- Body <= 220 words, but still focused and readable.\n"
+        "- BODY MUST be structured with the following plain-text sections:\n"
+        '    1) "Summary of case:" — 2–4 sentences summarising the case and main issues.\n'
+        '    2) "Clinical rationale and interpretation:" — briefly explain key findings, differentials, and reasoning.\n'
+        '    3) "Requested actions / next steps:" — concrete, action-oriented instructions for the secretary (e.g. book tests, schedule follow-up, forward to consultant, etc.).\n'
+        "- Use the clinical note + session context to make the message highly context-aware and specific to this case.\n"
+        "- If patient name/ID are missing, gracefully omit them.\n"
+        "- The `summary` field is a 1–2 sentence dashboard-style summary of the case and what is being requested (no headings).\n"
+        "- Explain only what is relevant to the secretary; avoid technical over-detail that does not change workflow.\n"
+        "- Explicitly mention the attached clinical note PDF as the main reference document.\n"
+        "- No Markdown code-fences. No extra keys. JSON OBJECT ONLY.\n\n"
         f"Patient Name: {patient_name}\n"
         f"Patient ID / File #: {patient_id}\n"
         f"Condition (if known): {condition}\n"
         f"Case description (if known): {desc}\n"
+        f"Context summary / plan (if available): {ctx_brief}\n"
         f"Recipient email (if provided): {to_email or ''}\n\n"
+        "Use the following clinical note as your main clinical context.\n"
         "Clinical Note (Markdown):\n"
         f"{note_markdown}\n"
     )
+
 
 @app.post("/api/share/compose")
 def share_compose():
@@ -4792,6 +4828,9 @@ def share_compose():
       }
     Returns:
       { "subject":"...", "body":"...", "summary":"...", "session_id":"..." }
+
+    The reply is context-aware (uses the stored session context + note markdown)
+    and the BODY includes: Summary of case, Clinical rationale, and Requested actions.
     """
     data = request.get_json() or {}
     session_id = data.get("session_id", str(uuid4()))
@@ -4863,15 +4902,16 @@ def share_send():
 
     # No-op delivery for now; just acknowledge and log
     payload = {
-        "to": to,
-        "subject": subject,
-        "body": body,
-        "has_attachment": bool(attachment and attachment.get("content_base64")),
-        "attachment_name": (attachment or {}).get("filename"),
+      "to": to,
+      "subject": subject,
+      "body": body,
+      "has_attachment": bool(attachment and attachment.get("content_base64")),
+      "attachment_name": (attachment or {}).get("filename"),
     }
     logging.info("DRY SEND (queued=False): %s", payload)
 
     return jsonify({"ok": True, "queued": False, "dry_run": True, "echo": payload}), 200
+
 
 if __name__ == "__main__":
     app.run(host="127.0.0.1", port=5050, debug=True)

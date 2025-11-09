@@ -1,22 +1,32 @@
-/* ===== Theme ===== */
+/* ========================
+   THEME
+======================== */
 :root{
   --primary: #534CE8;
-  --primary-600: #534CE8;
-  --primary-500: #6A64EC; /* lighter hover tint */
+  --primary-500: #6A64EC; /* hover tint */
   --primary-700: #433ECC; /* pressed */
   --border: #e5e7eb;
   --panel: #ffffff;
   --text: #0f172a;
   --muted: #6b7280;
+
+  /* Stable control sizing */
+  --chip-font: 13px;
+  --btn-font: 13px;
+  --btn-lh: 1.2;
 }
 
-/* ===== Container / Toolbar ===== */
+/* ========================
+   CONTAINER / TOOLBAR
+======================== */
 .cn-root{
   border: 1px solid var(--border);
   border-radius: 14px;
   padding: 12px;
   background: var(--panel);
   color: var(--text);
+  font-size: 14px;            /* stabilize base size */
+  box-sizing: border-box;
 }
 
 .cn-toolbar{
@@ -24,18 +34,24 @@
   align-items: center;
   gap: 8px;
   margin-bottom: 10px;
+  font-size: 0;               /* prevent inline text nodes affecting layout */
 }
 
-.cn-tabs-inline{
-  display: flex;
-  gap: 6px;
+/* Ensure toolbar controls NEVER inherit huge sizes from outside */
+.cn-toolbar .cn-btn,
+.cn-toolbar .cn-chip{
+  font-size: var(--btn-font) !important;
+  line-height: var(--btn-lh) !important;
 }
 
+.cn-tabs-inline{ display: flex; gap: 6px; }
 .cn-spacer{ flex: 1; }
 
-/* ===== Pills / Tabs ===== */
+/* ========================
+   PILLS / TABS
+======================== */
 .cn-chip{
-  font-size: 12px;
+  font-size: var(--chip-font);
   padding: 6px 10px;
   border-radius: 999px;
   border: 1px solid #d1d5db;
@@ -43,11 +59,12 @@
   color: inherit;
   cursor: pointer;
   transition:
-    background-color .2s ease,
-    border-color .2s ease,
-    color .2s ease,
-    box-shadow .2s ease,
-    transform .15s ease;
+    background-color .18s ease,
+    border-color .18s ease,
+    color .18s ease,
+    box-shadow .18s ease,
+    transform .12s ease;
+  box-sizing: border-box;
 }
 .cn-chip:hover{
   background: var(--primary);
@@ -72,9 +89,12 @@
   box-shadow: 0 0 0 3px rgba(83,76,232,.25);
 }
 
-/* ===== Buttons ===== */
+/* ========================
+   BUTTONS
+======================== */
 .cn-btn{
-  font-size: 13px;
+  font-size: var(--btn-font);
+  line-height: var(--btn-lh);
   padding: 8px 12px;
   border-radius: 10px;
   border: 1px solid #cbd5e1;
@@ -82,11 +102,12 @@
   color: inherit;
   cursor: pointer;
   transition:
-    background-color .2s ease,
-    border-color .2s ease,
-    color .2s ease,
-    box-shadow .2s ease,
-    transform .15s ease;
+    background-color .18s ease,
+    border-color .18s ease,
+    color .18s ease,
+    box-shadow .18s ease,
+    transform .12s ease;
+  box-sizing: border-box;
 }
 .cn-btn:hover{ background: #eef2ff; }
 .cn-btn:active{ transform: translateY(1px); }
@@ -119,9 +140,7 @@
   background: transparent;
   border-color: #cbd5e1;
 }
-.cn-btn.ghost:hover{
-  background: #f3f4f6;
-}
+.cn-btn.ghost:hover{ background: #f3f4f6; }
 
 .cn-btn:focus-visible{
   outline: none;
@@ -133,20 +152,21 @@
   transform: none;
 }
 
-/* ===== Grid / Cards ===== */
+/* ========================
+   GRID / CARDS
+======================== */
 .cn-grid{
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
   gap: 10px;
 }
-
 .cn-card{
   border: 1px solid var(--border);
   border-radius: 12px;
   padding: 10px;
   background: #ffffff;
+  box-sizing: border-box;
 }
-
 .cn-card-head{
   display: flex;
   gap: 8px;
@@ -154,7 +174,6 @@
   justify-content: space-between;
   margin-bottom: 6px;
 }
-
 .cn-title{
   font-weight: 700;
   font-size: 14px;
@@ -163,21 +182,20 @@
   background: transparent;
 }
 
-/* Actions row inside card */
-.cn-card-actions{
-  display: flex;
-  gap: 6px;
-}
+/* actions row inside card */
+.cn-card-actions{ display: flex; gap: 6px; }
 
-/* ===== Inputs ===== */
+/* ========================
+   INPUTS
+======================== */
 .cn-input{
   width: 100%;
   padding: 8px 10px;
   border-radius: 10px;
   border: 1px solid var(--border);
   background: #fff;
+  box-sizing: border-box;
 }
-
 .cn-textarea{
   width: 100%;
   min-height: 140px;
@@ -186,15 +204,18 @@
   padding: 8px;
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
   font-size: 13px;
+  box-sizing: border-box;
 }
-
 .cn-help{
   font-size: 12px;
   color: var(--muted);
   margin-top: 4px;
 }
 
-/* ===== Preview ===== */
+/* ========================
+   PREVIEW (Markdown)
+   – Scoped typography so it never affects toolbar/buttons
+======================== */
 .cn-preview{
   white-space: pre-wrap;
   background: #f9fafb;
@@ -203,14 +224,34 @@
   border-radius: 10px;
 }
 
-/* ===== Streaming progress ===== */
+.cn-card .markdown{ /* add className "markdown" to your ReactMarkdown if you want tighter scope */
+  font-size: 14px;
+  line-height: 1.45;
+}
+.cn-card .markdown h1{ font-size: 20px; margin: 0 0 8px; }
+.cn-card .markdown h2{ font-size: 18px; margin: 10px 0 6px; }
+.cn-card .markdown h3{ font-size: 16px; margin: 8px 0 4px; }
+.cn-card .markdown p,
+.cn-card .markdown li{ font-size: 14px; }
+.cn-card .markdown ul{ padding-left: 1.1rem; }
+.cn-card .markdown code{ background:#f3f4f6; border:1px solid #e5e7eb; padding:.1rem .25rem; border-radius:6px; }
+
+/* If you didn't set "markdown" class in JSX, this fallback keeps sizing sane */
+.cn-card h1{ font-size: 20px; margin: 0 0 8px; }
+.cn-card h2{ font-size: 18px; margin: 10px 0 6px; }
+.cn-card h3{ font-size: 16px; margin: 8px 0 4px; }
+.cn-card p,
+.cn-card li{ font-size: 14px; line-height: 1.45; }
+
+/* ========================
+   STREAMING
+======================== */
 .cn-streaming{
   margin-top: 12px;
   display: flex;
   gap: 10px;
   align-items: flex-start;
 }
-
 .cn-spinner{
   width: 14px;
   height: 14px;
@@ -220,15 +261,13 @@
   animation: cnspin 1s linear infinite;
   margin-top: 4px;
 }
-
-@keyframes cnspin{
-  to{ transform: rotate(360deg); }
-}
-
+@keyframes cnspin{ to{ transform: rotate(360deg); } }
 .cn-stream-box{ flex: 1; }
 .cn-stream-title{ font-weight: 700; margin-bottom: 4px; }
 
-/* ===== Errors ===== */
+/* ========================
+   ERRORS
+======================== */
 .cn-error{
   color: #b91c1c;
   background: #fee2e2;
@@ -238,7 +277,9 @@
   margin-bottom: 8px;
 }
 
-/* ===== Modal (centered) ===== */
+/* ========================
+   MODAL (centered)
+======================== */
 .cn-modal-overlay{
   position: fixed;
   inset: 0;
@@ -249,7 +290,6 @@
   z-index: 9999;
   padding: 16px;
 }
-
 .cn-modal{
   width: min(680px, 96vw);
   background: #fff;
@@ -259,19 +299,16 @@
   box-shadow: 0 20px 60px rgba(0,0,0,.25);
   padding: 14px;
 }
-
 .cn-modal-header{
   display: flex;
   align-items: center;
   justify-content: space-between;
   margin-bottom: 10px;
 }
-
 .cn-modal-title{
   font-weight: 800;
   font-size: 16px;
 }
-
 .cn-modal-close{
   border: none;
   background: transparent;
@@ -279,26 +316,22 @@
   font-size: 18px;
   line-height: 1;
 }
-
 .cn-field{
   display: grid;
   gap: 6px;
   margin-bottom: 10px;
 }
-
 .cn-field > label{
   font-size: 13px;
   color: #111827;
   font-weight: 700;
 }
-
 .cn-radio-row{
   display: flex;
   gap: 12px;
   flex-wrap: wrap;
   color: #111827;
 }
-
 .cn-modal-actions{
   display: flex;
   justify-content: flex-end;
@@ -306,12 +339,13 @@
   margin-top: 6px;
 }
 
-/* ===== Utilities ===== */
+/* ========================
+   UTILITIES
+======================== */
 .cn-row{ display: flex; gap: 6px; }
 
-/* ===== Motion preferences ===== */
+/* Motion preferences */
 @media (prefers-reduced-motion: reduce){
-  .cn-chip,
-  .cn-btn{ transition: none; }
-  .cn-spinner{ animation: none; }
+  .cn-chip, .cn-btn { transition: none; }
+  .cn-spinner { animation: none; }
 }

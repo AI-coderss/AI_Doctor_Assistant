@@ -504,7 +504,7 @@ export default function LabVoiceAgent({
 
         <div className="ha-orb">
           <div className="ha-orb-ring" aria-hidden="true" />
-          <Orb className="ha-orb-canvas" />
+          <Orb  boost={5.5} className="ha-orb-canvas" />
         </div>
 
         <div className="va-controls">

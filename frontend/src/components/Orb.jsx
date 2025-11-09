@@ -21,7 +21,7 @@ export default function Orb({
   alphaDecay = 0.06,   // trail fade per frame on OFFSCREEN layer
   lineAlpha = 0.18,    // line opacity
   dprCap = 2,          // devicePixelRatio cap
-  boost = 1.0,         // extra speed multiplier (e.g. 2.6 while AI speaks)
+  boost = 3.0,         // extra speed multiplier (e.g. 2.6 while AI speaks)
   className = "",
   style = {},          // e.g. { minHeight: 240 }
 }) {

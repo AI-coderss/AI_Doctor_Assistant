@@ -1,12 +1,14 @@
 # voice.py — Realtime + Function-Calling contract for LabVoiceAgent & HelperAgent
+import ast
 from flask import Flask, request, Response, jsonify, stream_with_context
 from flask_cors import CORS
 import requests
 import os
 import json
 import logging
+from uuid import uuid4
 from dotenv import load_dotenv
-
+from openai import OpenAI
 # ===== Optional RAG bits (kept from your original) =====
 from langchain_openai import OpenAIEmbeddings
 from langchain_qdrant import Qdrant
@@ -32,11 +34,40 @@ CORS(app, resources={
         "methods": ["GET", "POST", "OPTIONS"],
         "allow_headers": ["Content-Type", "Authorization", "X-Session-Id"]
     },
+     r"/api/*": {
+        "origins": [
+            "https://ai-doctor-assistant-app-dev.onrender.com",
+            "https://ai-doctor-assistant-backend-server.onrender.com",
+            "http://localhost:3000",
+            "http://127.0.0.1:3000",
+        ],
+        "methods": ["GET", "POST", "OPTIONS"],
+        "allow_headers": ["Content-Type", "Authorization", "X-Session-Id"]
+    },
+    r"/helper-agent/*": {
+        "origins": [
+            "https://ai-doctor-assistant-app-dev.onrender.com",
+            "http://localhost:3000",
+            "http://127.0.0.1:3000",
+        ],
+        "methods": ["GET", "POST", "OPTIONS"],
+        "allow_headers": ["Content-Type", "Authorization", "X-Session-Id"]
+    },
+    # NEW: accept the /api/helper-agent/* prefix too
+    r"/api/helper-agent/*": {
+        "origins": [
+            "https://ai-doctor-assistant-app-dev.onrender.com",
+            "http://localhost:3000",
+            "http://127.0.0.1:3000",
+        ],
+        "methods": ["GET", "POST", "OPTIONS"],
+        "allow_headers": ["Content-Type", "Authorization", "X-Session-Id"]
+    }
 })
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("voice")
-
+chat_sessions = {}
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 if not OPENAI_API_KEY:
     raise EnvironmentError("OPENAI_API_KEY not set")
@@ -44,11 +75,27 @@ if not OPENAI_API_KEY:
 OPENAI_SESSION_URL = "https://api.openai.com/v1/realtime/sessions"
 OPENAI_API_URL     = "https://api.openai.com/v1/realtime"
 CHAT_API_URL       = "https://api.openai.com/v1/chat/completions"
-
+oai_client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 # Realtime config
 MODEL_ID = "gpt-4o-realtime-preview-2024-12-17"
 VOICE    = "ballad"  # client can override to "alloy" via session.update
+session_context = globals().get("session_context", {})
+if session_context is None:
+    session_context = {}
+try:
+    chat_sessions
+except NameError:
+    from collections import defaultdict
+    chat_sessions = defaultdict(list)
+try:
+    session_context
+except NameError:
+    session_context = {}
 
+try:
+    ast.expr_context
+except NameError:
+    helper_context = {} 
 # Your global system prompt
 from prompts.system_prompt import SYSTEM_PROMPT as DEFAULT_INSTRUCTIONS
 
@@ -462,6 +509,62 @@ def clinical_notes_save():
         "updated_at": __import__("datetime").datetime.utcnow().isoformat() + "Z"
     }
     return jsonify({"ok": True})
+@app.post("/api/clinical-notes/suggest-section")
+def clinical_notes_suggest_section():
+    """
+    Body: { session_id?: str, transcript?: str, title: str, style?: 'paragraph'|'bullets' }
+    Returns: { ok: true, text: "..." }
+    """
+    if not oai_client:
+        return jsonify({"ok": False, "error": "OpenAI client not available"}), 500
+
+    data = request.get_json(silent=True) or {}
+    session_id = data.get("session_id", str(uuid4()))
+    transcript = (data.get("transcript") or "").strip()
+    title = (data.get("title") or "").strip()
+    style = (data.get("style") or "paragraph").lower()
+
+    if not title:
+        return jsonify({"ok": False, "error": "Missing title"}), 400
+
+    # Pull any saved note (to keep voice consistent)
+    sess = session_context.get(session_id, {}) if isinstance(session_context, dict) else {}
+    existing_md = sess.get("clinical_note_markdown") or ""
+
+    bullets_hint = "Use short bullet points." if style == "bullets" else "Use a concise paragraph (3–6 lines)."
+
+    # Tiny RAG-boost by peeking stored transcript/context (if any)
+    ctx = helper_context.get(session_id, {})
+    extra = (ctx.get("context") or "").strip()
+
+    sys = (
+        "You are a clinical scribe. Write a single new section for a clinical note.\n"
+        f"Section heading: {title}\n"
+        f"{bullets_hint}\n"
+        "Avoid PHI; be factual and concise.\n"
+        "Do NOT surround with markdown fences. Do NOT add extra headings beyond the section content."
+    )
+    usr = (
+        f"Relevant transcript:\n{transcript or '(none)'}\n\n"
+        f"Existing note (if any):\n{existing_md or '(none)'}\n\n"
+        f"Extra case context:\n{extra or '(none)'}"
+    )
+
+    try:
+        comp = oai_client.chat.completions.create(
+            model=os.getenv("OAI_SUGGEST_MODEL", "gpt-4o-mini"),
+            temperature=0.4,
+            messages=[
+                {"role": "system", "content": sys},
+                {"role": "user", "content": usr}
+            ]
+        )
+        text = comp.choices[0].message.content or ""
+        text = text.strip()
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+    return jsonify({"ok": True, "text": text})
 
 # ===== Run =====
 if __name__ == "__main__":

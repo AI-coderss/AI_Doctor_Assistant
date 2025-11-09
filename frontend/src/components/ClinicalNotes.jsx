@@ -1,27 +1,5 @@
+/* eslint-disable react-hooks/exhaustive-deps */
 /* eslint-disable no-unused-vars */
-/* ClinicalNotes.jsx — function-call aware, RAG-ready suggest endpoint,
-   centered Add Section modal, responsive editor grid, high-fidelity PDF export (no logo),
-   safe remark-gfm import, ICD-10 Finder (Edit panel), and
-   editable ICD-10 table in Preview with row-level animated search + add/remove rows.
-   CHANGE: After clicking “Apply”, suggestion list collapses/clears.
-*/
-
-/* eslint-disable no-unused-vars */
-/* ClinicalNotes.jsx — function-call aware, RAG-ready suggest endpoint,
-   centered Add Section modal, responsive editor grid, high-fidelity PDF export (no logo),
-   safe remark-gfm import, ICD-10 Finder (Edit panel), and
-   editable ICD-10 table in Preview with row-level animated search + add/remove rows.
-   CLEAN FORMAT: DDX serialized as "Diagnosis | CODE | 80%" (no dashes/backticks/asterisks).
-*/
-
-/* eslint-disable no-unused-vars */
-/* ClinicalNotes.jsx — function-call aware, RAG-ready suggest endpoint,
-   centered Add Section modal, responsive editor grid, high-fidelity PDF export (no logo),
-   safe remark-gfm import, ICD-10 Finder (Edit panel), and
-   editable ICD-10 table in Preview with row-level animated search + add/remove rows.
-   CLEAN FORMAT: DDX serialized as "Diagnosis | CODE | 80%" (no dashes/backticks/asterisks).
-*/
-
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import { FaDownload, FaSearch } from "react-icons/fa";
@@ -709,7 +687,7 @@ export default function ClinicalNotes({
     }
   };
 
-  // UPDATED: Apply (Edit panel) writes clean lines (no dashes/backticks) and clears suggestions
+  // Apply (Edit panel): clean lines, clear suggestions
   const applyICD = (dx, code) => {
     const arr = [...soap];
     let idx = arr.findIndex((s) =>
@@ -730,7 +708,6 @@ export default function ClinicalNotes({
           const probStr = s.prob == null ? "" : ` | ${s.prob}%`;
           return `${s.name} | ${code}${probStr}`;
         }
-        // also sanitize non-matching lines to remove any bullets/backticks
         return s.line;
       });
       if (!found) newLines.push(`${dx} | ${code}`);
@@ -742,9 +719,13 @@ export default function ClinicalNotes({
 
   /* ========= Preview: Editable DDX table ========= */
   const [ddxEditRows, setDdxEditRows] = useState([]);
+
+  // Seed preview rows ONLY when entering Preview (prevents overwriting newly added blank rows)
   useEffect(() => {
-    setDdxEditRows((ddxRows || []).map(r => ({ ...r })));
-  }, [ddxRows]);
+    if (!editMode) {
+      setDdxEditRows(extractDdxFromSoap(soap));
+    }
+  }, [editMode, /* not soap to avoid constant resync while editing */]);
 
   const writeBackDdx = (rows) => {
     const lines = (rows || [])
@@ -765,7 +746,7 @@ export default function ClinicalNotes({
       /^(differential\s+diagnosis|differentials?)$/i.test((s.title || "").trim())
     );
     if (idx < 0) {
-      if (!lines) return;
+      if (!lines) return; // don't create empty section
       arr.push({ key: "differential_diagnosis", title: "Differential Diagnosis", text: lines });
     } else {
       arr[idx] = { ...arr[idx], text: lines };
@@ -788,7 +769,7 @@ export default function ClinicalNotes({
   const addRow = () => {
     const next = [...ddxEditRows, { diagnosis: "", icd10: "", probability: "" }];
     setDdxEditRows(next);
-    writeBackDdx(next);
+    // Do NOT persist empty line to SOAP yet; persist after the user types something.
   };
 
   const removeRow = (i) => {
@@ -1164,4 +1145,3 @@ export default function ClinicalNotes({
     </div>
   );
 }
-

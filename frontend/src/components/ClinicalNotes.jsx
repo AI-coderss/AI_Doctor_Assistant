@@ -7,6 +7,12 @@
    function-call aware (Helper Agent events), RAG-ready suggest endpoint,
    working Add/Remove and never-freezing editor grid.
 */
+/* ClinicalNotes.jsx — function-call aware, RAG-ready suggest endpoint,
+   centered Add Section modal, horizontal mini buttons, responsive editor grid. */
+
+/* ClinicalNotes.jsx — function-call aware, RAG-ready suggest endpoint,
+   centered Add Section modal, horizontal mini buttons, responsive editor grid. */
+
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
@@ -45,6 +51,7 @@ function parseMarkdownToSoap(md = "") {
   }
   return out;
 }
+
 function stringifySoapMarkdown(soapArr) {
   return (soapArr || DEFAULT_SOAP)
     .map(s => `## ${s.title}\n${(s.text || "").trim() || "—"}`)
@@ -214,7 +221,7 @@ export default function ClinicalNotes({ sessionId, transcript, autostart = true,
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sessionId]);
 
-  // ===== Helper Agent event bridge =====
+  // ===== Helper / Voice Agent bridge (function-calling) =====
   useEffect(() => {
     const byKey = (k) => {
       const idx = (soap || []).findIndex(s => (s.key || "").toLowerCase() === String(k || "").toLowerCase());
@@ -269,7 +276,6 @@ export default function ClinicalNotes({ sessionId, transcript, autostart = true,
       setHasStreamed(true);
     };
 
-    // Let agent open the modal prefilled
     const onAddOpen = (e) => {
       const d = e.detail || {};
       openAdd(d.title || "", d.anchor_key || (soap[soap.length-1]?.key), d.position || "after", d.style || "paragraph");
@@ -452,7 +458,7 @@ export default function ClinicalNotes({ sessionId, transcript, autostart = true,
               rows={10}
               value={addPreview}
               onChange={(e)=>setAddPreview(e.target.value)}
-              placeholder="(generated content appears here; you can edit before inserting)"
+              placeholder="(generated or manual content; you can edit before inserting)"
             />
           </div>
         </div>
@@ -473,25 +479,41 @@ export default function ClinicalNotes({ sessionId, transcript, autostart = true,
             setSoap(arr); saveCache({ soap: arr, hasStreamed: hasStreamed || true });
           }}
         />
+
         <div className="cn-card-actions">
-          <button type="button" className="cn-chip" onClick={() => {
-            const arr = [...soap]; arr.splice(idx, 1); setSoap(arr); saveCache({ soap: arr, hasStreamed: hasStreamed || true });
-          }}>Remove</button>
-          <button type="button" className="cn-chip" onClick={() => {
-            const custom = { title: "Custom Section", key: slugify("Custom Section"), text: "" };
-            const arr = [...soap]; arr.splice(idx + 1, 0, custom);
-            setSoap(arr); saveCache({ soap: arr, hasStreamed: hasStreamed || true });
-          }}>+ Section</button>
           <button
             type="button"
-            className="cn-chip"
+            className="cn-mini is-danger"
+            onClick={() => {
+              const arr = [...soap]; arr.splice(idx, 1);
+              setSoap(arr); saveCache({ soap: arr, hasStreamed: hasStreamed || true });
+            }}
+          >
+            Remove
+          </button>
+
+          {/* CHANGED: “+ Section” opens the same Add Section modal */}
+          <button
+            type="button"
+            className="cn-mini is-ghost"
             onClick={() => openAdd("", sec.key, "after", "paragraph")}
-            title="Add new section after this one (AI)"
+            title="Open Add Section popup"
+          >
+            + Section
+          </button>
+
+          {/* Optional shortcut: also opens the modal (pre-filled) */}
+          <button
+            type="button"
+            className="cn-mini is-primary"
+            onClick={() => openAdd("", sec.key, "after", "paragraph")}
+            title="Add new section after this one (AI or manual)"
           >
             Add w/ AI
           </button>
         </div>
       </div>
+
       <textarea
         className="cn-textarea"
         placeholder={`Write ${sec.title}…`}
@@ -529,10 +551,14 @@ export default function ClinicalNotes({ sessionId, transcript, autostart = true,
         <button type="button" className="cn-btn ghost" onClick={() => setEditMode(v=>!v)}>{editMode ? "Preview" : "Edit"}</button>
         <button type="button" className="cn-btn ghost" onClick={() => setOrganized(v=>!v)}>{organized ? "Ungroup" : "Organize"}</button>
 
-        {/* Add Section (center modal) */}
-        <button type="button" className="cn-btn ghost" onClick={() => openAdd()}>Add Section</button>
+        {/* Toolbar Add Section (opens same modal) */}
+        <button type="button" className="cn-btn ghost" onClick={() => openAdd()}>
+          Add Section
+        </button>
 
-        <button type="button" className="cn-btn primary" onClick={approveAndSave} disabled={streaming || !soap?.length}>Approve & Save</button>
+        <button type="button" className="cn-btn primary" onClick={approveAndSave} disabled={streaming || !soap?.length}>
+          Approve & Save
+        </button>
       </div>
 
       {error && !addOpen ? <div className="cn-error">{error}</div> : null}
@@ -586,5 +612,3 @@ export default function ClinicalNotes({ sessionId, transcript, autostart = true,
     </div>
   );
 }
-
-

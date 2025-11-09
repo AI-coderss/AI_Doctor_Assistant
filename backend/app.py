@@ -3567,14 +3567,20 @@ def lab_agent_rtc_connect():
     if not offer_sdp:
         return Response("No SDP provided", status=400, mimetype="text/plain")
 
-    session_id = request.args.get("session_id") or request.headers.get("X-Session-Id") or ""
-    if not session_id:
-        session_id = "anon"
-
+    session_id = request.args.get("session_id") or request.headers.get("X-Session-Id") or "anon"
     st = _sess(session_id)
-    merged_instructions = SYSTEM_PROMPT + _build_context_instructions(st.get("context"), st.get("approved"))
+
+    merged_instructions = (
+        SYSTEM_PROMPT
+        + _build_context_instructions(st.get("context"), st.get("approved"))
+        + "\n\n### Clinical Notes actions (function calling)\n"
+          "- Only call a function after the clinician asks you to perform that action.\n"
+          "- Keep voice responses short. When you call a function, do not narrate its parameters.\n"
+          "- For adding a section: if the user does not provide the content, generate a concise draft first, then insert.\n"
+    )
 
     tools = [
+        # -------------- Labs (existing) --------------
         {
             "type": "function",
             "name": "approve_lab",
@@ -3584,7 +3590,7 @@ def lab_agent_rtc_connect():
                 "additionalProperties": False,
                 "properties": {
                     "name": {"type": "string", "description": "Lab test name"},
-                    "why": {"type": "string", "description": "Rationale"},
+                    "why": {"type": "string", "description": "Short rationale"},
                     "priority": {"type": "string", "enum": ["STAT", "High", "Routine"]},
                 },
                 "required": ["name"],
@@ -3601,20 +3607,97 @@ def lab_agent_rtc_connect():
                 "required": ["name"],
             },
         },
+
+        # -------------- Clinical Notes (new) --------------
+        {
+            "type": "function",
+            "name": "clinical_add_section",
+            "description": "Add a new section to the clinical note. If text is missing, draft it first.",
+            "parameters": {
+                "type": "object",
+                "additionalProperties": False,
+                "properties": {
+                    "title": {"type": "string", "description": "Section title (e.g., Investigations)"},
+                    "text": {"type": "string", "description": "Optional section content (Markdown)"},
+                    "style": {"type": "string", "enum": ["paragraph","bullets"], "description": "If text missing, how to draft"},
+                    "anchor_key": {"type": "string", "description": "Existing section key to insert near"},
+                    "position": {"type": "string", "enum": ["before","after","end"], "description": "Where to insert"}
+                },
+                "required": ["title"]
+            }
+        },
+        {
+            "type": "function",
+            "name": "clinical_remove_section",
+            "description": "Remove a section from the clinical note.",
+            "parameters": {
+                "type": "object",
+                "additionalProperties": False,
+                "properties": {"key": {"type": "string", "description": "Section key to remove"}},
+                "required": ["key"]
+            }
+        },
+        {
+            "type": "function",
+            "name": "clinical_update_section",
+            "description": "Replace or append text to a section.",
+            "parameters": {
+                "type": "object",
+                "additionalProperties": False,
+                "properties": {
+                    "key": {"type": "string"},
+                    "text": {"type": "string"},
+                    "append": {"type": "boolean", "description": "true=append, false=replace"}
+                },
+                "required": ["key","text"]
+            }
+        },
+        {
+            "type": "function",
+            "name": "clinical_rename_section",
+            "description": "Rename (and re-key) a section.",
+            "parameters": {
+                "type": "object",
+                "additionalProperties": False,
+                "properties": {
+                    "key": {"type": "string"},
+                    "new_title": {"type": "string"},
+                    "new_key": {"type": "string"}
+                },
+                "required": ["key","new_title"]
+            }
+        },
+        {
+            "type": "function",
+            "name": "clinical_apply_markdown",
+            "description": "Replace the current note with the provided Markdown (power user).",
+            "parameters": {
+                "type": "object",
+                "additionalProperties": False,
+                "properties": {"markdown": {"type": "string"}},
+                "required": ["markdown"]
+            }
+        },
+        {
+            "type": "function",
+            "name": "clinical_save",
+            "description": "Save the current note now.",
+            "parameters": {"type": "object", "additionalProperties": False, "properties": {}}
+        },
     ]
 
+    # --- Exchange SDP with OpenAI Realtime (unchanged plumbing) ---
     import requests, os
     OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
-
+    headers = {"Authorization": f"Bearer {OPENAI_API_KEY}", "Content-Type": "application/json"}
+    payload = {
+        "model": REALTIME_MODEL,
+        "voice": REALTIME_VOICE,
+        "instructions": merged_instructions,
+        "tools": tools,
+        "turn_detection": {"type": "server_vad"},
+    }
     try:
-        headers = {"Authorization": f"Bearer {OPENAI_API_KEY}", "Content-Type": "application/json"}
-        payload = {
-            "model": REALTIME_MODEL,
-            "voice": REALTIME_VOICE,
-            "instructions": merged_instructions,
-            "tools": tools,
-            "turn_detection": {"type": "server_vad"},
-        }
         sess = requests.post(OPENAI_SESSION_URL, headers=headers, json=payload, timeout=30)
         sess.raise_for_status()
         eph = sess.json().get("client_secret", {}).get("value")
@@ -3639,6 +3722,7 @@ def lab_agent_rtc_connect():
     resp = Response(answer, status=200, mimetype="application/sdp")
     resp.headers["Cache-Control"] = "no-cache"
     return resp
+
 ############## Highcharts endpoints #################
 # ===================== Highcharts Pie: helpers + endpoints =====================
 

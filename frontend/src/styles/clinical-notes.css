@@ -1,25 +1,35 @@
 /* ========================
    THEME
+/* ========================
+   THEME
+======================== */
+/* ========================
+   THEME
 ======================== */
 :root{
-  --primary: #534CE8;
-  --primary-500: #6A64EC; /* hover tint */
-  --primary-700: #433ECC; /* pressed */
+  --primary: #534CE8;           /* light mode primary */
+  --primary-500: #6A64EC;
+  --primary-700: #433ECC;
   --border: #e5e7eb;
   --panel: #ffffff;
   --text: #0f172a;
   --muted: #6b7280;
 
-  /* Stable control sizing */
   --chip-font: 13px;
   --btn-font: 13px;
   --btn-lh: 1.2;
 }
+
+/* Prefer cyan accents in dark mode */
 @media (prefers-color-scheme: dark){
   :root{
+    --primary: #06B6D4;         /* cyan */
+    --primary-500: #22D3EE;
+    --primary-700: #0891B2;
     --panel: #0f1220;
     --text: #eef2ff;
     --border: rgba(255,255,255,.14);
+    --muted: #9aa3b2;
   }
 }
 
@@ -41,7 +51,7 @@
   align-items: center;
   gap: 8px;
   margin-bottom: 10px;
-  font-size: 0;  /* prevent inline text nodes affecting layout */
+  font-size: 0; /* prevent stray text nodes affecting layout */
 }
 
 .cn-toolbar .cn-btn,
@@ -64,12 +74,8 @@
   background: #f9fafb;
   color: inherit;
   cursor: pointer;
-  transition:
-    background-color .18s ease,
-    border-color .18s ease,
-    color .18s ease,
-    box-shadow .18s ease,
-    transform .12s ease;
+  transition: background-color .18s ease, border-color .18s ease,
+              color .18s ease, box-shadow .18s ease, transform .12s ease;
   box-sizing: border-box;
 }
 .cn-chip:hover{
@@ -96,7 +102,7 @@
 }
 
 /* ========================
-   BUTTONS
+   BUTTONS (toolbar & modal)
 ======================== */
 .cn-btn{
   font-size: var(--btn-font);
@@ -107,12 +113,8 @@
   background: #f8fafc;
   color: inherit;
   cursor: pointer;
-  transition:
-    background-color .18s ease,
-    border-color .18s ease,
-    color .18s ease,
-    box-shadow .18s ease,
-    transform .12s ease;
+  transition: background-color .18s ease, border-color .18s ease,
+              color .18s ease, box-shadow .18s ease, transform .12s ease;
   box-sizing: border-box;
 }
 .cn-btn:hover{ background: #eef2ff; }
@@ -168,6 +170,7 @@
   max-height: calc(80vh - 160px);
   overflow: auto; /* keep edit area scrollable */
 }
+
 .cn-card{
   border: 1px solid var(--border);
   border-radius: 12px;
@@ -178,11 +181,13 @@
 @media (prefers-color-scheme: dark){
   .cn-card{ background: #121527; }
 }
+
+/* Title | actions on one row */
 .cn-card-head{
-  display: flex;
-  gap: 8px;
+  display: grid;
+  grid-template-columns: 1fr auto; /* title grows, actions fixed width */
   align-items: center;
-  justify-content: space-between;
+  gap: 10px;
   margin-bottom: 6px;
 }
 .cn-title{
@@ -191,8 +196,98 @@
   border: none;
   outline: none;
   background: transparent;
+  min-width: 0; /* allow shrinking instead of pushing actions down */
 }
-.cn-card-actions{ display: flex; gap: 6px; }
+
+/* Actions row: horizontal mini buttons */
+.cn-card-actions{
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 6px;
+  flex: 0 0 auto;
+  white-space: nowrap;  /* keep each button on one line */
+  flex-wrap: nowrap;
+}
+
+/* ========================
+   MINI BUTTONS (per-section)
+======================== */
+:root{
+  --mini-h: 28px;
+  --mini-font: 12.5px;
+  --mini-pad-x: 10px;
+  --mini-radius: 8px;
+}
+
+.cn-mini{
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: var(--mini-h);
+  padding: 0 var(--mini-pad-x);
+  font-size: var(--mini-font);
+  line-height: 1.2;
+  font-weight: 600;
+  border-radius: var(--mini-radius);
+  border: 1px solid var(--border);
+  background: #f9fafb;
+  color: var(--text);
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background-color .18s ease, border-color .18s ease,
+              color .18s ease, box-shadow .18s ease, transform .12s ease;
+}
+.cn-mini:hover{
+  background: var(--primary);
+  border-color: var(--primary);
+  color: #ffffff;
+  box-shadow: 0 0 0 3px rgba(83,76,232,.15);
+  transform: translateY(-1px);
+}
+.cn-mini:active{ transform: translateY(0); }
+
+.cn-mini.is-primary{
+  background: var(--primary);
+  border-color: var(--primary);
+  color: #ffffff;
+}
+.cn-mini.is-primary:hover{
+  background: var(--primary-500);
+  border-color: var(--primary-500);
+}
+
+.cn-mini.is-danger{
+  background: #ef4444;
+  border-color: #ef4444;
+  color: #ffffff;
+}
+.cn-mini.is-danger:hover{
+  background: #dc2626;
+  border-color: #dc2626;
+}
+
+.cn-mini.is-ghost{
+  background: transparent;
+  border-color: var(--border);
+}
+.cn-mini.is-ghost:hover{
+  background: #f3f4f6;
+}
+
+/* Dark mode polish for minis */
+@media (prefers-color-scheme: dark){
+  .cn-mini{
+    background: #0f172a;
+    border-color: var(--border);
+    color: var(--text);
+  }
+  .cn-mini.is-ghost:hover{ background: rgba(255,255,255,.06); }
+  .cn-mini:hover{
+    box-shadow: 0 0 0 3px rgba(6,182,212,.22);
+  }
+}
 
 /* ========================
    INPUTS
@@ -236,23 +331,22 @@
   border-radius: 10px;
 }
 
-.cn-card .markdown{
-  font-size: 14px;
-  line-height: 1.45;
-}
+.cn-card .markdown{ font-size: 14px; line-height: 1.45; }
 .cn-card .markdown h1{ font-size: 20px; margin: 0 0 8px; }
 .cn-card .markdown h2{ font-size: 18px; margin: 10px 0 6px; }
 .cn-card .markdown h3{ font-size: 16px; margin: 8px 0 4px; }
 .cn-card .markdown p,
 .cn-card .markdown li{ font-size: 14px; }
 .cn-card .markdown ul{ padding-left: 1.1rem; }
-.cn-card .markdown code{ background:#f3f4f6; border:1px solid #e5e7eb; padding:.1rem .25rem; border-radius:6px; }
+.cn-card .markdown code{
+  background:#f3f4f6; border:1px solid #e5e7eb; padding:.1rem .25rem; border-radius:6px;
+}
 
+/* Fallback if .markdown class is omitted */
 .cn-card h1{ font-size: 20px; margin: 0 0 8px; }
 .cn-card h2{ font-size: 18px; margin: 10px 0 6px; }
 .cn-card h3{ font-size: 16px; margin: 8px 0 4px; }
-.cn-card p,
-.cn-card li{ font-size: 14px; line-height: 1.45; }
+.cn-card p, .cn-card li{ font-size: 14px; line-height: 1.45; }
 
 /* ========================
    STREAMING
@@ -312,9 +406,7 @@
   color: var(--text);
   border-radius: 16px;
   border: 1px solid var(--border);
-  box-shadow:
-    0 30px 80px rgba(0,0,0,.35),
-    0 6px 24px rgba(0,0,0,.18);
+  box-shadow: 0 30px 80px rgba(0,0,0,.35), 0 6px 24px rgba(0,0,0,.18);
   padding: 16px;
   transform: translateY(0);
   animation: cnModalPop .18s ease-out;
@@ -343,11 +435,7 @@
 }
 .cn-add-body{ padding: 4px 2px 8px; }
 .cn-field{ display: grid; gap: 6px; margin-bottom: 10px; }
-.cn-field > label{
-  font-size: 13px;
-  color: #111827;
-  font-weight: 700;
-}
+.cn-field > label{ font-size: 13px; color: #111827; font-weight: 700; }
 .cn-radio-row{ display: flex; gap: 12px; flex-wrap: wrap; color: #111827; }
 .cn-modal-actions{
   display: flex;
@@ -357,64 +445,26 @@
 }
 
 /* ========================
-   DRAWER (legacy — unused; safe to keep)
-======================== */
-.cn-drawer-overlay{
-  position: fixed;
-  inset: 0;
-  background: rgba(0,0,0,.35);
-  z-index: 9998;
-}
-.cn-drawer{
-  position: fixed;
-  top: 0; right: 0;
-  height: 100vh;
-  width: min(520px, 92vw);
-  background: #fff;
-  color: var(--text);
-  border-left: 1px solid var(--border);
-  box-shadow: -16px 0 40px rgba(0,0,0,.25);
-  transform: translateX(100%);
-  transition: transform .28s ease;
-  z-index: 9999;
-  display: flex;
-  flex-direction: column;
-}
-.cn-drawer.open{ transform: translateX(0); }
-.cn-drawer-header{
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 14px;
-  border-bottom: 1px solid var(--border);
-}
-
-/* ========================
-   UTILITIES
+   UTILITIES & RESPONSIVE
 ======================== */
 .cn-row{ display: flex; gap: 6px; }
-@media (max-width: 720px){
-  .cn-row{ flex-direction: column; }
-}
+@media (max-width: 720px){ .cn-row{ flex-direction: column; } }
 
-/* Toolbar consistency */
-:root {
-  --cn-primary: #534CE8;
-  --cn-border: var(--border, #e5e7eb);
-  --cn-ink: #0f172a;
-}
-.cn-toolbar .cn-btn,
-.cn-toolbar .cn-btn.primary,
-.cn-toolbar .cn-btn.danger,
-.cn-toolbar .cn-btn.ghost {
-  font-size: 13px;
-  padding: 8px 12px;
-  line-height: 1.2;
+/* On very narrow cards, let actions wrap below the title neatly */
+@media (max-width: 420px){
+  .cn-card-head{ grid-template-columns: 1fr; }
+  .cn-card-actions{
+    margin-top: 6px;
+    justify-content: flex-start;
+    flex-wrap: wrap;
+    white-space: normal;
+  }
 }
 
 /* Differential Diagnosis block + table */
+:root { --cn-primary: var(--primary); --cn-border: var(--border); --cn-ink: var(--text); }
 .cn-ddx { margin-top: 16px; }
-.cn-ddx > h2 {
+.cn-ddx > h2{
   font-size: 16px;
   font-weight: 800;
   margin: 0 0 8px 0;
@@ -422,7 +472,7 @@
   border-bottom: 2px solid var(--cn-primary);
   padding-bottom: 4px;
 }
-.cn-table {
+.cn-table{
   width: 100%;
   border-collapse: collapse;
   border: 1px solid var(--cn-border);
@@ -430,20 +480,17 @@
   overflow: hidden;
   font-size: 13.5px;
 }
-.cn-table thead th {
+.cn-table thead th{
   text-align: left;
   padding: 10px 8px;
   background: #f6f7ff;
   border-bottom: 1px solid var(--cn-border);
 }
-.cn-table tbody td {
-  padding: 8px;
-  border-bottom: 1px solid var(--cn-border);
-}
-.cn-table tbody tr:nth-child(even) td { background: #fafbff; }
-.cn-table tbody tr:hover td { background: #f2f4ff; }
-.cn-table td.num, .cn-table th.num { text-align: right; }
-.cn-table td code {
+.cn-table tbody td{ padding: 8px; border-bottom: 1px solid var(--cn-border); }
+.cn-table tbody tr:nth-child(even) td{ background: #fafbff; }
+.cn-table tbody tr:hover td{ background: #f2f4ff; }
+.cn-table td.num, .cn-table th.num{ text-align: right; }
+.cn-table td code{
   background: #f3f4f6;
   border: 1px solid #e5e7eb;
   padding: 2px 6px;
@@ -453,31 +500,6 @@
 
 /* Motion prefs */
 @media (prefers-reduced-motion: reduce){
-  .cn-chip, .cn-btn { transition: none; }
+  .cn-chip, .cn-btn, .cn-mini { transition: none; }
   .cn-spinner { animation: none; }
-}
-
-.cn-modal-overlay{
-  position: fixed;
-  inset: 0;
-  background: rgba(0,0,0,.45);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  z-index: 9999;
-  padding: 16px;
-}
-.cn-modal-overlay--blur{
-  backdrop-filter: blur(6px) saturate(120%);
-}
-.cn-modal{
-  width: min(680px, 96vw);
-  background: #fff;
-  color: var(--text);
-  border-radius: 14px;
-  border: 1px solid var(--border);
-  box-shadow: 0 20px 60px rgba(0,0,0,.25);
-  padding: 14px;
-  max-height: 90vh;
-  overflow: auto;
 }

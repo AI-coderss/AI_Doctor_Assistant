@@ -1,5 +1,5 @@
 /* eslint-disable no-unused-vars */
-/* ClinicalNotes.jsx (centered modal, no restreams, ReactMarkdown preview) */
+/* ClinicalNotes.jsx (centered modal, no restreams, ReactMarkdown preview, PDF download) */
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
@@ -69,6 +69,10 @@ export default function ClinicalNotes({
         position: "after", // before|after|end
     });
     const [keyTouched, setKeyTouched] = useState(false);
+
+    // PDF state
+    const [downloading, setDownloading] = useState(false);
+    const previewRef = useRef(null);
 
     const controllerRef = useRef(null);
     const mountedRef = useRef(false);
@@ -256,6 +260,67 @@ export default function ClinicalNotes({
         setShowNewSection(false);
     }
 
+    // ---- PDF download (Preview only) ----
+    async function downloadPdf() {
+        if (!previewRef.current || downloading) return;
+        setDownloading(true);
+        try {
+            const [{ default: jsPDF }, { default: html2canvas }] = await Promise.all([
+                import("jspdf"),
+                import("html2canvas"),
+            ]);
+
+            const el = previewRef.current;
+            // ensure white background for capture
+            const prevBg = el.style.backgroundColor;
+            el.style.backgroundColor = "#ffffff";
+
+            const canvas = await html2canvas(el, {
+                scale: window.devicePixelRatio || 1,
+                useCORS: true,
+                backgroundColor: "#ffffff",
+            });
+            el.style.backgroundColor = prevBg;
+
+            const imgData = canvas.toDataURL("image/png");
+
+            // A4 portrait in mm
+            const pdf = new jsPDF({ orientation: "p", unit: "mm", format: "a4" });
+            const pageWidth = pdf.internal.pageSize.getWidth();
+            const pageHeight = pdf.internal.pageSize.getHeight();
+            const margin = 10;
+
+            // scale image to fit width
+            const imgWidth = pageWidth - margin * 2;
+            const imgHeight = (canvas.height * imgWidth) / canvas.width;
+
+            let heightLeft = imgHeight;
+            let position = margin;
+
+            // First page
+            pdf.addImage(imgData, "PNG", margin, position, imgWidth, imgHeight);
+            heightLeft -= (pageHeight - margin * 2);
+
+            // Additional pages
+            while (heightLeft > 0) {
+                pdf.addPage();
+                position = margin - (imgHeight - heightLeft);
+                pdf.addImage(imgData, "PNG", margin, position, imgWidth, imgHeight);
+                heightLeft -= (pageHeight - margin * 2);
+            }
+
+            const basename = `Clinical_Note_${sessionId || "session"}_${new Date()
+                .toISOString()
+                .replace(/[:.]/g, "-")}.pdf`;
+            pdf.save(basename);
+        } catch (e) {
+            console.error(e);
+            setError("Could not generate PDF.");
+        } finally {
+            setDownloading(false);
+        }
+    }
+
     const SectionCard = ({ sec, idx }) => (
         <div className="cn-card" key={`${sec.key}-${idx}`}>
             <div className="cn-card-head">
@@ -320,6 +385,12 @@ export default function ClinicalNotes({
                 <button className="cn-btn ghost" onClick={() => setOrganized(v => !v)}>{organized ? "Ungroup" : "Organize"}</button>
                 <button className="cn-btn primary" onClick={approveAndSave} disabled={streaming || !soap?.length}>Approve & Save</button>
                 <button className="cn-btn ghost" onClick={() => openNewSectionModal(-1)} title="Add a new section at the end">+ New Section</button>
+                {/* Show "Download PDF" only in Preview mode */}
+                {!editMode && (
+                    <button className="cn-btn" onClick={downloadPdf} disabled={downloading}>
+                        {downloading ? "Preparing PDF…" : "Download PDF"}
+                    </button>
+                )}
             </div>
 
             {error && <div className="cn-error">{error}</div>}
@@ -330,8 +401,8 @@ export default function ClinicalNotes({
                     {soap.map((sec, idx) => <SectionCard key={`${sec.key}-${idx}`} sec={sec} idx={idx} />)}
                 </div>
             ) : (
-                // PREVIEW MODE with ReactMarkdown
-                <div className="cn-card">
+                // PREVIEW MODE with ReactMarkdown (capture this block to PDF)
+                <div className="cn-card" ref={previewRef}>
                     {!organized ? (
                         <ReactMarkdown remarkPlugins={[remarkGfm]}>
                             {`# Clinical Note (SOAP)\n\n${mdNow}`}
@@ -412,4 +483,3 @@ export default function ClinicalNotes({
         </div>
     );
 }
-

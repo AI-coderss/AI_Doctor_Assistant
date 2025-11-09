@@ -23,34 +23,30 @@
    ICD-10 Finder + Quick Search, and EDITABLE DDx table in Preview.
 */
 
+/* eslint-disable no-unused-vars */
+/* ClinicalNotes.jsx — function-call aware, RAG-ready suggest endpoint,
+   centered Add Section modal, responsive editor grid, high-fidelity PDF export (no logo),
+   safe remark-gfm import, ICD-10 Finder (Edit panel), and
+   **editable ICD-10 table in Preview** with row-level animated search + add/remove rows.
+*/
+
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
-import remarkGfm from "remark-gfm";
-import {
-  PDFDownloadLink,
-  Document,
-  Page,
-  Text,
-  View,
-  Image,
-  StyleSheet,
-  pdf as pdfBuilder
-} from "@react-pdf/renderer";
-import { FaDownload, FaSearch, FaPlus, FaMinus } from "react-icons/fa";
+import { FaDownload, FaSearch } from "react-icons/fa";
+import { pdf, Document, Page, Text, View, StyleSheet } from "@react-pdf/renderer";
 import "../styles/clinical-notes.css";
 
-const BACKEND_BASE = "https://ai-doctor-assistant-backend-server.onrender.com";
-const REMOTE_LOGO = "https://www.zchocolat.com/img/cms/Articles/Ramadan/drSamirHP.png";
+// ---- Lazy/safe GFM plugin: loaded at runtime, falls back to none ----
+let gfmModule = null;
 
-/* ---- Interop-safe GFM plugin (prevents “is not a function”) ---- */
-const gfm = typeof remarkGfm === "function" ? remarkGfm : remarkGfm?.default;
+const BACKEND_BASE = "https://ai-doctor-assistant-backend-server.onrender.com";
 
 /* ---- SOAP defaults ---- */
 const DEFAULT_SOAP = [
   { key: "subjective", title: "Subjective", text: "" },
   { key: "objective",  title: "Objective",  text: "" },
   { key: "assessment", title: "Assessment", text: "" },
-  { key: "plan",       title: "Plan",       text: "" }
+  { key: "plan",       title: "Plan",       text: "" },
 ];
 
 const storageKey = (sid, mode) => `cn:${sid || "default"}:${mode || "markdown"}:v1`;
@@ -63,14 +59,14 @@ const slugify = (s) =>
 
 /* ---------- Helpers ---------- */
 function parseMarkdownToSoap(md = "") {
-  const out = DEFAULT_SOAP.map(x => ({...x}));
-  const map = Object.fromEntries(out.map(s => [s.title.toLowerCase(), s]));
+  const out = DEFAULT_SOAP.map((x) => ({ ...x }));
+  const map = Object.fromEntries(out.map((s) => [s.title.toLowerCase(), s]));
   const sections = md.split(/\n(?=##\s+)/g);
   for (const sec of sections) {
     const m = /^##\s+([^\n]+)\n?([\s\S]*)$/i.exec(sec.trim());
     if (!m) continue;
     const title = (m[1] || "").trim().toLowerCase();
-    const body  = (m[2] || "").trim();
+    const body = (m[2] || "").trim();
     const hit = map[title];
     if (hit) hit.text = body;
     else out.push({ key: slugify(m[1]), title: m[1].trim(), text: body });
@@ -79,7 +75,7 @@ function parseMarkdownToSoap(md = "") {
 }
 function stringifySoapMarkdown(soapArr) {
   return (soapArr || DEFAULT_SOAP)
-    .map(s => `## ${s.title}\n${(s.text || "").trim() || "—"}`)
+    .map((s) => `## ${s.title}\n${(s.text || "").trim() || "—"}`)
     .join("\n\n");
 }
 function extractDdxFromSoap(sections) {
@@ -94,8 +90,10 @@ function extractDdxFromSoap(sections) {
     return n <= 1 ? Math.round(n * 100) : Math.max(0, Math.min(100, n));
   };
   const ddxSection =
-    sections.find(s => /^(differential\s+diagnosis|differentials?)$/i.test((s.title||"").trim())) ||
-    sections.find(s => /(assessment|impression|diagnosis)/i.test((s.title||"").trim()));
+    sections.find((s) =>
+      /^(differential\s+diagnosis|differentials?)$/i.test((s.title || "").trim())
+    ) ||
+    sections.find((s) => /(assessment|impression|diagnosis)/i.test((s.title || "").trim()));
 
   if (!ddxSection?.text) return [];
   let text = ddxSection.text;
@@ -106,26 +104,25 @@ function extractDdxFromSoap(sections) {
       const obj = JSON.parse(jsonFence[1]);
       const arr = Array.isArray(obj) ? obj : (Array.isArray(obj?.items) ? obj.items : []);
       return (arr || [])
-        .map(x => ({
+        .map((x) => ({
           diagnosis: x.diagnosis || x.name || "",
           icd10: (x.icd10 || x.code || "").toString(),
-          probability: normalizeProb(x.probability ?? x.prob ?? x.p)
+          probability: normalizeProb(x.probability ?? x.prob ?? x.p),
         }))
-        .filter(r => r.diagnosis);
+        .filter((r) => r.diagnosis);
     } catch {}
   }
 
-  const lines = text.split(/\n+/).map(l => l.trim()).filter(Boolean);
+  const lines = text.split(/\n+/).map((l) => l.trim()).filter(Boolean);
   const out = [];
   for (const line of lines) {
-    // ignore markdown table separators if they exist
-    if (/^[-\s|:]+$/.test(line)) continue;
-
-    const parts = line.split("|").map(s => s.trim());
-    let diagnosis = "", code = "", prob = null;
+    const parts = line.split("|").map((s) => s.trim());
+    let diagnosis = "",
+      code = "",
+      prob = null;
 
     if (parts.length >= 2) {
-      diagnosis = parts[0].replace(/^(?:[-*]|\d+[.)])\s*/, "");
+      diagnosis = parts[0];
       code = parts[1].replace(/`/g, "");
       if (parts[2]) prob = normalizeProb(parts[2]);
     } else {
@@ -136,8 +133,8 @@ function extractDdxFromSoap(sections) {
       prob = normalizeProb(pPct ? pPct[1] : (pDec ? pDec[1] : null));
       diagnosis = line
         .replace(/^(?:[-*]|\d+[.)])\s*/, "")
-        .replace(/\(.*?ICD[-–]?\s*10.*?\)/i,"")
-        .replace(/\bICD[-–]?\s*10[: ]?[A-Z0-9.]+\b/i,"")
+        .replace(/\(.*?ICD[-–]?\s*10.*?\)/i, "")
+        .replace(/\bICD[-–]?\s*10[: ]?[A-Z0-9.]+\b/i, "")
         .replace(/\s[-–]\s*\d+%/,"")
         .replace(/\s+\d+%$/,"")
         .trim();
@@ -149,11 +146,15 @@ function extractDdxFromSoap(sections) {
   return out;
 }
 
-/* ---------- PDF bits ---------- */
+/* ---------- PDF bits (no logo) ---------- */
 const pdfStyles = StyleSheet.create({
-  page: { padding: 28, fontSize: 11, lineHeight: 1.35, fontFamily: "Helvetica" },
-  header: { alignItems: "center", marginBottom: 12 },
-  logo: { width: 160, height: 36, objectFit: "contain", marginBottom: 6 },
+  page: {
+    padding: 28,
+    fontSize: 11,
+    lineHeight: 1.35,
+    fontFamily: "Helvetica",
+  },
+  header: { marginBottom: 8, alignItems: "center" },
   title: { fontSize: 16, fontWeight: "bold" },
   hr: { height: 1, backgroundColor: "#ccc", marginVertical: 8 },
 
@@ -167,12 +168,24 @@ const pdfStyles = StyleSheet.create({
 
   ddxBlock: { marginTop: 10, marginBottom: 4 },
   ddxTitle: { fontSize: 13, fontWeight: "bold", marginBottom: 6 },
-  table: { display: "table", width: "auto", borderStyle: "solid", borderWidth: 1, borderColor: "#cbd5e1" },
+  table: {
+    display: "table",
+    width: "auto",
+    borderStyle: "solid",
+    borderWidth: 1,
+    borderColor: "#cbd5e1",
+  },
   tableRow: { flexDirection: "row" },
   tableHeader: { backgroundColor: "#f3f4f6" },
-  cellDiag: { width: "56%", padding: 6, borderStyle: "solid", borderWidth: 1, borderColor: "#cbd5e1" },
-  cellICD:  { width: "18%", padding: 6, borderStyle: "solid", borderWidth: 1, borderColor: "#cbd5e1" },
-  cellProb: { width: "26%", padding: 6, borderStyle: "solid", borderWidth: 1, borderColor: "#cbd5e1", textAlign: "right" },
+  cellDiag: {
+    width: "56%", padding: 6, borderStyle: "solid", borderWidth: 1, borderColor: "#cbd5e1",
+  },
+  cellICD: {
+    width: "18%", padding: 6, borderStyle: "solid", borderWidth: 1, borderColor: "#cbd5e1",
+  },
+  cellProb: {
+    width: "26%", padding: 6, borderStyle: "solid", borderWidth: 1, borderColor: "#cbd5e1", textAlign: "right",
+  },
 
   footer: { marginTop: 14, fontSize: 9, color: "#6b7280", textAlign: "center" },
 });
@@ -216,13 +229,12 @@ function SectionBody({ text }) {
     </View>
   );
 }
-function NotePDF({ title = "Clinical Notes", soap, ddxRows, logoDataUrl }) {
+function NotePDF({ title = "Clinical Notes", soap, ddxRows }) {
   const today = new Date().toLocaleDateString();
   return (
     <Document>
       <Page size="A4" style={pdfStyles.page}>
         <View style={pdfStyles.header} wrap={false}>
-          {logoDataUrl ? <Image src={logoDataUrl} style={pdfStyles.logo} /> : null}
           <Text style={pdfStyles.title}>{title}</Text>
         </View>
         <View style={pdfStyles.hr} />
@@ -245,9 +257,7 @@ function NotePDF({ title = "Clinical Notes", soap, ddxRows, logoDataUrl }) {
                 <View style={pdfStyles.tableRow} key={`${r.diagnosis}-${idx}`}>
                   <Text style={pdfStyles.cellDiag}>{r.diagnosis}</Text>
                   <Text style={pdfStyles.cellICD}>{r.icd10 || "—"}</Text>
-                  <Text style={pdfStyles.cellProb}>
-                    {r.probability != null ? `${r.probability}%` : "—"}
-                  </Text>
+                  <Text style={pdfStyles.cellProb}>{r.probability != null ? `${r.probability}%` : "—"}</Text>
                 </View>
               ))}
             </View>
@@ -262,7 +272,12 @@ function NotePDF({ title = "Clinical Notes", soap, ddxRows, logoDataUrl }) {
 }
 
 /* ---------- MAIN ---------- */
-export default function ClinicalNotes({ sessionId, transcript, autostart = true, backendBase = BACKEND_BASE }) {
+export default function ClinicalNotes({
+  sessionId,
+  transcript,
+  autostart = true,
+  backendBase = BACKEND_BASE,
+}) {
   const [mode, setMode] = useState("markdown");
   const [streaming, setStreaming] = useState(false);
   const [hasStreamed, setHasStreamed] = useState(false);
@@ -276,33 +291,43 @@ export default function ClinicalNotes({ sessionId, transcript, autostart = true,
   const mountedRef = useRef(false);
   const previewRef = useRef(null);
 
-  /* PDF logo: prefetch to data-URL to avoid CORS-based silent failures */
-  const [logoDataUrl, setLogoDataUrl] = useState(null);
+  // ---- Load remark-gfm safely (prevents "is not a function") ----
+  const [gfm, setGfm] = useState(null);
   useEffect(() => {
-    let alive = true;
+    let live = true;
     (async () => {
       try {
-        const r = await fetch(REMOTE_LOGO, { mode: "cors" });
-        if (!r.ok) throw new Error("logo fetch failed");
-        const blob = await r.blob();
-        const fr = new FileReader();
-        fr.onload = () => { if (alive) setLogoDataUrl(fr.result); };
-        fr.readAsDataURL(blob);
+        if (gfmModule) {
+          if (live) setGfm(() => gfmModule);
+          return;
+        }
+        const mod = await import("remark-gfm");
+        const fn = mod?.default || mod;
+        if (typeof fn === "function") {
+          gfmModule = fn;
+          if (live) setGfm(() => fn);
+        } else {
+          if (live) setGfm(null);
+        }
       } catch {
-        setLogoDataUrl(null);
+        if (live) setGfm(null);
       }
     })();
-    return () => { alive = false; };
+    return () => { live = false; };
   }, []);
 
   const mdNow = useMemo(() => stringifySoapMarkdown(soap), [soap]);
   const ddxRows = useMemo(() => extractDdxFromSoap(soap), [soap]);
 
   const loadCache = () => {
-    try { const raw = sessionStorage.getItem(storageKey(sessionId, mode)); return raw ? JSON.parse(raw) : null; }
-    catch { return null; }
+    try {
+      const raw = sessionStorage.getItem(storageKey(sessionId, mode));
+      return raw ? JSON.parse(raw) : null;
+    } catch { return null; }
   };
-  const saveCache = (payload) => { try { sessionStorage.setItem(storageKey(sessionId, mode), JSON.stringify(payload)); } catch {} };
+  const saveCache = (payload) => {
+    try { sessionStorage.setItem(storageKey(sessionId, mode), JSON.stringify(payload)); } catch {}
+  };
 
   const startStream = async (force = false) => {
     if (!transcript || streaming) return;
@@ -332,7 +357,7 @@ export default function ClinicalNotes({ sessionId, transcript, autostart = true,
       if (mode === "json") {
         try {
           const obj = JSON.parse(acc.replace(/```json|```/gi, "").trim());
-          const parsed = DEFAULT_SOAP.map(s => ({ ...s, text: String(obj[s.key] || obj[s.title?.toLowerCase()] || "—") }));
+          const parsed = DEFAULT_SOAP.map((s) => ({ ...s, text: String(obj[s.key] || obj[s.title?.toLowerCase()] || "—") }));
           if (mountedRef.current) { setSoap(parsed); setHasStreamed(true); saveCache({ soap: parsed, hasStreamed: true }); }
         } catch {
           if (mountedRef.current) {
@@ -373,11 +398,15 @@ export default function ClinicalNotes({ sessionId, transcript, autostart = true,
     const cached = loadCache();
     if (cached?.soap) { setSoap(cached.soap); setHasStreamed(!!cached.hasStreamed); }
     else if (autostart && transcript) { startStream(false); }
-    return () => { mountedRef.current = false; try { controllerRef.current?.abort(); } catch {}; };
+
+    return () => {
+      mountedRef.current = false;
+      try { controllerRef.current?.abort(); } catch {};
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sessionId]);
 
-  /* ===== Helper/Voice Agent event bridge ===== */
+  /* ===== Helper / Voice Agent bridge (function-calling) ===== */
   useEffect(() => {
     const byKey = (k) => {
       const idx = (soap || []).findIndex(s => (s.key || "").toLowerCase() === String(k || "").toLowerCase());
@@ -396,12 +425,14 @@ export default function ClinicalNotes({ sessionId, transcript, autostart = true,
       else arr.splice(i + 1, 0, obj);
       setAndCache(arr);
     };
+
     const onRemove = (e) => {
       const { key } = e.detail || {};
       const [i] = byKey(key);
       if (i < 0) return;
       const arr = [...soap]; arr.splice(i, 1); setAndCache(arr);
     };
+
     const onUpdate = (e) => {
       const { key, text = "", append = false } = e.detail || {};
       const [i, sec] = byKey(key);
@@ -410,6 +441,7 @@ export default function ClinicalNotes({ sessionId, transcript, autostart = true,
       arr[i] = { ...sec, text: append ? (sec.text ? `${sec.text}\n${text}` : text) : text };
       setAndCache(arr);
     };
+
     const onRename = (e) => {
       const { key, new_title, new_key } = e.detail || {};
       const [i, sec] = byKey(key);
@@ -418,6 +450,7 @@ export default function ClinicalNotes({ sessionId, transcript, autostart = true,
       arr[i] = { ...sec, title: new_title || sec.title, key: new_key || slugify(new_title || sec.title) };
       setAndCache(arr);
     };
+
     const onApply = (e) => {
       const md = e.detail?.markdown || "";
       if (!md) return;
@@ -425,10 +458,12 @@ export default function ClinicalNotes({ sessionId, transcript, autostart = true,
       setAndCache(parsed);
       setHasStreamed(true);
     };
+
     const onAddOpen = (e) => {
       const d = e.detail || {};
       openAdd(d.title || "", d.anchor_key || (soap[soap.length-1]?.key), d.position || "after", d.style || "paragraph");
     };
+
     const onSave = () => { approveAndSave(); };
     const onPreview = () => { setEditMode(false); };
 
@@ -553,7 +588,13 @@ export default function ClinicalNotes({ sessionId, transcript, autostart = true,
         <div className="cn-add-body">
           <div className="cn-field">
             <label>Title</label>
-            <input ref={titleRef} className="cn-input" value={addTitle} onChange={(e)=>setAddTitle(e.target.value)} placeholder="e.g., Investigations" />
+            <input
+              ref={titleRef}
+              className="cn-input"
+              value={addTitle}
+              onChange={(e)=>setAddTitle(e.target.value)}
+              placeholder="e.g., Investigations"
+            />
           </div>
 
           <div className="cn-row">
@@ -588,7 +629,9 @@ export default function ClinicalNotes({ sessionId, transcript, autostart = true,
             </button>
             <div className="cn-spacer" />
             <button type="button" className="cn-btn ghost" onClick={closeAdd}>Cancel</button>
-            <button type="button" className="cn-btn primary" onClick={insertSuggestion} disabled={!addTitle}>Insert</button>
+            <button type="button" className="cn-btn primary" onClick={insertSuggestion} disabled={!addTitle}>
+              Insert
+            </button>
           </div>
 
           <div className="cn-field" style={{marginTop: 10}}>
@@ -606,13 +649,10 @@ export default function ClinicalNotes({ sessionId, transcript, autostart = true,
     </div>
   ) : null;
 
-  /* ===== ICD-10 Finder (RAG) in Edit mode + Quick Search toolbar ===== */
-  const [icdBusy, setIcdBusy] = useState({}); // { [dx]: true/false }
-  const [icdResults, setIcdResults] = useState({}); // { [dx]: [{code, label}] }
+  /* ===== ICD-10 Finder (RAG) in Edit mode ===== */
+  const [icdBusy, setIcdBusy] = useState({});        // { [dx]: true/false }
+  const [icdResults, setIcdResults] = useState({});   // { [dx]: [{code, label}] }
   const [icdOpen, setIcdOpen] = useState(true);
-  const [quickQuery, setQuickQuery] = useState("");
-  const [quickBusy, setQuickBusy] = useState(false);
-  const [quickResults, setQuickResults] = useState([]);
 
   const currentCodeFor = (dx) => {
     const row = (ddxRows || []).find(
@@ -632,8 +672,9 @@ export default function ClinicalNotes({ sessionId, transcript, autostart = true,
       });
       const j = await r.json().catch(() => ({}));
       const arr = j?.results || j?.items || j?.codes || [];
-      const norm = arr.map((x) => ({ code: x.code || x.icd10 || x.id || "", label: x.label || x.name || x.title || "" }))
-                      .filter((x) => x.code && x.label);
+      const norm = arr
+        .map((x) => ({ code: x.code || x.icd10 || x.id || "", label: x.label || x.name || x.title || "" }))
+        .filter((x) => x.code && x.label);
       setIcdResults((p) => ({ ...p, [dx]: norm }));
     } catch {
       setIcdResults((p) => ({ ...p, [dx]: [] }));
@@ -642,85 +683,130 @@ export default function ClinicalNotes({ sessionId, transcript, autostart = true,
     }
   };
 
-  const quickSearch = async () => {
-    const q = quickQuery.trim();
-    if (!q) return;
-    setQuickBusy(true);
-    try {
-      const r = await fetch(`${backendBase}/api/clinical-notes/icd10-search`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ session_id: sessionId, query: q, transcript: transcript || "" }),
-      });
-      const j = await r.json().catch(() => ({}));
-      const arr = j?.results || [];
-      const norm = arr.map(x => ({ code: x.code, label: x.label })).filter(x => x.code && x.label);
-      setQuickResults(norm);
-    } catch {
-      setQuickResults([]);
-    } finally {
-      setQuickBusy(false);
-    }
-  };
-
-  const addQuickResultToDdx = (it) => {
-    // Append to DDx draft (below) or directly to soap if no draft started yet
-    const draft = ddxDraftRows.length ? [...ddxDraftRows] : [...ddxRows];
-    draft.push({ diagnosis: it.label, icd10: it.code, probability: null });
-    setDdxDraftRows(draft);
-  };
-
   const applyICD = (dx, code) => {
-    // write/append into DDx section in SOAP as bullet lines
-    writeDdxToSoap(
-      ddxRows.map(r => r.diagnosis === dx ? { ...r, icd10: code } : r)
+    const arr = [...soap];
+    let idx = arr.findIndex((s) =>
+      /^(differential\s+diagnosis|differentials?)$/i.test((s.title || "").trim())
     );
-  };
-
-  /* ===== Editable DDx table (Preview) ===== */
-  const [ddxDraftRows, setDdxDraftRows] = useState([]);
-  // whenever we switch into preview or soap changes, refresh draft
-  useEffect(() => {
-    if (!editMode) {
-      setDdxDraftRows(ddxRows);
+    if (idx < 0) {
+      const block = `- ${dx} | \`${code}\``;
+      arr.push({ key: "differential_diagnosis", title: "Differential Diagnosis", text: block });
+      setSoap(arr); saveCache({ soap: arr, hasStreamed: hasStreamed || true });
+      return;
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [editMode, soap]);
-
-  const clampProb = (v) => {
-    if (v === "" || v === null || v === undefined) return null;
-    const n = Number(v);
-    if (!isFinite(n)) return null;
-    return Math.max(0, Math.min(100, Math.round(n)));
+    const text = arr[idx].text || "";
+    const lines = text.split(/\n/);
+    let found = false;
+    const newLines = lines.map((line) => {
+      const base = line.replace(/^(?:[-*]|\d+[.)])\s*/, "").trim();
+      const nameGuess = base.split("|")[0].split("(")[0].trim().toLowerCase();
+      if (nameGuess === String(dx).toLowerCase()) {
+        found = true;
+        const left = base
+          .replace(/\|\s*`?[A-Z0-9.]+`?\s*$/i, "")
+          .replace(/\(ICD[-–]?\s*10:.*?\)/i, "")
+          .trim();
+        return `- ${left} | \`${code}\``;
+      }
+      return line;
+    });
+    if (!found) newLines.push(`- ${dx} | \`${code}\``);
+    arr[idx] = { ...arr[idx], text: newLines.join("\n") };
+    setSoap(arr); saveCache({ soap: arr, hasStreamed: hasStreamed || true });
   };
 
-  const writeDdxToSoap = (rows) => {
-    // serialize as bullet lines, which your parser handles robustly
+  /* ========= Preview: Editable DDX table ========= */
+  const [ddxEditRows, setDdxEditRows] = useState([]);
+  useEffect(() => {
+    // Sync local editable copy whenever the underlying SOAP changes
+    setDdxEditRows((ddxRows || []).map(r => ({ ...r })));
+  }, [ddxRows]);
+
+  const writeBackDdx = (rows) => {
     const lines = (rows || [])
-      .filter(r => (r.diagnosis || "").trim())
+      .filter(r => (r.diagnosis && r.diagnosis.trim()))
       .map(r => {
-        const prob = r.probability == null || r.probability === "" ? "—" : `${clampProb(r.probability)}%`;
-        const code = (r.icd10 && r.icd10 !== "—") ? `\`${r.icd10}\`` : "`—`";
-        return `- ${r.diagnosis} | ${code} | ${prob}`;
-      });
-    const mdBlock = lines.length ? lines.join("\n") : "—";
+        const dx = r.diagnosis.trim();
+        const code = (r.icd10 && String(r.icd10).trim()) ? `\`${String(r.icd10).trim()}\`` : "`—`";
+        const prob =
+          r.probability === "" || r.probability === null || r.probability === undefined
+            ? ""
+            : ` | ${Math.max(0, Math.min(100, Math.round(Number(r.probability))))}%`;
+        return `- ${dx} | ${code}${prob}`;
+      })
+      .join("\n");
 
     const arr = [...soap];
-    let idx = arr.findIndex(s => /^(differential\s+diagnosis|differentials?)$/i.test((s.title||"").trim()));
+    let idx = arr.findIndex(s =>
+      /^(differential\s+diagnosis|differentials?)$/i.test((s.title || "").trim())
+    );
     if (idx < 0) {
-      arr.push({ key: "differential_diagnosis", title: "Differential Diagnosis", text: mdBlock });
+      if (!lines) return; // nothing to create
+      arr.push({ key: "differential_diagnosis", title: "Differential Diagnosis", text: lines });
     } else {
-      arr[idx] = { ...arr[idx], text: mdBlock };
+      arr[idx] = { ...arr[idx], text: lines };
     }
     setSoap(arr);
     saveCache({ soap: arr, hasStreamed: hasStreamed || true });
   };
 
-  const applyDdxDraftToNote = () => {
-    writeDdxToSoap(ddxDraftRows);
+  const updateRow = (i, field, value) => {
+    const next = ddxEditRows.map((r, idx) => idx === i ? { ...r, [field]: value } : r);
+    setDdxEditRows(next);
+    writeBackDdx(next);
   };
 
-  /* ===== Section Card ===== */
+  const updateProb = (i, value) => {
+    const v = value === "" ? "" : Math.max(0, Math.min(100, Number(value)));
+    updateRow(i, "probability", v === "" ? "" : v);
+  };
+
+  const addRow = () => {
+    const next = [...ddxEditRows, { diagnosis: "", icd10: "", probability: "" }];
+    setDdxEditRows(next);
+    writeBackDdx(next);
+  };
+
+  const removeRow = (i) => {
+    const next = ddxEditRows.filter((_, idx) => idx !== i);
+    setDdxEditRows(next);
+    writeBackDdx(next);
+  };
+
+  // Row-level ICD-10 search states for Preview
+  const [pIcdBusy, setPIcdBusy] = useState({});      // { [rowIndex]: boolean }
+  const [pIcdResults, setPIcdResults] = useState({}); // { [rowIndex]: [{code,label}] }
+
+  const searchICDForRow = async (rowIndex) => {
+    const dx = ddxEditRows[rowIndex]?.diagnosis?.trim();
+    if (!dx) return;
+    setPIcdBusy(prev => ({ ...prev, [rowIndex]: true }));
+    try {
+      const r = await fetch(`${backendBase}/api/clinical-notes/icd10-search`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ session_id: sessionId, query: dx, transcript: transcript || "" }),
+      });
+      const j = await r.json().catch(() => ({}));
+      const arr = j?.results || j?.items || j?.codes || [];
+      const norm = arr
+        .map((x) => ({ code: x.code || x.icd10 || x.id || "", label: x.label || x.name || x.title || "" }))
+        .filter((x) => x.code && x.label);
+      setPIcdResults(prev => ({ ...prev, [rowIndex]: norm }));
+    } catch {
+      setPIcdResults(prev => ({ ...prev, [rowIndex]: [] }));
+    } finally {
+      setPIcdBusy(prev => ({ ...prev, [rowIndex]: false }));
+    }
+  };
+
+  const applyICDPreview = (rowIndex, code) => {
+    const next = ddxEditRows.map((r, i) => i === rowIndex ? { ...r, icd10: code } : r);
+    setDdxEditRows(next);
+    writeBackDdx(next);
+  };
+
+  /* ===== Section Card (Edit mode) ===== */
   const SectionCard = ({ sec, idx }) => (
     <div className="cn-card" key={`${sec.key}-${idx}`}>
       <div className="cn-card-head">
@@ -776,24 +862,18 @@ export default function ClinicalNotes({ sessionId, transcript, autostart = true,
     </div>
   );
 
-  /* ===== Manual PDF fallback ===== */
-  const manualDownload = async () => {
-    try {
-      const blob = await pdfBuilder(
-        <NotePDF title="Clinical Notes" soap={soap} ddxRows={ddxRows} logoDataUrl={logoDataUrl} />
-      ).toBlob();
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement("a");
-      a.href = url;
-      a.download = `clinical-notes-${sessionId || "note"}.pdf`;
-      document.body.appendChild(a);
-      a.click();
-      a.remove();
-      setTimeout(() => URL.revokeObjectURL(url), 1000);
-    } catch (e) {
-      console.error("PDF build failed", e);
-      setError("PDF build failed. Try again.");
-    }
+  // ---- Programmatic PDF download (robust) ----
+  const downloadPDF = async () => {
+    const doc = <NotePDF title="Clinical Notes" soap={soap} ddxRows={ddxRows} />;
+    const blob = await pdf(doc).toBlob();
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `clinical-notes-${sessionId || "note"}.pdf`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 2500);
   };
 
   return (
@@ -801,7 +881,7 @@ export default function ClinicalNotes({ sessionId, transcript, autostart = true,
       <div className="cn-toolbar">
         <div className="cn-tabs-inline">
           <button type="button" className={`cn-chip ${mode==='markdown'?'active':''}`} onClick={() => setMode("markdown")} disabled={streaming}>Markdown</button>
-          <button type="button" className={`cn-chip ${mode==='json'?'active':''}`} onClick={() => setMode("json")} disabled={streaming}>JSON</button>
+        <button type="button" className={`cn-chip ${mode==='json'?'active':''}`} onClick={() => setMode("json")} disabled={streaming}>JSON</button>
         </div>
         <div className="cn-spacer" />
         {!streaming && !hasStreamed ? (
@@ -817,254 +897,223 @@ export default function ClinicalNotes({ sessionId, transcript, autostart = true,
             Stop
           </button>
         )}
-        <button type="button" className="cn-btn ghost" onClick={() => setEditMode(v=>!v)}>{editMode ? "Preview" : "Edit"}</button>
-        <button type="button" className="cn-btn ghost" onClick={() => setOrganized(v=>!v)}>{organized ? "Ungroup" : "Organize"}</button>
-
-        {/* Toolbar Add Section (opens same modal) */}
-        <button type="button" className="cn-btn ghost" onClick={() => openAdd()}>Add Section</button>
-
-        <button type="button" className="cn-btn primary" onClick={approveAndSave} disabled={streaming || !soap?.length}>Approve & Save</button>
+        <button type="button" className="cn-btn ghost" onClick={() => setEditMode(v=>!v)}>
+          {editMode ? "Preview" : "Edit"}
+        </button>
+        <button type="button" className="cn-btn ghost" onClick={() => setOrganized(v=>!v)}>
+          {organized ? "Ungroup" : "Organize"}
+        </button>
+        <button type="button" className="cn-btn ghost" onClick={() => openAdd()}>
+          Add Section
+        </button>
+        <button type="button" className="cn-btn primary" onClick={approveAndSave} disabled={streaming || !soap?.length}>
+          Approve & Save
+        </button>
       </div>
 
       {error && !addOpen ? <div className="cn-error">{error}</div> : null}
 
-      {/* EDIT MODE: ICD-10 Finder + Quick Search */}
-      {editMode && (
-        <>
-          <div className="cn-card" style={{ marginBottom: 10 }}>
-            <div className="cn-card-head" style={{ marginBottom: 8 }}>
-              <div className="cn-modal-title">ICD-10 Quick Search</div>
-            </div>
-            <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
-              <input
-                className="cn-input"
-                style={{ flex: "1 1 320px" }}
-                placeholder="Search ICD-10 (e.g., migraine without aura)…"
-                value={quickQuery}
-                onChange={(e)=>setQuickQuery(e.target.value)}
-              />
-              <button className="cn-btn primary" onClick={quickSearch} disabled={quickBusy}>
-                <FaSearch style={{ marginRight: 6 }} />
-                {quickBusy ? "Searching…" : "Search"}
+      {/* ICD-10 Finder panel (Edit mode) */}
+      {editMode && ddxRows?.length ? (
+        <div className="cn-card" style={{ marginBottom: 10 }}>
+          <div className="cn-card-head" style={{ marginBottom: 8 }}>
+            <div className="cn-modal-title">ICD-10 Finder (RAG)</div>
+            <div className="cn-card-actions">
+              <button className="cn-mini is-ghost" onClick={() => setIcdOpen(v => !v)}>
+                {icdOpen ? "Hide" : "Show"}
               </button>
             </div>
-
-            {quickResults?.length ? (
-              <div style={{ marginTop: 8, display: "grid", gap: 6 }}>
-                {quickResults.map((it, i) => (
-                  <div key={`${it.code}-${i}`} style={{ display: "flex", gap: 8, alignItems: "center", justifyContent: "space-between", border: "1px solid var(--border)", borderRadius: 8, padding: 6 }}>
-                    <div style={{ display: "grid", gap: 2 }}>
-                      <div><strong>{it.code}</strong></div>
-                      <div className="cn-help" style={{ maxWidth: 680 }}>{it.label}</div>
-                    </div>
-                    <button
-                      className="cn-mini is-primary"
-                      onClick={() => addQuickResultToDdx(it)}
-                      title="Add as new DDx row"
-                    >
-                      Add to DDx
-                    </button>
-                  </div>
-                ))}
-              </div>
-            ) : null}
           </div>
 
-          {ddxRows?.length ? (
-            <div className="cn-card" style={{ marginBottom: 10 }}>
-              <div className="cn-card-head" style={{ marginBottom: 8 }}>
-                <div className="cn-modal-title">ICD-10 Finder (by diagnosis)</div>
-                <div className="cn-card-actions">
-                  <button className="cn-mini is-ghost" onClick={() => setIcdOpen(v=>!v)}>{icdOpen ? "Hide" : "Show"}</button>
-                </div>
-              </div>
-
-              {icdOpen && (
-                <div style={{ display: "grid", gap: 6 }}>
-                  {ddxRows.map((r, i) => {
-                    const dx = r.diagnosis;
-                    const results = icdResults[dx] || [];
-                    const busy = !!icdBusy[dx];
-                    return (
-                      <div key={`${dx}-${i}`} style={{ border: "1px solid var(--border)", borderRadius: 10, padding: 8 }}>
-                        <div style={{ display: "flex", gap: 8, alignItems: "center", justifyContent: "space-between", flexWrap: "wrap" }}>
-                          <div style={{ fontWeight: 700 }}>{dx}</div>
-                          <div style={{ marginLeft: "auto", opacity: 0.8 }}>Current: <code>{currentCodeFor(dx)}</code></div>
-                          <button className="cn-mini is-primary" onClick={() => searchICD(dx)} disabled={busy}>
-                            <FaSearch style={{ marginRight: 6 }} />
-                            {busy ? "Searching…" : "Search ICD-10"}
-                          </button>
-                        </div>
-
-                        {busy ? (
-                          <div className="cn-help" style={{ marginTop: 6 }}>Looking up codes…</div>
-                        ) : results.length ? (
-                          <div style={{ marginTop: 6, display: "grid", gap: 6 }}>
-                            {results.map((it, j) => (
-                              <div key={`${it.code}-${j}`} style={{ display: "flex", gap: 8, alignItems: "center", justifyContent: "space-between", border: "1px solid var(--border)", borderRadius: 8, padding: 6 }}>
-                                <div style={{ display: "grid", gap: 2 }}>
-                                  <div><strong>{it.code}</strong></div>
-                                  <div className="cn-help" style={{ maxWidth: 680 }}>{it.label}</div>
-                                </div>
-                                <button className="cn-mini is-primary" onClick={() => applyICD(dx, it.code)}>Apply</button>
-                              </div>
-                            ))}
-                          </div>
-                        ) : null}
+          {icdOpen && (
+            <div style={{ display: "grid", gap: 6 }}>
+              {ddxRows.map((r, i) => {
+                const dx = r.diagnosis;
+                const results = icdResults[dx] || [];
+                const busy = !!icdBusy[dx];
+                return (
+                  <div key={`${dx}-${i}`} style={{ border: "1px solid var(--border)", borderRadius: 10, padding: 8 }}>
+                    <div style={{ display: "flex", gap: 8, alignItems: "center", justifyContent: "space-between", flexWrap: "wrap" }}>
+                      <div style={{ fontWeight: 700 }}>{dx}</div>
+                      <div style={{ marginLeft: "auto", opacity: 0.8 }}>
+                        Current: <code>{(r.icd10 || "—")}</code>
                       </div>
-                    );
-                  })}
-                </div>
-              )}
-            </div>
-          ) : null}
-        </>
-      )}
+                      <button
+                        className={`cn-mini is-primary ${busy ? "is-busy" : ""}`}
+                        onClick={() => searchICD(dx)}
+                        disabled={busy}
+                        aria-busy={busy ? "true" : "false"}
+                        aria-label={`Search ICD-10 for ${dx}`}
+                        title={`Search ICD-10 for ${dx}`}
+                      >
+                        {busy ? (
+                          <>
+                            <span className="cn-spinner-inline" />
+                            Searching…
+                          </>
+                        ) : (
+                          <>
+                            <FaSearch style={{ marginRight: 6 }} />
+                            Search ICD-10
+                          </>
+                        )}
+                      </button>
+                    </div>
 
-      {/* EDIT vs PREVIEW */}
+                    {/* Results */}
+                    {busy ? (
+                      <div className="cn-help" style={{ marginTop: 6 }}>Looking up codes…</div>
+                    ) : results.length ? (
+                      <div style={{ marginTop: 6, display: "grid", gap: 6 }}>
+                        {results.map((it, j) => (
+                          <div key={`${it.code}-${j}`} style={{ display: "flex", gap: 8, alignItems: "center", justifyContent: "space-between", border: "1px solid var(--border)", borderRadius: 8, padding: 6 }}>
+                            <div style={{ display: "grid", gap: 2 }}>
+                              <div><strong>{it.code}</strong></div>
+                              <div className="cn-help" style={{ maxWidth: 680 }}>{it.label}</div>
+                            </div>
+                            <button className="cn-mini is-primary" onClick={() => applyICD(dx, it.code)}>Apply</button>
+                          </div>
+                        ))}
+                      </div>
+                    ) : null}
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      ) : null}
+
       {editMode ? (
         <div className="cn-grid" role="region" aria-label="Edit Sections">
           {soap.map((sec, idx) => <SectionCard key={`${sec.key}-${idx}`} sec={sec} idx={idx} />)}
         </div>
       ) : (
         <div className="cn-card" ref={previewRef}>
-          {/* Preview actions — robust PDF Download (two ways) */}
-          <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginBottom: 8, flexWrap: "wrap" }}>
-            <PDFDownloadLink
-              document={<NotePDF title="Clinical Notes" soap={soap} ddxRows={ddxRows} logoDataUrl={logoDataUrl} />}
-              fileName={`clinical-notes-${sessionId || "note"}.pdf`}
-              className="cn-mini is-primary"
-              style={{ textDecoration: "none" }}
-            >
-              {({ loading }) => (<><FaDownload style={{ marginRight: 6 }} />{loading ? "Building PDF…" : "Download PDF"}</>)}
-            </PDFDownloadLink>
-
-            <button className="cn-mini is-ghost" onClick={manualDownload} title="Alternate PDF builder (more robust in dev)">
+          {/* Preview actions — robust PDF Download */}
+          <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: 8 }}>
+            <button className="cn-mini is-primary" onClick={downloadPDF}>
               <FaDownload style={{ marginRight: 6 }} />
-              Download PDF (Alt)
+              Download PDF
             </button>
           </div>
 
-          {/* Markdown preview */}
           <div className="markdown">
             <ReactMarkdown remarkPlugins={gfm ? [gfm] : []}>
-              {`# Clinical Note (${organized ? "Organized" : "SOAP"})\n\n${mdNow}\n`}
+{`# Clinical Note (${organized ? "Organized" : "SOAP"})\n\n${mdNow}\n`}
             </ReactMarkdown>
-          </div>
 
-          {/* Editable Differential Diagnosis table */}
-          <div className="cn-ddx" style={{ marginTop: 16 }}>
-            <h2> Differential Diagnosis (Editable) </h2>
-            <div style={{ overflowX: "auto" }}>
+            {/* Editable Differential Diagnosis table */}
+            <div className="cn-ddx">
+              <h2>Differential Diagnosis</h2>
+
               <table className="cn-table">
                 <thead>
                   <tr>
-                    <th style={{ minWidth: 240 }}>Diagnosis</th>
-                    <th style={{ minWidth: 120 }}>ICD-10</th>
-                    <th className="num" style={{ minWidth: 140 }}>Probability (%)</th>
-                    <th className="num" style={{ minWidth: 120 }}>Actions</th>
+                    <th>Diagnosis</th>
+                    <th style={{width:"36%"}}>ICD-10</th>
+                    <th className="num" style={{width:"14%"}}>Probability</th>
+                    <th className="num" style={{width:"10%"}}>Actions</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {(ddxDraftRows || []).map((row, i) => (
-                    <tr key={`ddx-edit-${i}`}>
-                      <td>
-                        <input
-                          className="cn-input"
-                          value={row.diagnosis || ""}
-                          onChange={(e) => {
-                            const next = [...ddxDraftRows];
-                            next[i] = { ...next[i], diagnosis: e.target.value };
-                            setDdxDraftRows(next);
-                          }}
-                          placeholder="Diagnosis name"
-                        />
-                      </td>
-                      <td>
-                        <input
-                          className="cn-input"
-                          value={row.icd10 || ""}
-                          onChange={(e) => {
-                            const next = [...ddxDraftRows];
-                            next[i] = { ...next[i], icd10: e.target.value.toUpperCase() };
-                            setDdxDraftRows(next);
-                          }}
-                          placeholder="e.g., G43.0"
-                        />
-                      </td>
-                      <td className="num">
-                        <input
-                          className="cn-input"
-                          type="number"
-                          min={0}
-                          max={100}
-                          value={row.probability ?? ""}
-                          onChange={(e) => {
-                            const next = [...ddxDraftRows];
-                            next[i] = { ...next[i], probability: e.target.value === "" ? null : clampProb(e.target.value) };
-                            setDdxDraftRows(next);
-                          }}
-                          placeholder="0–100"
-                          style={{ textAlign: "right" }}
-                        />
-                      </td>
-                      <td className="num">
-                        <div style={{ display: "flex", gap: 6, justifyContent: "flex-end" }}>
-                          <button
-                            className="cn-mini is-ghost"
-                            title="ICD-10 search for this diagnosis"
-                            onClick={() => searchICD(row.diagnosis || "")}
-                          >
-                            <FaSearch />&nbsp;Find code
-                          </button>
-                          <button
-                            className="cn-mini is-danger"
-                            title="Remove row"
-                            onClick={() => {
-                              const next = [...ddxDraftRows];
-                              next.splice(i, 1);
-                              setDdxDraftRows(next);
-                            }}
-                          >
-                            <FaMinus />&nbsp;Remove
-                          </button>
-                        </div>
-
-                        {/* Inline suggestions if any */}
-                        {(icdResults[row.diagnosis || ""] || []).length ? (
-                          <div style={{ marginTop: 6, display: "grid", gap: 4 }}>
-                            {(icdResults[row.diagnosis || ""] || []).slice(0, 4).map((it, j) => (
-                              <button
-                                key={`sugg-${i}-${j}`}
-                                className="cn-mini is-primary"
-                                onClick={() => {
-                                  const next = [...ddxDraftRows];
-                                  next[i] = { ...next[i], icd10: it.code };
-                                  setDdxDraftRows(next);
-                                }}
-                              >
-                                Use {it.code}
-                              </button>
-                            ))}
-                          </div>
-                        ) : null}
+                  {ddxEditRows.length === 0 ? (
+                    <tr>
+                      <td colSpan={4} style={{opacity:.8, fontStyle:"italic"}}>
+                        No diagnoses yet. Use “Add row” to start building your table.
                       </td>
                     </tr>
+                  ) : ddxEditRows.map((r,i)=>(
+                    <React.Fragment key={`ddx-row-${i}`}>
+                      <tr>
+                        {/* Diagnosis */}
+                        <td>
+                          <input
+                            className="cn-input"
+                            value={r.diagnosis || ""}
+                            onChange={(e)=>updateRow(i,"diagnosis", e.target.value)}
+                            placeholder="Diagnosis name"
+                          />
+                        </td>
+
+                        {/* ICD-10 + Search */}
+                        <td>
+                          <div style={{ display:"flex", gap:6, alignItems:"center" }}>
+                            <input
+                              className="cn-input"
+                              value={r.icd10 || ""}
+                              onChange={(e)=>updateRow(i,"icd10", e.target.value.toUpperCase())}
+                              placeholder="e.g., J45.909"
+                              style={{ flex:1 }}
+                            />
+                            <button
+                              className={`cn-mini is-primary ${pIcdBusy[i] ? "is-busy": ""}`}
+                              onClick={()=>searchICDForRow(i)}
+                              disabled={pIcdBusy[i] || !(r.diagnosis||"").trim()}
+                              aria-busy={pIcdBusy[i] ? "true":"false"}
+                              title="Search ICD-10 for this diagnosis"
+                            >
+                              {pIcdBusy[i] ? (
+                                <>
+                                  <span className="cn-spinner-inline" />
+                                  Searching…
+                                </>
+                              ) : (
+                                <>
+                                  <FaSearch style={{ marginRight: 6 }} />
+                                  Search
+                                </>
+                              )}
+                            </button>
+                          </div>
+                        </td>
+
+                        {/* Probability */}
+                        <td className="num">
+                          <input
+                            type="number"
+                            min={0}
+                            max={100}
+                            step={1}
+                            className="cn-input"
+                            value={r.probability === "" || r.probability == null ? "" : r.probability}
+                            onChange={(e)=>updateProb(i, e.target.value)}
+                            placeholder="%"
+                            style={{ textAlign:"right" }}
+                          />
+                        </td>
+
+                        {/* Actions */}
+                        <td className="num">
+                          <button className="cn-mini is-danger" onClick={()=>removeRow(i)}>Remove</button>
+                        </td>
+                      </tr>
+
+                      {/* Inline ICD-10 suggestions for this row */}
+                      {Array.isArray(pIcdResults[i]) && pIcdResults[i].length > 0 ? (
+                        <tr>
+                          <td colSpan={4}>
+                            <div style={{ display:"grid", gap:6 }}>
+                              {pIcdResults[i].map((it, j)=>(
+                                <div key={`${i}-${it.code}-${j}`} style={{ display:"flex", gap:8, alignItems:"center", justifyContent:"space-between", border:"1px solid var(--border)", borderRadius:8, padding:6 }}>
+                                  <div style={{ display:"grid", gap:2 }}>
+                                    <div><strong>{it.code}</strong></div>
+                                    <div className="cn-help" style={{ maxWidth: 680 }}>{it.label}</div>
+                                  </div>
+                                  <button className="cn-mini is-primary" onClick={()=>applyICDPreview(i, it.code)}>Apply</button>
+                                </div>
+                              ))}
+                            </div>
+                          </td>
+                        </tr>
+                      ) : null}
+                    </React.Fragment>
                   ))}
                 </tbody>
               </table>
-            </div>
 
-            <div style={{ display: "flex", gap: 8, marginTop: 10, justifyContent: "space-between", flexWrap: "wrap" }}>
-              <button
-                className="cn-mini is-ghost"
-                onClick={() => setDdxDraftRows([...ddxDraftRows, { diagnosis: "", icd10: "", probability: null }])}
-              >
-                <FaPlus />&nbsp;Add Row
-              </button>
-              <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-                <button className="cn-mini is-ghost" onClick={() => setDdxDraftRows(ddxRows)}>Rebuild from Note</button>
-                <button className="cn-mini is-primary" onClick={applyDdxDraftToNote}>Apply to Note</button>
+              <div style={{ display:"flex", justifyContent:"flex-end", marginTop:8 }}>
+                <button className="cn-mini is-ghost" onClick={addRow}>+ Add row</button>
               </div>
             </div>
           </div>

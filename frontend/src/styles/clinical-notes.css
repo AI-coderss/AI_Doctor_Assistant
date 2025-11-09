@@ -6,31 +6,75 @@
 /* ========================
    THEME
 ======================== */
+/* ========================
+   THEME VARIABLES
+======================== */
 :root{
-  --primary: #534CE8;           /* light mode primary */
+  /* Light (default) */
+  --primary: #534CE8;           /* primary accent */
   --primary-500: #6A64EC;
   --primary-700: #433ECC;
-  --border: #e5e7eb;
-  --panel: #ffffff;
-  --text: #0f172a;
-  --muted: #6b7280;
+  --ring: rgba(83,76,232,.25);  /* focus ring for light */
+  --ring-soft: rgba(83,76,232,.15);
 
+  --panel: #ffffff;             /* surfaces/panels */
+  --text: #0f172a;              /* ink */
+  --muted: #6b7280;             /* secondary text */
+  --border: #e5e7eb;            /* hairlines */
+
+  /* Controls sizing */
   --chip-font: 13px;
   --btn-font: 13px;
   --btn-lh: 1.2;
+
+  /* Minis */
+  --mini-h: 28px;
+  --mini-font: 12.5px;
+  --mini-pad-x: 10px;
+  --mini-radius: 8px;
 }
 
-/* Prefer cyan accents in dark mode */
+/* Auto dark (OS) — black/white + cyan accents */
 @media (prefers-color-scheme: dark){
   :root{
     --primary: #06B6D4;         /* cyan */
     --primary-500: #22D3EE;
     --primary-700: #0891B2;
-    --panel: #0f1220;
-    --text: #eef2ff;
-    --border: rgba(255,255,255,.14);
-    --muted: #9aa3b2;
+    --ring: rgba(6,182,212,.28);
+    --ring-soft: rgba(6,182,212,.18);
+
+    --panel: #000000;           /* true black panel */
+    --text: #ffffff;            /* white ink */
+    --muted: #cbd5e1;
+    --border: rgba(255,255,255,.22);
   }
+}
+
+/* Forced themes (optional)
+   Wrap a parent (e.g., <div class="theme-dark">) to force theme */
+.theme-light, [data-theme="light"]{
+  --primary: #534CE8;
+  --primary-500: #6A64EC;
+  --primary-700: #433ECC;
+  --ring: rgba(83,76,232,.25);
+  --ring-soft: rgba(83,76,232,.15);
+
+  --panel: #ffffff;
+  --text: #0f172a;
+  --muted: #6b7280;
+  --border: #e5e7eb;
+}
+.theme-dark, [data-theme="dark"]{
+  --primary: #06B6D4;
+  --primary-500: #22D3EE;
+  --primary-700: #0891B2;
+  --ring: rgba(6,182,212,.28);
+  --ring-soft: rgba(6,182,212,.18);
+
+  --panel: #000000;
+  --text: #ffffff;
+  --muted: #cbd5e1;
+  --border: rgba(255,255,255,.22);
 }
 
 /* ========================
@@ -44,6 +88,7 @@
   color: var(--text);
   font-size: 14px;
   box-sizing: border-box;
+  width: 100%;
 }
 
 .cn-toolbar{
@@ -52,6 +97,7 @@
   gap: 8px;
   margin-bottom: 10px;
   font-size: 0; /* prevent stray text nodes affecting layout */
+  flex-wrap: wrap; /* responsive on narrow widths */
 }
 
 .cn-toolbar .cn-btn,
@@ -70,8 +116,8 @@
   font-size: var(--chip-font);
   padding: 6px 10px;
   border-radius: 999px;
-  border: 1px solid #d1d5db;
-  background: #f9fafb;
+  border: 1px solid var(--border);
+  background: color-mix(in srgb, var(--panel) 90%, #fff 10%);
   color: inherit;
   cursor: pointer;
   transition: background-color .18s ease, border-color .18s ease,
@@ -82,7 +128,7 @@
   background: var(--primary);
   border-color: var(--primary);
   color: #ffffff;
-  box-shadow: 0 0 0 3px rgba(83,76,232,.15);
+  box-shadow: 0 0 0 3px var(--ring-soft);
   transform: translateY(-1px);
 }
 .cn-chip:active{
@@ -94,11 +140,11 @@
   background: var(--primary);
   border-color: var(--primary);
   color: #ffffff;
-  box-shadow: 0 0 0 2px rgba(83,76,232,.12);
+  box-shadow: 0 0 0 2px var(--ring-soft);
 }
 .cn-chip:focus-visible{
   outline: none;
-  box-shadow: 0 0 0 3px rgba(83,76,232,.25);
+  box-shadow: 0 0 0 3px var(--ring);
 }
 
 /* ========================
@@ -109,15 +155,15 @@
   line-height: var(--btn-lh);
   padding: 8px 12px;
   border-radius: 10px;
-  border: 1px solid #cbd5e1;
-  background: #f8fafc;
+  border: 1px solid var(--border);
+  background: color-mix(in srgb, var(--panel) 92%, #fff 8%);
   color: inherit;
   cursor: pointer;
   transition: background-color .18s ease, border-color .18s ease,
               color .18s ease, box-shadow .18s ease, transform .12s ease;
   box-sizing: border-box;
 }
-.cn-btn:hover{ background: #eef2ff; }
+.cn-btn:hover{ background: color-mix(in srgb, var(--panel) 88%, var(--primary) 12%); }
 .cn-btn:active{ transform: translateY(1px); }
 
 .cn-btn.primary{
@@ -146,13 +192,15 @@
 
 .cn-btn.ghost{
   background: transparent;
-  border-color: #cbd5e1;
+  border-color: var(--border);
 }
-.cn-btn.ghost:hover{ background: #f3f4f6; }
+.cn-btn.ghost:hover{
+  background: color-mix(in srgb, var(--panel) 92%, #fff 8%);
+}
 
 .cn-btn:focus-visible{
   outline: none;
-  box-shadow: 0 0 0 3px rgba(83,76,232,.25);
+  box-shadow: 0 0 0 3px var(--ring);
 }
 .cn-btn:disabled{
   opacity: .6;
@@ -179,13 +227,15 @@
   box-sizing: border-box;
 }
 @media (prefers-color-scheme: dark){
-  .cn-card{ background: #121527; }
+  .cn-card{ background: #000000; }
 }
+.theme-dark .cn-card,
+[data-theme="dark"] .cn-card{ background: #000000; }
 
 /* Title | actions on one row */
 .cn-card-head{
   display: grid;
-  grid-template-columns: 1fr auto; /* title grows, actions fixed width */
+  grid-template-columns: 1fr auto; /* title grows, actions fit */
   align-items: center;
   gap: 10px;
   margin-bottom: 6px;
@@ -197,6 +247,7 @@
   outline: none;
   background: transparent;
   min-width: 0; /* allow shrinking instead of pushing actions down */
+  color: inherit;
 }
 
 /* Actions row: horizontal mini buttons */
@@ -214,13 +265,6 @@
 /* ========================
    MINI BUTTONS (per-section)
 ======================== */
-:root{
-  --mini-h: 28px;
-  --mini-font: 12.5px;
-  --mini-pad-x: 10px;
-  --mini-radius: 8px;
-}
-
 .cn-mini{
   display: inline-flex;
   align-items: center;
@@ -232,7 +276,7 @@
   font-weight: 600;
   border-radius: var(--mini-radius);
   border: 1px solid var(--border);
-  background: #f9fafb;
+  background: color-mix(in srgb, var(--panel) 92%, #fff 8%);
   color: var(--text);
   cursor: pointer;
   white-space: nowrap;
@@ -243,7 +287,7 @@
   background: var(--primary);
   border-color: var(--primary);
   color: #ffffff;
-  box-shadow: 0 0 0 3px rgba(83,76,232,.15);
+  box-shadow: 0 0 0 3px var(--ring-soft);
   transform: translateY(-1px);
 }
 .cn-mini:active{ transform: translateY(0); }
@@ -271,22 +315,10 @@
 .cn-mini.is-ghost{
   background: transparent;
   border-color: var(--border);
+  color: var(--text);
 }
 .cn-mini.is-ghost:hover{
-  background: #f3f4f6;
-}
-
-/* Dark mode polish for minis */
-@media (prefers-color-scheme: dark){
-  .cn-mini{
-    background: #0f172a;
-    border-color: var(--border);
-    color: var(--text);
-  }
-  .cn-mini.is-ghost:hover{ background: rgba(255,255,255,.06); }
-  .cn-mini:hover{
-    box-shadow: 0 0 0 3px rgba(6,182,212,.22);
-  }
+  background: color-mix(in srgb, var(--panel) 92%, #fff 8%);
 }
 
 /* ========================
@@ -298,6 +330,7 @@
   border-radius: 10px;
   border: 1px solid var(--border);
   background: #fff;
+  color: inherit;
   box-sizing: border-box;
 }
 .cn-textarea{
@@ -310,10 +343,16 @@
   font-size: 13px;
   box-sizing: border-box;
   background: #fff;
+  color: inherit;
 }
 @media (prefers-color-scheme: dark){
-  .cn-input, .cn-textarea{ background: #0f1220; color: #eef2ff; border-color: rgba(255,255,255,.14); }
+  .cn-input, .cn-textarea{ background: #000; color: #fff; border-color: var(--border); }
 }
+.theme-dark .cn-input, [data-theme="dark"] .cn-input,
+.theme-dark .cn-textarea, [data-theme="dark"] .cn-textarea{
+  background: #000; color: #fff; border-color: var(--border);
+}
+
 .cn-help{
   font-size: 12px;
   color: var(--muted);
@@ -325,7 +364,7 @@
 ======================== */
 .cn-preview{
   white-space: pre-wrap;
-  background: #f9fafb;
+  background: color-mix(in srgb, var(--panel) 95%, #fff 5%);
   border: 1px dashed var(--border);
   padding: 10px;
   border-radius: 10px;
@@ -339,7 +378,10 @@
 .cn-card .markdown li{ font-size: 14px; }
 .cn-card .markdown ul{ padding-left: 1.1rem; }
 .cn-card .markdown code{
-  background:#f3f4f6; border:1px solid #e5e7eb; padding:.1rem .25rem; border-radius:6px;
+  background: color-mix(in srgb, var(--panel) 88%, #fff 12%);
+  border: 1px solid var(--border);
+  padding: .1rem .25rem;
+  border-radius: 6px;
 }
 
 /* Fallback if .markdown class is omitted */
@@ -381,6 +423,18 @@
   border-radius: 10px;
   margin-bottom: 8px;
 }
+@media (prefers-color-scheme: dark){
+  .cn-error{
+    color: #fecaca;
+    background: #3b0d0d;
+    border-color: #7f1d1d;
+  }
+}
+.theme-dark .cn-error, [data-theme="dark"] .cn-error{
+  color: #fecaca;
+  background: #3b0d0d;
+  border-color: #7f1d1d;
+}
 
 /* ========================
    MODAL (centered, blurred scrim)
@@ -413,10 +467,16 @@
 }
 @media (prefers-color-scheme: dark){
   .cn-modal.cn-modal--center{
-    background: #101426;
-    border-color: rgba(255,255,255,.12);
-    color: #eef2ff;
+    background: #000;
+    border-color: var(--border);
+    color: #fff;
   }
+}
+.theme-dark .cn-modal.cn-modal--center,
+[data-theme="dark"] .cn-modal.cn-modal--center{
+  background: #000;
+  border-color: var(--border);
+  color: #fff;
 }
 @keyframes cnModalPop{
   from{ transform: translateY(8px); opacity: 0; }
@@ -435,8 +495,8 @@
 }
 .cn-add-body{ padding: 4px 2px 8px; }
 .cn-field{ display: grid; gap: 6px; margin-bottom: 10px; }
-.cn-field > label{ font-size: 13px; color: #111827; font-weight: 700; }
-.cn-radio-row{ display: flex; gap: 12px; flex-wrap: wrap; color: #111827; }
+.cn-field > label{ font-size: 13px; color: var(--text); font-weight: 700; }
+.cn-radio-row{ display: flex; gap: 12px; flex-wrap: wrap; color: var(--text); }
 .cn-modal-actions{
   display: flex;
   justify-content: flex-end;
@@ -450,7 +510,7 @@
 .cn-row{ display: flex; gap: 6px; }
 @media (max-width: 720px){ .cn-row{ flex-direction: column; } }
 
-/* On very narrow cards, let actions wrap below the title neatly */
+/* On very narrow cards, let actions wrap neatly below the title */
 @media (max-width: 420px){
   .cn-card-head{ grid-template-columns: 1fr; }
   .cn-card-actions{
@@ -461,7 +521,9 @@
   }
 }
 
-/* Differential Diagnosis block + table */
+/* ========================
+   DIFFERENTIAL TABLE
+======================== */
 :root { --cn-primary: var(--primary); --cn-border: var(--border); --cn-ink: var(--text); }
 .cn-ddx { margin-top: 16px; }
 .cn-ddx > h2{
@@ -472,6 +534,7 @@
   border-bottom: 2px solid var(--cn-primary);
   padding-bottom: 4px;
 }
+
 .cn-table{
   width: 100%;
   border-collapse: collapse;
@@ -479,27 +542,66 @@
   border-radius: 10px;
   overflow: hidden;
   font-size: 13.5px;
+  background: transparent;
 }
 .cn-table thead th{
   text-align: left;
   padding: 10px 8px;
   background: #f6f7ff;
   border-bottom: 1px solid var(--cn-border);
+  color: var(--text);
 }
-.cn-table tbody td{ padding: 8px; border-bottom: 1px solid var(--cn-border); }
+.cn-table tbody td{
+  padding: 8px;
+  border-bottom: 1px solid var(--cn-border);
+  color: var(--text);
+}
 .cn-table tbody tr:nth-child(even) td{ background: #fafbff; }
 .cn-table tbody tr:hover td{ background: #f2f4ff; }
 .cn-table td.num, .cn-table th.num{ text-align: right; }
 .cn-table td code{
-  background: #f3f4f6;
-  border: 1px solid #e5e7eb;
+  background: color-mix(in srgb, var(--panel) 88%, #fff 12%);
+  border: 1px solid var(--border);
   padding: 2px 6px;
   border-radius: 6px;
   font-size: 12px;
 }
 
-/* Motion prefs */
+/* Dark table refinements (true black + cyan hover) */
+@media (prefers-color-scheme: dark){
+  .cn-table thead th{ background: rgba(255,255,255,.06); }
+  .cn-table tbody tr:nth-child(even) td{ background: rgba(255,255,255,.03); }
+  .cn-table tbody tr:hover td{ background: rgba(6,182,212,.10); }
+}
+.theme-dark .cn-table thead th,
+[data-theme="dark"] .cn-table thead th{ background: rgba(255,255,255,.06); }
+.theme-dark .cn-table tbody tr:nth-child(even) td,
+[data-theme="dark"] .cn-table tbody tr:nth-child(even) td{ background: rgba(255,255,255,.03); }
+.theme-dark .cn-table tbody tr:hover td,
+[data-theme="dark"] .cn-table tbody tr:hover td{ background: rgba(6,182,212,.10); }
+
+/* ========================
+   MOTION PREFS
+======================== */
 @media (prefers-reduced-motion: reduce){
   .cn-chip, .cn-btn, .cn-mini { transition: none; }
   .cn-spinner { animation: none; }
+}
+/* Inline spinner for busy mini buttons */
+.cn-spinner-inline{
+  width: 12px;
+  height: 12px;
+  margin-right: 6px;
+  border: 2px solid currentColor;
+  border-right-color: transparent;
+  border-radius: 50%;
+  animation: cnspin .9s linear infinite;
+  display: inline-block;
+  vertical-align: -2px;
+}
+
+/* Busy state styling */
+.cn-mini.is-busy{
+  opacity: .9;
+  pointer-events: none;
 }

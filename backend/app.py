@@ -4303,62 +4303,129 @@ def clinical_notes_load():
 # ===========================
 # Clinical Notes — AI Suggest a new section
 # ===========================
+try:
+    session_context
+except NameError:
+    session_context = {}
+
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
+if not OPENAI_API_KEY:
+    raise EnvironmentError("OPENAI_API_KEY is not set")
+
+OPENAI_CHAT_URL = "https://api.openai.com/v1/chat/completions"
+OPENAI_TEXT_MODEL = os.getenv("OPENAI_TEXT_MODEL", "gpt-4o-mini")  # fast, cheap text model
+
+
+def _slugify(s: str) -> str:
+    s = (s or "").lower()
+    s = re.sub(r"[^a-z0-9]+", "_", s)
+    s = re.sub(r"^_+|_+$", "", s)
+    return s[:64] or "custom_section"
+
+
+def _safe_md(text: str) -> str:
+    """Normalize output and strip code fences if the model used them."""
+    t = (text or "").strip()
+    t = re.sub(r"^```(?:md|markdown)?\s*|\s*```$", "", t, flags=re.I|re.M)
+    return t.strip()
+
+
 @app.post("/api/clinical-notes/suggest-section")
 def clinical_notes_suggest_section():
     """
-    Body: { session_id?: str, transcript?: str, title: str, style?: 'paragraph'|'bullets' }
-    Returns: { ok: true, text: "..." }
+    Body: {
+      session_id?: str,
+      section_title: str,      # required
+      style?: 'bullets'|'paragraph',
+      transcript?: str         # optional; falls back to session_context[session_id]['transcript']
+    }
+    Returns: { ok: true, section: { title, key, markdown } }
     """
-    if not oai_client:
-        return jsonify({"ok": False, "error": "OpenAI client not available"}), 500
-
-    data = request.get_json(silent=True) or {}
-    session_id = data.get("session_id", str(uuid4()))
-    transcript = (data.get("transcript") or "").strip()
-    title = (data.get("title") or "").strip()
-    style = (data.get("style") or "paragraph").lower()
-
-    if not title:
-        return jsonify({"ok": False, "error": "Missing title"}), 400
-
-    # Pull any saved note (to keep voice consistent)
-    sess = session_context.get(session_id, {}) if isinstance(session_context, dict) else {}
-    existing_md = sess.get("clinical_note_markdown") or ""
-
-    bullets_hint = "Use short bullet points." if style == "bullets" else "Use a concise paragraph (3–6 lines)."
-
-    # Tiny RAG-boost by peeking stored transcript/context (if any)
-    ctx = helper_context.get(session_id, {})
-    extra = (ctx.get("context") or "").strip()
-
-    sys = (
-        "You are a clinical scribe. Write a single new section for a clinical note.\n"
-        f"Section heading: {title}\n"
-        f"{bullets_hint}\n"
-        "Avoid PHI; be factual and concise.\n"
-        "Do NOT surround with markdown fences. Do NOT add extra headings beyond the section content."
-    )
-    usr = (
-        f"Relevant transcript:\n{transcript or '(none)'}\n\n"
-        f"Existing note (if any):\n{existing_md or '(none)'}\n\n"
-        f"Extra case context:\n{extra or '(none)'}"
-    )
-
     try:
-        comp = oai_client.chat.completions.create(
-            model=os.getenv("OAI_SUGGEST_MODEL", "gpt-4o-mini"),
-            temperature=0.4,
-            messages=[
-                {"role": "system", "content": sys},
-                {"role": "user", "content": usr}
-            ]
-        )
-        text = comp.choices[0].message.content or ""
-        text = text.strip()
-    except Exception as e:
-        return jsonify({"ok": False, "error": str(e)}), 500
+        data = request.get_json(silent=True) or {}
+        session_id = data.get("session_id") or str(uuid4())
+        section_title = (data.get("section_title") or data.get("title") or "").strip()
+        style = (data.get("style") or "bullets").strip().lower()
+        transcript = (data.get("transcript") or "").strip()
 
-    return jsonify({"ok": True, "text": text})
+        if not section_title:
+            return jsonify({"ok": False, "error": "section_title is required"}), 400
+
+        # Fallback to server-side transcript if available
+        if not transcript:
+            transcript = (session_context.get(session_id, {}) or {}).get("transcript", "") or ""
+
+        # Build a tight prompt for the section content only
+        sys = (
+            "You are a clinical scribe. Generate concise content for a single clinical note section.\n"
+            "- Output ONLY the section body in Markdown (no section header line).\n"
+            "- Be succinct, factual, and safe. No PHI. If info is missing, write '—'."
+        )
+
+        if style == "paragraph":
+            style_hint = (
+                "Write 1–2 short paragraphs with crisp sentences. Avoid long prose."
+            )
+        else:
+            # default to bullets
+            style = "bullets"
+            style_hint = (
+                "Write 4–8 tight bullet points. Start each item with '-' and keep each to one line."
+            )
+
+        user = (
+            f"Section title: {section_title}\n"
+            f"Preferred style: {style}\n\n"
+            f"Dialogue transcript (may be partial):\n{transcript or '—'}\n\n"
+            f"{style_hint}"
+        )
+
+        try:
+            r = requests.post(
+                OPENAI_CHAT_URL,
+                headers={
+                    "Authorization": f"Bearer {OPENAI_API_KEY}",
+                    "Content-Type": "application/json",
+                },
+                json={
+                    "model": OPENAI_TEXT_MODEL,
+                    "temperature": 0.3,
+                    "messages": [
+                        {"role": "system", "content": sys},
+                        {"role": "user", "content": user},
+                    ],
+                },
+                timeout=45,
+            )
+            if not r.ok:
+                # Return a 200 with ok:false so the UI can show the error nicely instead of a 500
+                return jsonify({
+                    "ok": False,
+                    "error": f"OpenAI error {r.status_code}: {r.text[:400]}"
+                }), 200
+
+            content = r.json()["choices"][0]["message"]["content"]
+            markdown = _safe_md(content)
+
+        except Exception as e:
+            # Fallback content — never 500
+            log.exception("OpenAI call failed")
+            markdown = (
+                "- —\n"
+                "- (Fallback content; the model request failed. Check server logs and OPENAI_API_KEY.)"
+            )
+
+        section = {
+            "title": section_title,
+            "key": _slugify(section_title),
+            "markdown": markdown,
+        }
+        return jsonify({"ok": True, "section": section, "session_id": session_id}), 200
+
+    except Exception as e:
+        log.exception("suggest-section endpoint crashed")
+        # Still return 200 so the browser doesn't surface a CORS-looking 500
+        return jsonify({"ok": False, "error": f"{type(e).__name__}: {str(e)}"}), 200
 
 if __name__ == "__main__":
     app.run(host="127.0.0.1", port=5050, debug=True)

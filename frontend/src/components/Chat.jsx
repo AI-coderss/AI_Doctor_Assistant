@@ -1862,26 +1862,8 @@ const Chat = () => {
       )}
       {/* DRG Validator FAB + overlay */}
       {/* Helper Agent FAB — identical style to validator FAB */}
-      <div className="drg-fab ha-fab" data-state={showHelperAgent ? "active" : undefined}>
-        <button
-          className="btn"
-          onClick={() => setShowHelperAgent(v => !v)}
-          title={showHelperAgent ? "Close Helper Agent" : "Open Helper Agent"}
-        >
-          <span className="btn-label">Helper Agent ֎</span>
-        </button>
-      </div>
-      <HelperAgent
-        isVisible={showHelperAgent}
-        onClose={() => setShowHelperAgent(false)}
-        sessionId={sessionId}
-        backendBase={VOICE_BASE}
-        context={
-          typeof buildAgentContext === "function"
-            ? buildAgentContext()
-            : (useDosageStore.getState()?.transcript || "")
-        }
-      />
+      
+     
 
     </div>
   );

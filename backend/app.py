@@ -4313,8 +4313,52 @@ if not OPENAI_API_KEY:
     raise EnvironmentError("OPENAI_API_KEY is not set")
 
 OPENAI_CHAT_URL = "https://api.openai.com/v1/chat/completions"
-OPENAI_TEXT_MODEL = os.getenv("OPENAI_TEXT_MODEL", "gpt-4o-mini")  # fast, cheap text model
+OPENAI_TEXT_MODEL = os.getenv("OPENAI_TEXT_MODEL", "gpt-4o-mini")
 
+# Optional RAG setup (won’t crash if libs/env are missing)
+_vector_store = None
+def _get_vector_store():
+    global _vector_store
+    if _vector_store is not None:
+        return _vector_store
+    try:
+        import qdrant_client
+        from langchain_openai import OpenAIEmbeddings
+        from langchain_qdrant import Qdrant
+
+        qdrant = qdrant_client.QdrantClient(
+            url=os.getenv("QDRANT_HOST"),
+            api_key=os.getenv("QDRANT_API_KEY"),
+        )
+        embeddings = OpenAIEmbeddings(openai_api_key=OPENAI_API_KEY)
+        _vector_store = Qdrant(
+            client=qdrant,
+            collection_name=os.getenv("QDRANT_COLLECTION_NAME"),
+            embeddings=embeddings,
+        )
+        return _vector_store
+    except Exception as e:
+        log.warning(f"RAG disabled (vector store unavailable): {e}")
+        _vector_store = False
+        return None
+
+def _rag_snippets(query: str, k: int = 4) -> list[str]:
+    if not query:
+        return []
+    try:
+        vs = _get_vector_store()
+        if not vs:
+            return []
+        hits = vs.similarity_search_with_score(query, k=k)
+        out = []
+        for doc, score in hits:
+            t = (doc.page_content or "").strip().replace("\n", " ")
+            if len(t) > 450: t = t[:450] + "…"
+            out.append(t)
+        return out
+    except Exception as e:
+        log.warning(f"RAG search failed: {e}")
+        return []
 
 def _slugify(s: str) -> str:
     s = (s or "").lower()
@@ -4322,61 +4366,58 @@ def _slugify(s: str) -> str:
     s = re.sub(r"^_+|_+$", "", s)
     return s[:64] or "custom_section"
 
-
-def _safe_md(text: str) -> str:
-    """Normalize output and strip code fences if the model used them."""
+def _strip_md_fences(text: str) -> str:
     t = (text or "").strip()
     t = re.sub(r"^```(?:md|markdown)?\s*|\s*```$", "", t, flags=re.I|re.M)
     return t.strip()
 
-
+# ---------------- Suggest Section (RAG + model) ----------------
 @app.post("/api/clinical-notes/suggest-section")
 def clinical_notes_suggest_section():
     """
     Body: {
       session_id?: str,
-      section_title: str,      # required
+      title: str,                     # required
       style?: 'bullets'|'paragraph',
-      transcript?: str         # optional; falls back to session_context[session_id]['transcript']
+      transcript?: str                # optional (fallback to session_context[session_id].transcript)
     }
-    Returns: { ok: true, section: { title, key, markdown } }
+    Returns 200 with:
+      { ok: true, section: { title, key, markdown }, session_id }
+    or
+      { ok: false, error }
     """
     try:
         data = request.get_json(silent=True) or {}
         session_id = data.get("session_id") or str(uuid4())
-        section_title = (data.get("section_title") or data.get("title") or "").strip()
+        section_title = (data.get("title") or data.get("section_title") or "").strip()
         style = (data.get("style") or "bullets").strip().lower()
         transcript = (data.get("transcript") or "").strip()
 
         if not section_title:
-            return jsonify({"ok": False, "error": "section_title is required"}), 400
+            return jsonify({"ok": False, "error": "title is required"}), 200
 
-        # Fallback to server-side transcript if available
         if not transcript:
             transcript = (session_context.get(session_id, {}) or {}).get("transcript", "") or ""
 
-        # Build a tight prompt for the section content only
+        # RAG snippets (optional)
+        snippets = _rag_snippets(transcript, k=4)
+        ctx_block = "\n".join(f"• {s}" for s in snippets) if snippets else "• (no retrieved context)"
+
         sys = (
             "You are a clinical scribe. Generate concise content for a single clinical note section.\n"
             "- Output ONLY the section body in Markdown (no section header line).\n"
-            "- Be succinct, factual, and safe. No PHI. If info is missing, write '—'."
+            "- Use factual, safe language. No PHI; redact identifying details.\n"
+            "- If information is unknown or absent, write '—'."
         )
-
-        if style == "paragraph":
-            style_hint = (
-                "Write 1–2 short paragraphs with crisp sentences. Avoid long prose."
-            )
-        else:
-            # default to bullets
-            style = "bullets"
-            style_hint = (
-                "Write 4–8 tight bullet points. Start each item with '-' and keep each to one line."
-            )
-
+        style_hint = (
+            "Write 1–2 tight paragraphs." if style == "paragraph"
+            else "Write 4–8 tight bullets using '-' as the bullet marker."
+        )
         user = (
             f"Section title: {section_title}\n"
             f"Preferred style: {style}\n\n"
-            f"Dialogue transcript (may be partial):\n{transcript or '—'}\n\n"
+            f"Transcript (may be partial):\n{transcript or '—'}\n\n"
+            f"Retrieved context:\n{ctx_block}\n\n"
             f"{style_hint}"
         )
 
@@ -4395,36 +4436,21 @@ def clinical_notes_suggest_section():
                         {"role": "user", "content": user},
                     ],
                 },
-                timeout=45,
+                timeout=60,
             )
             if not r.ok:
-                # Return a 200 with ok:false so the UI can show the error nicely instead of a 500
-                return jsonify({
-                    "ok": False,
-                    "error": f"OpenAI error {r.status_code}: {r.text[:400]}"
-                }), 200
-
+                return jsonify({"ok": False, "error": f"OpenAI error {r.status_code}: {r.text[:400]}"}), 200
             content = r.json()["choices"][0]["message"]["content"]
-            markdown = _safe_md(content)
-
+            markdown = _strip_md_fences(content)
         except Exception as e:
-            # Fallback content — never 500
             log.exception("OpenAI call failed")
-            markdown = (
-                "- —\n"
-                "- (Fallback content; the model request failed. Check server logs and OPENAI_API_KEY.)"
-            )
+            markdown = "- —\n- (Fallback: model request failed; check OPENAI_API_KEY / network / logs.)"
 
-        section = {
-            "title": section_title,
-            "key": _slugify(section_title),
-            "markdown": markdown,
-        }
+        section = {"title": section_title, "key": _slugify(section_title), "markdown": markdown}
         return jsonify({"ok": True, "section": section, "session_id": session_id}), 200
 
     except Exception as e:
-        log.exception("suggest-section endpoint crashed")
-        # Still return 200 so the browser doesn't surface a CORS-looking 500
+        log.exception("suggest-section crashed")
         return jsonify({"ok": False, "error": f"{type(e).__name__}: {str(e)}"}), 200
 
 if __name__ == "__main__":

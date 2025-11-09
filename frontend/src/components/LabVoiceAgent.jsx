@@ -5,6 +5,7 @@ import React, { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import "../styles/lab-voice-agent.css";
 import BaseOrb from "./BaseOrb.jsx";
+import Orb from "./Orb.jsx";
 import { FaMicrophoneAlt, FaFlask, FaTimes, FaBroom, FaPaperPlane } from "react-icons/fa";
 
 /* 🔊 Visualizer + audio store */
@@ -582,9 +583,10 @@ export default function LabVoiceAgent({
         {/* hidden audio element */}
         <audio ref={remoteAudioRef} autoPlay playsInline style={{ display: "none" }} />
 
-        <div className="assistant-orb">
-          <BaseOrb className="base-orb" />
-        </div>
+       <div className="ha-orb">
+               <div className="ha-orb-ring" aria-hidden="true" />
+               <Orb className="ha-orb-canvas" />
+             </div>
 
         {/* top-right controls */}
         <div className="va-controls">

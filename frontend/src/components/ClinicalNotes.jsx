@@ -2,17 +2,10 @@
 /* ClinicalNotes.jsx (centered modal, no restreams, ReactMarkdown preview, PDF download) */
 /* eslint-disable no-unused-vars */
 /* ClinicalNotes.jsx */
-/* eslint-disable no-unused-vars */
-/* ClinicalNotes.jsx — Preview shows a proper ICD-10 Differential Diagnosis table (no backend call) */
-/* eslint-disable no-unused-vars */
-/* ClinicalNotes.jsx — function-call aware, no restream on tab switch, DDx table in Preview */
-/* eslint-disable no-unused-vars */
 // src/components/ClinicalNotes.jsx
-/* eslint-disable no-unused-vars */
-// src/components/ClinicalNotes.jsx
-/* eslint-disable no-unused-vars */
-/* ClinicalNotes.jsx — centered Add Section modal (blurred background),
-   function-call aware (Helper Agent events), no freezing, working Add/Remove.
+/* ClinicalNotes.jsx — centered Add Section modal (blur background),
+   function-call aware (Helper Agent events), RAG-ready suggest endpoint,
+   working Add/Remove and never-freezing editor grid.
 */
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
@@ -221,9 +214,7 @@ export default function ClinicalNotes({ sessionId, transcript, autostart = true,
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sessionId]);
 
-  // =======================
-  // Helper Agent event bridge (function calling)
-  // =======================
+  // ===== Helper Agent event bridge =====
   useEffect(() => {
     const byKey = (k) => {
       const idx = (soap || []).findIndex(s => (s.key || "").toLowerCase() === String(k || "").toLowerCase());
@@ -278,7 +269,7 @@ export default function ClinicalNotes({ sessionId, transcript, autostart = true,
       setHasStreamed(true);
     };
 
-    // NEW: open add modal prefilled from agent
+    // Let agent open the modal prefilled
     const onAddOpen = (e) => {
       const d = e.detail || {};
       openAdd(d.title || "", d.anchor_key || (soap[soap.length-1]?.key), d.position || "after", d.style || "paragraph");
@@ -309,9 +300,7 @@ export default function ClinicalNotes({ sessionId, transcript, autostart = true,
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [soap, hasStreamed]);
 
-  // =======================
-  // Add Section (centered modal)
-  // =======================
+  // ===== Add Section (centered modal) =====
   const [addOpen, setAddOpen] = useState(false);
   const [addTitle, setAddTitle] = useState("");
   const [addAnchor, setAddAnchor] = useState("plan");
@@ -328,6 +317,7 @@ export default function ClinicalNotes({ sessionId, transcript, autostart = true,
     setAddStyle(style);
     setAddPreview("");
     setAddOpen(true);
+    setError("");
   };
   const closeAdd = () => setAddOpen(false);
 
@@ -348,6 +338,7 @@ export default function ClinicalNotes({ sessionId, transcript, autostart = true,
   const generateSuggestion = async () => {
     if (!addTitle.trim()) return;
     setAdding(true);
+    setError("");
     try {
       const r = await fetch(`${backendBase}/api/clinical-notes/suggest-section`, {
         method: "POST",
@@ -360,13 +351,22 @@ export default function ClinicalNotes({ sessionId, transcript, autostart = true,
         })
       });
       const j = await r.json();
-      if (j?.ok) setAddPreview(j.text || "");
-    } catch {}
-    finally { setAdding(false); }
+      if (!j?.ok) {
+        setError(j?.error || "Failed to generate section");
+        return;
+      }
+      const md = j.section?.markdown || j.markdown || j.text || "";
+      setAddPreview(md);
+    } catch (e) {
+      setError("Network error while generating section");
+    } finally {
+      setAdding(false);
+    }
   };
 
   const insertSuggestion = () => {
-    const obj = { title: addTitle.trim() || "Custom Section", key: slugify(addTitle||"Custom Section"), text: addPreview || "" };
+    const text = (addPreview || "—").trim();
+    const obj = { title: addTitle.trim() || "Custom Section", key: slugify(addTitle||"Custom Section"), text };
     if (addPos === "end" || !addAnchor) {
       const next = [...soap, obj]; setSoap(next); saveCache({ soap: next, hasStreamed: true });
     } else {
@@ -393,6 +393,8 @@ export default function ClinicalNotes({ sessionId, transcript, autostart = true,
           <div className="cn-modal-title">Add Section</div>
           <button type="button" className="cn-modal-close" onClick={closeAdd}>×</button>
         </div>
+
+        {error ? <div className="cn-error">{error}</div> : null}
 
         <div className="cn-add-body">
           <div className="cn-field">
@@ -438,7 +440,9 @@ export default function ClinicalNotes({ sessionId, transcript, autostart = true,
             </button>
             <div className="cn-spacer" />
             <button type="button" className="cn-btn ghost" onClick={closeAdd}>Cancel</button>
-            <button type="button" className="cn-btn primary" onClick={insertSuggestion} disabled={!addTitle}>Insert</button>
+            <button type="button" className="cn-btn primary" onClick={insertSuggestion} disabled={!addTitle}>
+              Insert
+            </button>
           </div>
 
           <div className="cn-field" style={{marginTop: 10}}>
@@ -456,9 +460,7 @@ export default function ClinicalNotes({ sessionId, transcript, autostart = true,
     </div>
   ) : null;
 
-  // =======================
-  // Section Card
-  // =======================
+  // ===== Section Card =====
   const SectionCard = ({ sec, idx }) => (
     <div className="cn-card" key={`${sec.key}-${idx}`}>
       <div className="cn-card-head">
@@ -480,6 +482,14 @@ export default function ClinicalNotes({ sessionId, transcript, autostart = true,
             const arr = [...soap]; arr.splice(idx + 1, 0, custom);
             setSoap(arr); saveCache({ soap: arr, hasStreamed: hasStreamed || true });
           }}>+ Section</button>
+          <button
+            type="button"
+            className="cn-chip"
+            onClick={() => openAdd("", sec.key, "after", "paragraph")}
+            title="Add new section after this one (AI)"
+          >
+            Add w/ AI
+          </button>
         </div>
       </div>
       <textarea
@@ -519,13 +529,13 @@ export default function ClinicalNotes({ sessionId, transcript, autostart = true,
         <button type="button" className="cn-btn ghost" onClick={() => setEditMode(v=>!v)}>{editMode ? "Preview" : "Edit"}</button>
         <button type="button" className="cn-btn ghost" onClick={() => setOrganized(v=>!v)}>{organized ? "Ungroup" : "Organize"}</button>
 
-        {/* NEW: Add Section (center modal) */}
+        {/* Add Section (center modal) */}
         <button type="button" className="cn-btn ghost" onClick={() => openAdd()}>Add Section</button>
 
         <button type="button" className="cn-btn primary" onClick={approveAndSave} disabled={streaming || !soap?.length}>Approve & Save</button>
       </div>
 
-      {error && <div className="cn-error">{error}</div>}
+      {error && !addOpen ? <div className="cn-error">{error}</div> : null}
 
       {editMode ? (
         <div className="cn-grid" role="region" aria-label="Edit Sections">
@@ -576,4 +586,5 @@ export default function ClinicalNotes({ sessionId, transcript, autostart = true,
     </div>
   );
 }
+
 

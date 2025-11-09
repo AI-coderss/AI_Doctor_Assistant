@@ -1,17 +1,32 @@
-/* Scoped, no global selectors */
-.orbfx-host {
+/* Orb is sized by its parent (e.g., .assistant-orb).
+   We ensure it paints ABOVE the ring halo (::before/::after). */
+.orbfx-host{
   position: relative;
-  overflow: hidden;     /* keep strokes inside */
-  /* size is controlled by parent or inline style prop */
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  z-index: 2;                /* child above the ::before/::after with z-index:1 */
 }
 
-.orbfx-canvas {
+.orbfx-canvas{
   position: absolute;
   inset: 0;
   width: 100%;
   height: 100%;
-  background: transparent !important; /* force transparency */
-  pointer-events: none;               /* never block clicks */
+  background: transparent !important;
+  pointer-events: none;
   display: block;
-  z-index: 0;
+}
+
+/* Ensure the ring/halo sit BELOW the Orb lines but still visible */
+.assistant-orb::before,
+.assistant-orb::after{
+  z-index: 1;
+}
+.assistant-orb .base-orb{
+  position: relative;
+  z-index: 2;                /* host above ring/halo */
+  width: 100%;
+  height: 100%;
+  display: block;
 }

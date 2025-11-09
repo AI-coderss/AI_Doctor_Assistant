@@ -1,23 +1,24 @@
 // src/components/Orb.jsx
 /* eslint-disable react-hooks/exhaustive-deps */
+/* eslint-disable react-hooks/exhaustive-deps */
 import React, { useEffect, useRef } from "react";
 import "../styles/Orb.css";
 
-// 🔊 reuse the exact hooks/deps from BaseOrb
+// 🔊 same stores/helpers as BaseOrb
 import useAudioForVisualizerStore from "../store/useAudioForVisualizerStore";
 import { enhanceAudioScale } from "./audioLevelAnalyzer";
 
 /**
- * Orb — audio-reactive variant
- * - Transparent canvas, fills parent
- * - Multi-instance safe
- * - Speed scales with mic level via useAudioForVisualizerStore + enhanceAudioScale
+ * Orb — audio-reactive
+ * Notes:
+ *  - Renders ABOVE the ring halo via CSS z-index (see Orb.css).
+ *  - Scale is clamped to stay inside the circular frame.
  */
 export default function Orb({
   density = 50,        // points per ring (MAX)
-  alphaDecay = 0.05,   // trail fade speed
-  lineAlpha = 0.15,    // stroke opacity
-  dprCap = 2,          // devicePixelRatio cap for perf
+  alphaDecay = 0.06,   // trail fade speed
+  lineAlpha = 0.25,    // stroke opacity (bumped so it reads through halo)
+  dprCap = 2,
   className = "",
   style = {},          // e.g. { minHeight: 300 }
 }) {
@@ -28,18 +29,18 @@ export default function Orb({
   const countRef = useRef(0);
   const roRef = useRef(null);
 
-  // Smooth audio -> speed (EMA to prevent jitter)
-  const speedEmaRef = useRef(0); // [0..~1]
-  const emaAlpha = 0.22;         // smoothing factor
+  // Smooth audio -> speed (EMA)
+  const speedEmaRef = useRef(0);
+  const emaAlpha = 0.22;
 
   useEffect(() => {
     const canvas = canvasRef.current;
     const host = hostRef.current;
     if (!canvas || !host) return;
 
-    const ctx = canvas.getContext("2d");
+    const ctx = canvas.getContext("2d", { alpha: true });
 
-    // === Build points exactly like the original “org” code ===
+    // Build base points
     const buildPoints = (MAX) => {
       const pts = [];
       let r = 0;
@@ -53,10 +54,11 @@ export default function Orb({
     };
     pointsRef.current = buildPoints(density);
 
-    let w = 0, h = 0;
+    let w = 0, h = 0, dpr = 1;
+
     const resize = () => {
       const rect = host.getBoundingClientRect();
-      const dpr = Math.min(window.devicePixelRatio || 1, dprCap);
+      dpr = Math.min(window.devicePixelRatio || 1, dprCap);
       const W = Math.max(1, Math.floor(rect.width * dpr));
       const H = Math.max(1, Math.floor(rect.height * dpr));
       if (canvas.width !== W || canvas.height !== H) {
@@ -68,7 +70,6 @@ export default function Orb({
       }
     };
 
-    // Observe host size
     if (typeof ResizeObserver !== "undefined") {
       roRef.current = new ResizeObserver(resize);
       roRef.current.observe(host);
@@ -78,37 +79,35 @@ export default function Orb({
     resize();
 
     const tick = () => {
-      // ---- AUDIO -> SPEED MAPPING (same store/enhancer as BaseOrb) ----
+      // Audio → speed
       const raw = useAudioForVisualizerStore.getState().audioScale || 0;
-      const enhanced = Math.max(0, enhanceAudioScale(raw)); // ~[0..1+]
+      const enhanced = Math.max(0, enhanceAudioScale(raw));
+      speedEmaRef.current = (1 - emaAlpha) * speedEmaRef.current + emaAlpha * enhanced;
 
-      // Exponential moving average to smooth spikes
-      speedEmaRef.current =
-        (1 - emaAlpha) * speedEmaRef.current + emaAlpha * enhanced;
+      const speedFactor = Math.min(4.0, 0.6 + 3.4 * speedEmaRef.current);
+      countRef.current += speedFactor;
+      let tim = countRef.current / 5;
 
-      // Map EMA to a usable speed factor:
-      // idle ≈ 0.6x; loud speech up to ≈ 4.0x (clamped)
-      const speedFactor = Math.min(
-        4.0,
-        0.6 + 3.4 * speedEmaRef.current
-      );
-
-      // ---- TRAIL FADE (transparent, no black flash) ----
+      // Fade trails
       ctx.save();
       ctx.globalCompositeOperation = "destination-out";
       ctx.fillStyle = `rgba(0,0,0,${alphaDecay})`;
       ctx.fillRect(0, 0, w, h);
       ctx.restore();
 
-      // ---- ADDITIVE GLOW LINES ----
+      // Draw
       ctx.globalCompositeOperation = "lighter";
-
-      // Increase tim progression with audio-driven speed
-      countRef.current += speedFactor;
-      let tim = countRef.current / 5;
+      ctx.lineCap = "round";
+      ctx.lineJoin = "round";
 
       const MAX = density;
       const src = pointsRef.current;
+
+      // Keep drawings nicely inside the ring:
+      // use ~38% of the min side (gives breathing room inside the border/glow)
+      const minSide = Math.min(w, h);
+      const baseScale = minSide * 0.38;
+      const cx = w / 2, cy = h / 2;
 
       for (let e = 0; e < 3; e++) {
         tim *= 1.7;
@@ -136,10 +135,7 @@ export default function Orb({
           p2.push([x, y, z]);
         }
 
-        // Centered and responsive scale
-        const minSide = Math.min(w, h);
-        const scale = s * (minSide * 0.3);
-        const cx = w / 2, cy = h / 2;
+        const scale = s * baseScale;
 
         for (let d = 0; d < 3; d++) {
           for (let a = 0; a < MAX; a++) {
@@ -148,7 +144,7 @@ export default function Orb({
 
             ctx.beginPath();
             ctx.strokeStyle = `hsla(${((a / MAX) * 360) | 0}, 70%, 60%, ${lineAlpha})`;
-            ctx.lineWidth = Math.max(0.6, Math.pow(6, b[2]));
+            ctx.lineWidth = Math.max(0.7, Math.pow(5.5, b[2]));
             ctx.moveTo(b[0] * scale + cx, b[1] * scale + cy);
             ctx.lineTo(c[0] * scale + cx, c[1] * scale + cy);
             ctx.stroke();
@@ -169,8 +165,13 @@ export default function Orb({
   }, [density, alphaDecay, lineAlpha, dprCap]);
 
   return (
-    <div ref={hostRef} className={`orbfx-host ${className}`} style={style}>
-      <canvas ref={canvasRef} className="orbfx-canvas" aria-hidden="true" />
+    <div
+      ref={hostRef}
+      className={`orbfx-host ${className}`}
+      style={style}
+      aria-hidden="true"
+    >
+      <canvas ref={canvasRef} className="orbfx-canvas" />
     </div>
   );
 }

@@ -31,6 +31,7 @@ import useDRGValidatorStore from "../store/useDRGValidatorStore";
 import DRGValidator from "./DRGValidator";
 import ClinicalNotes from "./ClinicalNotes.jsx";
 import "../styles/clinical-notes.css";
+import HelperAgent from "./HelperAgent.jsx";
 
 // 🧪 Lab Voice Agent (VAD, suggestions + approve)
 import LabVoiceAgent from "./LabVoiceAgent.jsx";
@@ -576,6 +577,8 @@ const Chat = () => {
   const drgTriggeredRef = useRef(false);
   const drgAnchorRef = useRef(null);
   const drgBubbleRef = useRef(null);
+  const [showHelperAgent, setShowHelperAgent] = useState(false);
+
   const scrollToDrg = () =>
     drgBubbleRef.current?.scrollIntoView({ behavior: "smooth", block: "center" });
   // ✅ Fresh session per mount (no localStorage persistence)
@@ -1858,31 +1861,27 @@ const Chat = () => {
         />
       )}
       {/* DRG Validator FAB + overlay */}
-      {drgStore.iconVisible && (
+      {/* Helper Agent FAB — identical style to validator FAB */}
+      <div className="drg-fab ha-fab" data-state={showHelperAgent ? "active" : undefined}>
         <button
-          className="drg-fab pulsing bouncing"
-          data-state={drgStore.open ? "open" : "closed"}
-          onClick={() => {
-            if (!drgStore.open) {
-              drgStore.validateNow?.(BACKEND_BASE, sessionId);
-              drgStore.toggleOpen?.(true);
-            } else {
-              drgStore.toggleOpen?.(false);
-            }
-          }}
-          title="DRG Validator"
-          aria-pressed={drgStore.open ? "true" : "false"}
+          className="btn"
+          onClick={() => setShowHelperAgent(v => !v)}
+          title={showHelperAgent ? "Close Helper Agent" : "Open Helper Agent"}
         >
-          {/* Investigator / magnifier svg; inherits currentColor */}
-          <svg viewBox="0 0 24 24" aria-hidden="true">
-            <path d="M11 3a7 7 0 1 1-4.95 11.95l-3.4 3.4a1 1 0 0 1-1.41-1.42l3.4-3.4A7 7 0 0 1 11 3zm0 2a5 5 0 1 0 0 10 5 5 0 0 0 0-10zm7-3l1 3h-4l1-3h2z" />
-            <path d="M20.3 19.6l-3.2-3.2a1 1 0 1 1 1.4-1.4l3.2 3.2a1 1 0 1 1-1.4 1.4z" />
-          </svg>
+          <span className="btn-label">Helper Agent ֎</span>
         </button>
-      )}
-
-      {/* DRG overlay lives globally; renders only when store.open is true */}
-      <DRGValidator backendBase={BACKEND_BASE} sessionId={sessionId} />
+      </div>
+      <HelperAgent
+        isVisible={showHelperAgent}
+        onClose={() => setShowHelperAgent(false)}
+        sessionId={sessionId}
+        backendBase={BACKEND_BASE}
+        context={
+          typeof buildAgentContext === "function"
+            ? buildAgentContext()
+            : (useDosageStore.getState()?.transcript || "")
+        }
+      />
 
     </div>
   );

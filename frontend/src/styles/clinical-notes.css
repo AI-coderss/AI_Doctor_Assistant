@@ -349,3 +349,73 @@
   .cn-chip, .cn-btn { transition: none; }
   .cn-spinner { animation: none; }
 }
+:root {
+  --cn-primary: #534CE8;
+  --cn-border: var(--border, #e5e7eb);
+  --cn-ink: #0f172a;
+}
+
+/* Keep toolbar buttons the same size across Edit/Preview */
+.cn-toolbar .cn-btn,
+.cn-toolbar .cn-btn.primary,
+.cn-toolbar .cn-btn.danger,
+.cn-toolbar .cn-btn.ghost {
+  font-size: 13px;
+  padding: 8px 12px;
+  line-height: 1.2;
+}
+
+/* Differential Diagnosis block */
+.cn-ddx { margin-top: 16px; }
+.cn-ddx > h2 {
+  font-size: 16px;
+  font-weight: 800;
+  margin: 0 0 8px 0;
+  color: var(--cn-ink);
+  border-bottom: 2px solid var(--cn-primary);
+  padding-bottom: 4px;
+}
+
+/* Table look & feel */
+.cn-table {
+  width: 100%;
+  border-collapse: collapse;
+  border: 1px solid var(--cn-border);
+  border-radius: 10px;
+  overflow: hidden; /* round corners */
+  font-size: 13.5px;
+}
+
+.cn-table thead th {
+  text-align: left;
+  padding: 10px 8px;
+  background: #f6f7ff;
+  border-bottom: 1px solid var(--cn-border);
+}
+
+.cn-table tbody td {
+  padding: 8px;
+  border-bottom: 1px solid var(--cn-border);
+}
+
+.cn-table tbody tr:nth-child(even) td {
+  background: #fafbff;
+}
+
+.cn-table tbody tr:hover td {
+  background: #f2f4ff;
+}
+
+.cn-table td.num,
+.cn-table th.num {
+  text-align: right;
+}
+
+/* Keep code in ICD-10 column compact */
+.cn-table td code {
+  background: #f3f4f6;
+  border: 1px solid #e5e7eb;
+  padding: 2px 6px;
+  border-radius: 6px;
+  font-size: 12px;
+}

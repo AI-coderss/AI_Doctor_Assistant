@@ -332,6 +332,36 @@ CORS(
         "methods": ["GET", "POST", "OPTIONS"],
         "allow_headers": ["Content-Type", "Authorization", "X-Session-Id"]
     }
+    ,
+     r"/api/*": {
+        "origins": [
+            "https://ai-doctor-assistant-app-dev.onrender.com",
+            "https://ai-doctor-assistant-backend-server.onrender.com",
+            "http://localhost:3000",
+            "http://127.0.0.1:3000",
+        ],
+        "methods": ["GET", "POST", "OPTIONS"],
+        "allow_headers": ["Content-Type", "Authorization", "X-Session-Id"]
+    },
+    r"/helper-agent/*": {
+        "origins": [
+            "https://ai-doctor-assistant-app-dev.onrender.com",
+            "http://localhost:3000",
+            "http://127.0.0.1:3000",
+        ],
+        "methods": ["GET", "POST", "OPTIONS"],
+        "allow_headers": ["Content-Type", "Authorization", "X-Session-Id"]
+    },
+    # NEW: accept the /api/helper-agent/* prefix too
+    r"/api/helper-agent/*": {
+        "origins": [
+            "https://ai-doctor-assistant-app-dev.onrender.com",
+            "http://localhost:3000",
+            "http://127.0.0.1:3000",
+        ],
+        "methods": ["GET", "POST", "OPTIONS"],
+        "allow_headers": ["Content-Type", "Authorization", "X-Session-Id"]
+    }
     }
 )
 

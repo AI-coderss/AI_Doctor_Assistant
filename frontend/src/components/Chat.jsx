@@ -1875,7 +1875,7 @@ const Chat = () => {
         isVisible={showHelperAgent}
         onClose={() => setShowHelperAgent(false)}
         sessionId={sessionId}
-        backendBase={VOICE_BASE}
+        backendBase={BACKEND_BASE}
         context={
           typeof buildAgentContext === "function"
             ? buildAgentContext()

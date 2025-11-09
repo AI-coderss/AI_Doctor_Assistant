@@ -13,7 +13,7 @@ import hashlib
 import unicodedata
 from werkzeug.exceptions import HTTPException, RequestEntityTooLarge
 from werkzeug.utils import secure_filename
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Optional
 import os.path as osp
 import random
 from collections import defaultdict
@@ -42,7 +42,7 @@ SESSION_STORE = defaultdict(lambda: {"transcript": []})
 # Provider plan guard (per OCR.Space docs: Free≈1MB, PRO≈5MB, PRO PDF≈100MB+)
 # This is a best-effort early guard; the provider still enforces its own limits.
 PROVIDER_LIMIT_MB = int(os.getenv("OCR_PROVIDER_LIMIT_MB", "1"))  # 1|5|100
-
+OPENAI_REALTIME_URL = "https://api.openai.com/v1/realtime"
 # Flask request cap (bytes); keep >= provider limit (default 20MB)
 MAX_BYTES = int(os.getenv("OCR_MAX_BYTES", 20 * 1024 * 1024))
 
@@ -302,6 +302,26 @@ CORS(
             "supports_credentials": True,
             "max_age": 86400,
         },
+        r"/api/clinical-notes/suggest-section": {
+            "origins": [
+                "https://ai-doctor-assistant-app-dev.onrender.com", 
+                "http://localhost:3000",
+            ],
+            "methods": ["POST", "OPTIONS"],
+            "allow_headers": ["Content-Type", "Authorization", "Accept", "X-Requested-With", "X-Session-Id"],
+            "expose_headers": ["Content-Type"],
+            "supports_credentials": True,
+            "max_age": 86400,
+        },
+         r"/helper-agent/*": {
+        "origins": [
+            "https://ai-doctor-assistant-app-dev.onrender.com",
+            "http://localhost:3000",
+            "http://127.0.0.1:3000",
+        ],
+        "methods": ["GET", "POST", "OPTIONS"],
+        "allow_headers": ["Content-Type", "Authorization", "X-Session-Id"]
+    }
     },
 )
 
@@ -321,6 +341,20 @@ COMMON_JSON_HEADERS = {
     "Content-Type": "application/json",
     "OpenAI-Beta": "realtime=v1",
 }
+USE_OAI_FALLBACK = True
+try:
+    from openai import OpenAI
+    oai_client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+except Exception:
+    oai_client = None
+
+# ----- Optional RAG bits (import if available) -----
+try:
+    # your chain should expose `.stream({"chat_history": ..., "input": ...})`
+    from your_rag_module import conversation_rag_chain  # noqa: F401
+    HAS_RAG = True
+except Exception:
+    HAS_RAG = False
 
 # Initialize OpenAI client
 client = OpenAI()
@@ -3893,8 +3927,14 @@ try:
 except NameError:
     session_context = {}
 
-# ---------- Defaults & helpers ----------
+try:
+    ast.expr_context
+except NameError:
+    helper_context = {}  # {session_id: {"context": str}}
 
+# ------------------------------------------------------------------------------------
+# Helper constants & utils
+# ------------------------------------------------------------------------------------
 SOAP_DEFAULT_SECTIONS = [
     {"key": "subjective", "title": "Subjective"},
     {"key": "objective",  "title": "Objective"},
@@ -3902,164 +3942,293 @@ SOAP_DEFAULT_SECTIONS = [
     {"key": "plan",       "title": "Plan"},
 ]
 
-def _soap_system_prompt(template: dict | None, mode: str = "markdown") -> str:
-    """
-    Build strict SOAP instructions. If a session template is active, we enforce its section order & field names.
-    mode: 'markdown' (default) or 'json' (strict JSON object with {subjective, objective, assessment, plan})
-    """
-    if template and isinstance(template, dict) and template.get("sections"):
-        sec_titles = [s.get("title", "") for s in template.get("sections", []) if s.get("title")]
-        fields_map = {s.get("title",""): s.get("fields", []) for s in template.get("sections", [])}
-        followups = template.get("follow_up_questions", [])
-        style = template.get("style", {})
-
-        if mode == "json":
-            return (
-                "You are a clinical scribe. RETURN STRICT JSON ONLY (no prose, no fences).\n"
-                "Schema:\n"
-                "{\n"
-                '  "subjective": "string",\n'
-                '  "objective": "string",\n'
-                '  "assessment": "string",\n'
-                '  "plan": "string"\n'
-                "}\n"
-                "Rules:\n"
-                f"- Use these section titles (in order): {sec_titles}\n"
-                "- Populate fields when possible using bullets; if unknown, write '—'.\n"
-                f"- Preferred tone: {style.get('tone','concise, clinical')}. Bullets allowed: {bool(style.get('bullets', True))}.\n"
-                f"- If information is missing, consider asking 1–2 of: {followups[:6]}\n"
-                "- No PHI; concise."
-            )
-
-        # markdown mode
-        sec_md = "\n".join([f"## {t}" for t in sec_titles])
-        return (
-            "You are a clinical scribe. Produce SOAP notes in Markdown using EXACTLY these headings in order:\n"
-            f"{sec_md}\n\n"
-            "Populate fields for each section when possible. If unknown, write '—'.\n"
-            f"Style: {style.get('tone', 'concise, clinical')}. Use short bullets if helpful.\n"
-            "Keep PHI generic. Be precise. No extra sections beyond those headings.\n"
-        )
-
-    # default template (no active specialty)
-    if mode == "json":
-        return (
-            "You are a clinical scribe. RETURN STRICT JSON ONLY (no prose, no fences).\n"
-            "Schema: {\"subjective\":\"string\",\"objective\":\"string\",\"assessment\":\"string\",\"plan\":\"string\"}\n"
-            "Use concise bullets inside strings; if unknown write '—'. No PHI."
-        )
-
-    # markdown default
-    return (
-        "You are a clinical scribe. Produce SOAP notes in Markdown with EXACT headings:\n"
-        "## Subjective\n"
-        "## Objective\n"
-        "## Assessment\n"
-        "## Plan\n\n"
-        "Use short, factual bullets. If information is unknown, write '—'. Keep PHI generic."
-    )
-
-def _soap_user_block(transcript: str, rag_snippets: list[str] | None = None) -> str:
-    transcript = (transcript or "").strip()
-    rag_block = ""
-    if rag_snippets:
-        rag_block = "\n\nRetrieved high-confidence context:\n" + "\n".join(f"• {s}" for s in rag_snippets)
-    return f"Dialogue transcript (may be partial):\n\n{transcript}{rag_block}"
-
-def _safe_json_obj(text: str):
-    try:
-        return json.loads(re.sub(r"```json|```", "", (text or "").strip(), flags=re.I))
-    except Exception:
-        m = re.search(r"\{[\s\S]*\}", text or "")
-        if m:
-            try:
-                return json.loads(m.group(0))
-            except Exception:
-                pass
-    return None
-
-def _sess_active_template(session_id: str) -> dict | None:
+def _sess_active_template(session_id: str) -> Optional[dict]:
     act = ACTIVE_TEMPLATES.get(session_id)
     if act and isinstance(act, dict):
         return act.get("template")
     return None
 
-# If your file has _ensure_context and _rag_snippets, we will use them.
-def _rag_snippets_fallback(transcript: str) -> list[str]:
-    """
-    Best-effort: if your app exposes a retriever helper, use it.
-    Otherwise, return an empty list; conversation_rag_chain still does the heavy lifting.
-    """
+def _rag_snippets_fallback(transcript: str) -> List[str]:
     try:
-        # If your app has _rag_snippets, calling it will work; else we fallback.
-        return _rag_snippets(transcript)  # type: ignore  # noqa
+        return _rag_snippets(transcript)  # if your app exposes this, it will work
     except Exception:
         return []
 
-# ---------- Endpoints ----------
+def _soap_system_prompt(template: Optional[dict], mode: str = "markdown") -> str:
+    if template and isinstance(template, dict) and template.get("sections"):
+        sec_titles = [s.get("title", "") for s in template.get("sections", []) if s.get("title")]
+        style = template.get("style", {})
+        followups = template.get("follow_up_questions", [])
+        if mode == "json":
+            return (
+                "You are a clinical scribe. RETURN STRICT JSON ONLY.\n"
+                'Schema: {"subjective":"string","objective":"string","assessment":"string","plan":"string"}\n'
+                f"- Use these section titles (in this order): {sec_titles}\n"
+                "- If any field unknown, write '—'.\n"
+                f"- Tone: {style.get('tone','concise, clinical')}.\n"
+                f"- Bullets allowed: {bool(style.get('bullets', True))}.\n"
+                f"- If information is missing, consider 1–2 follow-ups: {followups[:6]}\n"
+                "- No PHI; concise."
+            )
+        sec_md = "\n".join([f"## {t}" for t in sec_titles])
+        return (
+            "You are a clinical scribe. Produce SOAP in Markdown using EXACT headings:\n"
+            f"{sec_md}\n\n"
+            "Use concise bullets when helpful. If unknown, write '—'."
+        )
+    if mode == "json":
+        return ("You are a clinical scribe. RETURN STRICT JSON ONLY.\n"
+                'Schema: {"subjective":"string","objective":"string","assessment":"string","plan":"string"}\n'
+                "Use concise bullets inside strings; if unknown write '—'. No PHI.")
+    return (
+        "You are a clinical scribe. Produce SOAP in Markdown with EXACT headings:\n"
+        "## Subjective\n## Objective\n## Assessment\n## Plan\n\n"
+        "Use concise bullets; if unknown write '—'. No PHI."
+    )
 
+def _soap_user_block(transcript: str, rag_snippets: Optional[List[str]] = None) -> str:
+    transcript = (transcript or "").strip()
+    rag_block = ""
+    if rag_snippets:
+        rag_block = "\n\nRetrieved context:\n" + "\n".join(f"• {s}" for s in rag_snippets)
+    return f"Dialogue transcript (may be partial):\n\n{transcript}{rag_block}"
+
+def _strip_json_fences(text: str) -> str:
+    return re.sub(r"```json|```", "", (text or ""), flags=re.I).strip()
+
+# ------------------------------------------------------------------------------------
+# Routes
+# ------------------------------------------------------------------------------------
+@app.get("/")
+def home():
+    return "Backend up ✅"
+
+# ===========================
+# Helper Agent - Tools Schema
+# ===========================
+CN_TOOLS = [
+    {
+        "name": "cn_add_section",
+        "description": "Add a new section to clinical notes.",
+        "parameters": {
+            "type": "object",
+            "additionalProperties": False,
+            "properties": {
+                "title": {"type": "string", "description": "Section title"},
+                "key": {"type": "string", "description": "Slug key (lowercase_with_underscores). Optional"},
+                "text": {"type": "string", "description": "Default text content", "default": ""},
+                "position": {"type": "string", "enum": ["before", "after", "end"], "default": "after"},
+                "anchor_key": {"type": "string", "description": "Place relative to this key (required for before/after)"}
+            },
+            "required": ["title"]
+        }
+    },
+    {
+        "name": "cn_remove_section",
+        "description": "Remove a section by key.",
+        "parameters": {
+            "type": "object",
+            "additionalProperties": False,
+            "properties": {"key": {"type": "string"}},
+            "required": ["key"]
+        }
+    },
+    {
+        "name": "cn_update_section",
+        "description": "Set or append text for a section.",
+        "parameters": {
+            "type": "object",
+            "additionalProperties": False,
+            "properties": {
+                "key": {"type": "string"},
+                "text": {"type": "string"},
+                "append": {"type": "boolean", "default": False}
+            },
+            "required": ["key", "text"]
+        }
+    },
+    {
+        "name": "cn_rename_section",
+        "description": "Rename a section (and optionally change its key).",
+        "parameters": {
+            "type": "object",
+            "additionalProperties": False,
+            "properties": {
+                "key": {"type": "string"},
+                "new_title": {"type": "string"},
+                "new_key": {"type": "string"}
+            },
+            "required": ["key", "new_title"]
+        }
+    },
+    {
+        "name": "cn_apply_markdown",
+        "description": "Replace the entire note with a full Markdown string (SOAP or organized).",
+        "parameters": {
+            "type": "object",
+            "additionalProperties": False,
+            "properties": {"markdown": {"type": "string"}},
+            "required": ["markdown"]
+        }
+    },
+    {
+        "name": "cn_save",
+        "description": "Ask UI to approve & save the current clinical notes.",
+        "parameters": {"type": "object", "additionalProperties": False, "properties": {}}
+    },
+    {
+        "name": "cn_preview",
+        "description": "Open preview tab for the clinical notes.",
+        "parameters": {"type": "object", "additionalProperties": False, "properties": {}}
+    },
+    # NEW: lets the agent open the Add Section modal prefilled (UI chooses insertion)
+    {
+        "name": "cn_open_add_section",
+        "description": "Open the Add Section modal prefilled; user can confirm/inject.",
+        "parameters": {
+            "type": "object",
+            "additionalProperties": False,
+            "properties": {
+                "title": {"type": "string"},
+                "anchor_key": {"type": "string"},
+                "position": {"type": "string", "enum": ["before", "after", "end"], "default": "after"},
+                "style": {"type": "string", "enum": ["paragraph", "bullets"], "default": "paragraph"}
+            },
+            "required": ["title"]
+        }
+    }
+]
+
+@app.get("/helper-agent/tools")
+def helper_tools():
+    return jsonify({
+        "ok": True,
+        "tool_choice": {"type": "auto"},
+        "tools": CN_TOOLS
+    })
+
+# Context the agent can read (e.g., transcript / case data)
+@app.post("/helper-agent/context")
+def helper_context_post():
+    data = request.get_json(silent=True) or {}
+    session_id = data.get("session_id") or str(uuid4())
+    ctx = (data.get("context") or "").strip()
+    helper_context[session_id] = {"context": ctx}
+    return jsonify({"ok": True, "session_id": session_id})
+
+# SDP exchange using Realtime ephemeral session
+@app.post("/helper-agent/rtc-connect")
+def helper_rtc_connect():
+    client_sdp = request.get_data(as_text=True)
+    if not client_sdp:
+        return Response("No SDP provided", status=400)
+
+    # merge any context into instructions
+    session_id = request.args.get("session_id") or request.headers.get("X-Session-Id") or str(uuid4())
+    ctx = helper_context.get(session_id, {})
+    extra_instr = (ctx.get("context") or "").strip()
+
+    merged_instructions = (
+        "You are a UI Helper Agent for editing Clinical Notes. "
+        "Prefer using the provided tools (function calls) to modify the notes. "
+        "Do not claim changes occurred unless the tool succeeded. "
+        "When done or on request, call cn_save or cn_preview."
+    )
+    if extra_instr:
+        merged_instructions = f"{merged_instructions}\n\nCase context:\n{extra_instr}"
+
+    # create ephemeral session
+    headers = {"Authorization": f"Bearer {OPENAI_API_KEY}", "Content-Type": "application/json"}
+    payload = {
+        "model": REALTIME_MODEL,
+        "voice": REALTIME_VOICE,
+        "instructions": merged_instructions,
+        "tool_choice": {"type": "auto"},
+        "tools": CN_TOOLS
+    }
+    sess = requests.post(OPENAI_SESSION_URL, headers=headers, json=payload)
+    if not sess.ok:
+        log.error("Failed to create realtime session: %s", sess.text)
+        return Response("Failed to create realtime session", status=500)
+
+    ephemeral = sess.json().get("client_secret", {}).get("value")
+    if not ephemeral:
+        return Response("Missing ephemeral token", status=500)
+
+    # exchange SDP
+    sdp_headers = {"Authorization": f"Bearer {ephemeral}", "Content-Type": "application/sdp"}
+    r = requests.post(
+        OPENAI_REALTIME_URL,
+        headers=sdp_headers,
+        params={"model": REALTIME_MODEL, "voice": REALTIME_VOICE},
+        data=client_sdp
+    )
+    if not r.ok:
+        log.error("SDP exchange failed: %s", r.text)
+        return Response("SDP exchange error", status=500)
+
+    return Response(r.content, status=200, mimetype="application/sdp")
+
+# ===========================
+# Clinical Notes — SOAP stream / save / load
+# ===========================
 @app.post("/api/clinical-notes/soap-stream")
 def clinical_notes_soap_stream():
-    """
-    Body: { session_id?: str, transcript?: str, mode?: 'markdown'|'json' }
-    Streams SOAP clinical notes (RAG-backed) as text/plain.
-    - If mode='json', the model is instructed to emit strict JSON (we still stream raw text).
-    - If an ACTIVE specialty template is set for this session, its sections & fields are enforced.
-    """
     data = request.get_json(silent=True) or {}
     session_id = data.get("session_id", str(uuid4()))
     transcript = (data.get("transcript") or "").strip()
     mode = (data.get("mode") or "markdown").lower()
-
-    # Ensure context if your extractor exists
-    try:
-        ctx = _ensure_context(session_id, transcript=transcript)  # type: ignore  # noqa
-    except Exception:
-        ctx = {"transcript": transcript}
-
-    if not transcript and ctx.get("transcript"):
-        transcript = ctx["transcript"] or ""
 
     if not transcript:
         return Response("No transcript provided", status=400, mimetype="text/plain")
 
     template = _sess_active_template(session_id)
     system = _soap_system_prompt(template, mode=mode)
-
-    # Optional: include brief retrieved snippets inside the user block (makes notes more factual)
+    rags = []
     try:
         rags = _rag_snippets_fallback(transcript)
     except Exception:
-        rags = []
+        pass
     user = _soap_user_block(transcript, rags)
 
-    # Stream via your RAG chain so retrieval is active
-    def generate():
-        acc = ""
-        try:
-            for chunk in conversation_rag_chain.stream(
-                {"chat_history": chat_sessions.get(session_id, []), "input": f"{system}\n\n{user}"}
-            ):
-                token = chunk.get("answer", "")
-                acc += token
-                yield token
-        except Exception as e:
-            yield f"\n[Vector error: {str(e)}]"
+    # Primary: stream from your RAG chain if available
+    if HAS_RAG:
+        def generate():
+            acc = ""
+            try:
+                for chunk in conversation_rag_chain.stream(
+                    {"chat_history": chat_sessions.get(session_id, []), "input": f"{system}\n\n{user}"}
+                ):
+                    token = chunk.get("answer", "")
+                    acc += token
+                    yield token
+            except Exception as e:
+                yield f"\n[Vector error: {str(e)}]"
 
-        # Append to history
-        chat_sessions.setdefault(session_id, [])
-        chat_sessions[session_id].append({"role": "user", "content": "[Clinical Notes SOAP]"})
-        chat_sessions[session_id].append({"role": "assistant", "content": acc})
+            chat_sessions[session_id].append({"role": "user", "content": "[Clinical Notes SOAP]"})
+            chat_sessions[session_id].append({"role": "assistant", "content": acc})
+        return Response(stream_with_context(generate()), mimetype="text/plain")
 
-    return Response(stream_with_context(generate()), mimetype="text/plain")
+    # Fallback: OpenAI (non-stream for simplicity; you can stream if you wish)
+    if not oai_client or not USE_OAI_FALLBACK:
+        return Response("RAG chain missing and OpenAI fallback disabled", status=500, mimetype="text/plain")
 
+    try:
+        comp = oai_client.chat.completions.create(
+            model=os.getenv("OAI_SOAP_MODEL", "gpt-4o-mini"),
+            temperature=0.3,
+            messages=[
+                {"role": "system", "content": system},
+                {"role": "user", "content": user}
+            ]
+        )
+        text = comp.choices[0].message.content or ""
+    except Exception as e:
+        text = f"[OpenAI error: {e}]"
+    return Response(text, mimetype="text/plain")
 
 @app.post("/api/clinical-notes/save")
 def clinical_notes_save():
-    """
-    Body: { session_id: str, note_markdown?: str, note_json?: {...} }
-    Stores the latest approved/edited note for the session.
-    """
     data = request.get_json(silent=True) or {}
     session_id = data.get("session_id")
     note_md = (data.get("note_markdown") or "").strip()
@@ -4069,19 +4238,17 @@ def clinical_notes_save():
     if not note_md and not note_json:
         return jsonify({"error": "Provide note_markdown or note_json"}), 400
 
-    # lightweight in-memory store (attach to session_context to keep single source)
     sess = session_context.get(session_id, {}) if isinstance(session_context, dict) else {}
-    sess = {**sess, "clinical_note_markdown": note_md or sess.get("clinical_note_markdown"), "clinical_note_json": note_json or sess.get("clinical_note_json")}
+    sess = {
+        **sess,
+        "clinical_note_markdown": note_md or sess.get("clinical_note_markdown"),
+        "clinical_note_json": note_json or sess.get("clinical_note_json")
+    }
     session_context[session_id] = sess
     return jsonify({"ok": True, "session_id": session_id, "saved": {"markdown": bool(note_md), "json": bool(note_json)}}), 200
 
-
 @app.get("/api/clinical-notes/load")
 def clinical_notes_load():
-    """
-    Query: ?session_id=...
-    Returns the last saved clinical note (if any).
-    """
     session_id = request.args.get("session_id", "")
     if not session_id:
         return jsonify({"error": "Missing session_id"}), 400
@@ -4092,6 +4259,66 @@ def clinical_notes_load():
         "note_markdown": sess.get("clinical_note_markdown") or "",
         "note_json": sess.get("clinical_note_json") or None
     }), 200
+
+# ===========================
+# Clinical Notes — AI Suggest a new section
+# ===========================
+@app.post("/api/clinical-notes/suggest-section")
+def clinical_notes_suggest_section():
+    """
+    Body: { session_id?: str, transcript?: str, title: str, style?: 'paragraph'|'bullets' }
+    Returns: { ok: true, text: "..." }
+    """
+    if not oai_client:
+        return jsonify({"ok": False, "error": "OpenAI client not available"}), 500
+
+    data = request.get_json(silent=True) or {}
+    session_id = data.get("session_id", str(uuid4()))
+    transcript = (data.get("transcript") or "").strip()
+    title = (data.get("title") or "").strip()
+    style = (data.get("style") or "paragraph").lower()
+
+    if not title:
+        return jsonify({"ok": False, "error": "Missing title"}), 400
+
+    # Pull any saved note (to keep voice consistent)
+    sess = session_context.get(session_id, {}) if isinstance(session_context, dict) else {}
+    existing_md = sess.get("clinical_note_markdown") or ""
+
+    bullets_hint = "Use short bullet points." if style == "bullets" else "Use a concise paragraph (3–6 lines)."
+
+    # Tiny RAG-boost by peeking stored transcript/context (if any)
+    ctx = helper_context.get(session_id, {})
+    extra = (ctx.get("context") or "").strip()
+
+    sys = (
+        "You are a clinical scribe. Write a single new section for a clinical note.\n"
+        f"Section heading: {title}\n"
+        f"{bullets_hint}\n"
+        "Avoid PHI; be factual and concise.\n"
+        "Do NOT surround with markdown fences. Do NOT add extra headings beyond the section content."
+    )
+    usr = (
+        f"Relevant transcript:\n{transcript or '(none)'}\n\n"
+        f"Existing note (if any):\n{existing_md or '(none)'}\n\n"
+        f"Extra case context:\n{extra or '(none)'}"
+    )
+
+    try:
+        comp = oai_client.chat.completions.create(
+            model=os.getenv("OAI_SUGGEST_MODEL", "gpt-4o-mini"),
+            temperature=0.4,
+            messages=[
+                {"role": "system", "content": sys},
+                {"role": "user", "content": usr}
+            ]
+        )
+        text = comp.choices[0].message.content or ""
+        text = text.strip()
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+    return jsonify({"ok": True, "text": text})
 
 if __name__ == "__main__":
     app.run(host="127.0.0.1", port=5050, debug=True)

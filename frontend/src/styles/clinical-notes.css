@@ -15,6 +15,13 @@
   --btn-font: 13px;
   --btn-lh: 1.2;
 }
+@media (prefers-color-scheme: dark){
+  :root{
+    --panel: #0f1220;
+    --text: #eef2ff;
+    --border: rgba(255,255,255,.14);
+  }
+}
 
 /* ========================
    CONTAINER / TOOLBAR
@@ -25,7 +32,7 @@
   padding: 12px;
   background: var(--panel);
   color: var(--text);
-  font-size: 14px;            /* stabilize base size */
+  font-size: 14px;
   box-sizing: border-box;
 }
 
@@ -34,10 +41,9 @@
   align-items: center;
   gap: 8px;
   margin-bottom: 10px;
-  font-size: 0;               /* prevent inline text nodes affecting layout */
+  font-size: 0;  /* prevent inline text nodes affecting layout */
 }
 
-/* Ensure toolbar controls NEVER inherit huge sizes from outside */
 .cn-toolbar .cn-btn,
 .cn-toolbar .cn-chip{
   font-size: var(--btn-font) !important;
@@ -159,6 +165,8 @@
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
   gap: 10px;
+  max-height: calc(80vh - 160px);
+  overflow: auto; /* keep edit area scrollable */
 }
 .cn-card{
   border: 1px solid var(--border);
@@ -166,6 +174,9 @@
   padding: 10px;
   background: #ffffff;
   box-sizing: border-box;
+}
+@media (prefers-color-scheme: dark){
+  .cn-card{ background: #121527; }
 }
 .cn-card-head{
   display: flex;
@@ -181,8 +192,6 @@
   outline: none;
   background: transparent;
 }
-
-/* actions row inside card */
 .cn-card-actions{ display: flex; gap: 6px; }
 
 /* ========================
@@ -205,6 +214,10 @@
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
   font-size: 13px;
   box-sizing: border-box;
+  background: #fff;
+}
+@media (prefers-color-scheme: dark){
+  .cn-input, .cn-textarea{ background: #0f1220; color: #eef2ff; border-color: rgba(255,255,255,.14); }
 }
 .cn-help{
   font-size: 12px;
@@ -214,7 +227,6 @@
 
 /* ========================
    PREVIEW (Markdown)
-   – Scoped typography so it never affects toolbar/buttons
 ======================== */
 .cn-preview{
   white-space: pre-wrap;
@@ -224,7 +236,7 @@
   border-radius: 10px;
 }
 
-.cn-card .markdown{ /* add className "markdown" to your ReactMarkdown if you want tighter scope */
+.cn-card .markdown{
   font-size: 14px;
   line-height: 1.45;
 }
@@ -236,7 +248,6 @@
 .cn-card .markdown ul{ padding-left: 1.1rem; }
 .cn-card .markdown code{ background:#f3f4f6; border:1px solid #e5e7eb; padding:.1rem .25rem; border-radius:6px; }
 
-/* If you didn't set "markdown" class in JSX, this fallback keeps sizing sane */
 .cn-card h1{ font-size: 20px; margin: 0 0 8px; }
 .cn-card h2{ font-size: 18px; margin: 10px 0 6px; }
 .cn-card h3{ font-size: 16px; margin: 8px 0 4px; }
@@ -278,26 +289,46 @@
 }
 
 /* ========================
-   MODAL (centered)
+   MODAL (centered, blurred scrim)
 ======================== */
 .cn-modal-overlay{
   position: fixed;
   inset: 0;
-  background: rgba(0,0,0,.45);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  z-index: 9999;
+  display: grid;
+  place-items: center;
   padding: 16px;
+  z-index: 9999;
+  background: rgba(15,23,42,0.50); /* fallback dimming */
 }
-.cn-modal{
-  width: min(680px, 96vw);
+.cn-modal-overlay--blur{
+  backdrop-filter: blur(8px) saturate(120%);
+  -webkit-backdrop-filter: blur(8px) saturate(120%);
+}
+.cn-modal.cn-modal--center{
+  width: min(720px, 96vw);
+  max-height: 90vh;
+  overflow: auto;
   background: #fff;
   color: var(--text);
-  border-radius: 14px;
+  border-radius: 16px;
   border: 1px solid var(--border);
-  box-shadow: 0 20px 60px rgba(0,0,0,.25);
-  padding: 14px;
+  box-shadow:
+    0 30px 80px rgba(0,0,0,.35),
+    0 6px 24px rgba(0,0,0,.18);
+  padding: 16px;
+  transform: translateY(0);
+  animation: cnModalPop .18s ease-out;
+}
+@media (prefers-color-scheme: dark){
+  .cn-modal.cn-modal--center{
+    background: #101426;
+    border-color: rgba(255,255,255,.12);
+    color: #eef2ff;
+  }
+}
+@keyframes cnModalPop{
+  from{ transform: translateY(8px); opacity: 0; }
+  to{ transform: translateY(0); opacity: 1; }
 }
 .cn-modal-header{
   display: flex;
@@ -305,33 +336,19 @@
   justify-content: space-between;
   margin-bottom: 10px;
 }
-.cn-modal-title{
-  font-weight: 800;
-  font-size: 16px;
-}
+.cn-modal-title{ font-weight: 800; font-size: 16px; }
 .cn-modal-close{
-  border: none;
-  background: transparent;
-  cursor: pointer;
-  font-size: 18px;
-  line-height: 1;
+  border: none; background: transparent; cursor: pointer;
+  font-size: 18px; line-height: 1; color: inherit;
 }
-.cn-field{
-  display: grid;
-  gap: 6px;
-  margin-bottom: 10px;
-}
+.cn-add-body{ padding: 4px 2px 8px; }
+.cn-field{ display: grid; gap: 6px; margin-bottom: 10px; }
 .cn-field > label{
   font-size: 13px;
   color: #111827;
   font-weight: 700;
 }
-.cn-radio-row{
-  display: flex;
-  gap: 12px;
-  flex-wrap: wrap;
-  color: #111827;
-}
+.cn-radio-row{ display: flex; gap: 12px; flex-wrap: wrap; color: #111827; }
 .cn-modal-actions{
   display: flex;
   justify-content: flex-end;
@@ -340,22 +357,52 @@
 }
 
 /* ========================
+   DRAWER (legacy — unused; safe to keep)
+======================== */
+.cn-drawer-overlay{
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,.35);
+  z-index: 9998;
+}
+.cn-drawer{
+  position: fixed;
+  top: 0; right: 0;
+  height: 100vh;
+  width: min(520px, 92vw);
+  background: #fff;
+  color: var(--text);
+  border-left: 1px solid var(--border);
+  box-shadow: -16px 0 40px rgba(0,0,0,.25);
+  transform: translateX(100%);
+  transition: transform .28s ease;
+  z-index: 9999;
+  display: flex;
+  flex-direction: column;
+}
+.cn-drawer.open{ transform: translateX(0); }
+.cn-drawer-header{
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 14px;
+  border-bottom: 1px solid var(--border);
+}
+
+/* ========================
    UTILITIES
 ======================== */
 .cn-row{ display: flex; gap: 6px; }
-
-/* Motion preferences */
-@media (prefers-reduced-motion: reduce){
-  .cn-chip, .cn-btn { transition: none; }
-  .cn-spinner { animation: none; }
+@media (max-width: 720px){
+  .cn-row{ flex-direction: column; }
 }
+
+/* Toolbar consistency */
 :root {
   --cn-primary: #534CE8;
   --cn-border: var(--border, #e5e7eb);
   --cn-ink: #0f172a;
 }
-
-/* Keep toolbar buttons the same size across Edit/Preview */
 .cn-toolbar .cn-btn,
 .cn-toolbar .cn-btn.primary,
 .cn-toolbar .cn-btn.danger,
@@ -365,7 +412,7 @@
   line-height: 1.2;
 }
 
-/* Differential Diagnosis block */
+/* Differential Diagnosis block + table */
 .cn-ddx { margin-top: 16px; }
 .cn-ddx > h2 {
   font-size: 16px;
@@ -375,43 +422,27 @@
   border-bottom: 2px solid var(--cn-primary);
   padding-bottom: 4px;
 }
-
-/* Table look & feel */
 .cn-table {
   width: 100%;
   border-collapse: collapse;
   border: 1px solid var(--cn-border);
   border-radius: 10px;
-  overflow: hidden; /* round corners */
+  overflow: hidden;
   font-size: 13.5px;
 }
-
 .cn-table thead th {
   text-align: left;
   padding: 10px 8px;
   background: #f6f7ff;
   border-bottom: 1px solid var(--cn-border);
 }
-
 .cn-table tbody td {
   padding: 8px;
   border-bottom: 1px solid var(--cn-border);
 }
-
-.cn-table tbody tr:nth-child(even) td {
-  background: #fafbff;
-}
-
-.cn-table tbody tr:hover td {
-  background: #f2f4ff;
-}
-
-.cn-table td.num,
-.cn-table th.num {
-  text-align: right;
-}
-
-/* Keep code in ICD-10 column compact */
+.cn-table tbody tr:nth-child(even) td { background: #fafbff; }
+.cn-table tbody tr:hover td { background: #f2f4ff; }
+.cn-table td.num, .cn-table th.num { text-align: right; }
 .cn-table td code {
   background: #f3f4f6;
   border: 1px solid #e5e7eb;
@@ -419,3 +450,10 @@
   border-radius: 6px;
   font-size: 12px;
 }
+
+/* Motion prefs */
+@media (prefers-reduced-motion: reduce){
+  .cn-chip, .cn-btn { transition: none; }
+  .cn-spinner { animation: none; }
+}
+

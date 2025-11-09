@@ -1,4 +1,3 @@
-/* eslint-disable react-hooks/exhaustive-deps */
 /* eslint-disable no-unused-vars */
 /* ClinicalNotes.jsx (centered modal, no restreams, ReactMarkdown preview, PDF download) */
 /* eslint-disable no-unused-vars */
@@ -7,7 +6,14 @@
 /* ClinicalNotes.jsx — Preview shows a proper ICD-10 Differential Diagnosis table (no backend call) */
 /* eslint-disable no-unused-vars */
 /* ClinicalNotes.jsx — function-call aware, no restream on tab switch, DDx table in Preview */
-/* ClinicalNotes.jsx — function-call aware, stable listeners, smooth scrolling + DDx table */
+/* eslint-disable no-unused-vars */
+// src/components/ClinicalNotes.jsx
+/* eslint-disable no-unused-vars */
+// src/components/ClinicalNotes.jsx
+/* eslint-disable no-unused-vars */
+/* ClinicalNotes.jsx — centered Add Section modal (blurred background),
+   function-call aware (Helper Agent events), no freezing, working Add/Remove.
+*/
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
@@ -52,7 +58,6 @@ function stringifySoapMarkdown(soapArr) {
     .join("\n\n");
 }
 
-/** extract DDx rows from current SOAP */
 function extractDdxFromSoap(sections) {
   const normalizeProb = (p) => {
     if (p === undefined || p === null || p === "") return null;
@@ -117,8 +122,8 @@ function extractDdxFromSoap(sections) {
   return out;
 }
 
-export default function ClinicalNotes({ sessionId, transcript, autostart = true }) {
-  const [mode, setMode] = useState("markdown");    // 'markdown' | 'json'
+export default function ClinicalNotes({ sessionId, transcript, autostart = true, backendBase = BACKEND_BASE }) {
+  const [mode, setMode] = useState("markdown");
   const [streaming, setStreaming] = useState(false);
   const [hasStreamed, setHasStreamed] = useState(false);
   const [streamBuf, setStreamBuf] = useState("");
@@ -134,12 +139,13 @@ export default function ClinicalNotes({ sessionId, transcript, autostart = true 
   const mdNow = useMemo(() => stringifySoapMarkdown(soap), [soap]);
   const ddxRows = useMemo(() => extractDdxFromSoap(soap), [soap]);
 
-  // Load / Save cache
   const loadCache = () => {
-    try { const raw = sessionStorage.getItem(storageKey(sessionId, mode)); return raw ? JSON.parse(raw) : null; } catch { return null; }
+    try {
+      const raw = sessionStorage.getItem(storageKey(sessionId, mode));
+      return raw ? JSON.parse(raw) : null;
+    } catch { return null; }
   };
   const saveCache = (payload) => { try { sessionStorage.setItem(storageKey(sessionId, mode), JSON.stringify(payload)); } catch {} };
-  useEffect(() => { saveCache({ soap, hasStreamed }); /* autosave on change */ }, [soap, hasStreamed, sessionId, mode]);
 
   const startStream = async (force = false) => {
     if (!transcript || streaming) return;
@@ -150,7 +156,7 @@ export default function ClinicalNotes({ sessionId, transcript, autostart = true 
     const ctrl = new AbortController(); controllerRef.current = ctrl;
 
     try {
-      const res = await fetch(`${BACKEND_BASE}/api/clinical-notes/soap-stream`, {
+      const res = await fetch(`${backendBase}/api/clinical-notes/soap-stream`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ session_id: sessionId, transcript, mode }),
@@ -170,16 +176,16 @@ export default function ClinicalNotes({ sessionId, transcript, autostart = true 
         try {
           const obj = JSON.parse(acc.replace(/```json|```/gi, "").trim());
           const parsed = DEFAULT_SOAP.map(s => ({ ...s, text: String(obj[s.key] || obj[s.title?.toLowerCase()] || "—") }));
-          if (mountedRef.current) { setSoap(parsed); setHasStreamed(true); }
+          if (mountedRef.current) { setSoap(parsed); setHasStreamed(true); saveCache({ soap: parsed, hasStreamed: true }); }
         } catch {
           if (mountedRef.current) {
             const fallback = DEFAULT_SOAP.map((s,i)=> i===0 ? {...s, text: acc.trim()} : s);
-            setSoap(fallback); setHasStreamed(true);
+            setSoap(fallback); setHasStreamed(true); saveCache({ soap: fallback, hasStreamed: true });
           }
         }
       } else {
         const parsed = parseMarkdownToSoap(acc);
-        if (mountedRef.current) { setSoap(parsed); setHasStreamed(true); }
+        if (mountedRef.current) { setSoap(parsed); setHasStreamed(true); saveCache({ soap: parsed, hasStreamed: true }); }
       }
     } catch (e) {
       const msg = String(e || "").toLowerCase();
@@ -196,12 +202,12 @@ export default function ClinicalNotes({ sessionId, transcript, autostart = true 
     try {
       setError("");
       const note_markdown = stringifySoapMarkdown(soap);
-      const res = await fetch(`${BACKEND_BASE}/api/clinical-notes/save`, {
+      const res = await fetch(`${backendBase}/api/clinical-notes/save`, {
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ session_id: sessionId, note_markdown }),
       });
       if (!res.ok) throw new Error();
-      // cache happens via effect
+      saveCache({ soap, hasStreamed: true });
     } catch { setError("Failed to save the note."); }
   };
 
@@ -215,66 +221,67 @@ export default function ClinicalNotes({ sessionId, transcript, autostart = true 
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sessionId]);
 
-  /** ===== HelperAgent event bridge (stable listeners + functional updates) ===== **/
+  // =======================
+  // Helper Agent event bridge (function calling)
+  // =======================
   useEffect(() => {
+    const byKey = (k) => {
+      const idx = (soap || []).findIndex(s => (s.key || "").toLowerCase() === String(k || "").toLowerCase());
+      return [idx, idx >= 0 ? soap[idx] : null];
+    };
+    const setAndCache = (next) => { setSoap(next); saveCache({ soap: next, hasStreamed: hasStreamed || true }); };
+
     const onAdd = (e) => {
       const { title, key, text = "", position = "after", anchor_key } = e.detail || {};
       const obj = { key: key || slugify(title || "Custom Section"), title: title || "Custom Section", text: String(text || "") };
-      setSoap(prev => {
-        if (!anchor_key || position === "end") return [...prev, obj];
-        const idx = prev.findIndex(s => (s.key || "").toLowerCase() === String(anchor_key || "").toLowerCase());
-        if (idx < 0) return [...prev, obj];
-        const arr = [...prev];
-        if (position === "before") arr.splice(idx, 0, obj);
-        else arr.splice(idx + 1, 0, obj);
-        return arr;
-      });
-      setHasStreamed(h => h || true);
+      if (!anchor_key || position === "end") {
+        setAndCache([...(soap || []), obj]); return;
+      }
+      const [i] = byKey(anchor_key);
+      if (i < 0) { setAndCache([...(soap || []), obj]); return; }
+      const arr = [...soap];
+      if (position === "before") arr.splice(i, 0, obj);
+      else arr.splice(i + 1, 0, obj);
+      setAndCache(arr);
     };
 
     const onRemove = (e) => {
       const { key } = e.detail || {};
-      setSoap(prev => {
-        const idx = prev.findIndex(s => (s.key || "").toLowerCase() === String(key || "").toLowerCase());
-        if (idx < 0) return prev;
-        const arr = [...prev]; arr.splice(idx, 1);
-        return arr;
-      });
-      setHasStreamed(h => h || true);
+      const [i] = byKey(key);
+      if (i < 0) return;
+      const arr = [...soap]; arr.splice(i, 1); setAndCache(arr);
     };
 
     const onUpdate = (e) => {
       const { key, text = "", append = false } = e.detail || {};
-      setSoap(prev => {
-        const idx = prev.findIndex(s => (s.key || "").toLowerCase() === String(key || "").toLowerCase());
-        if (idx < 0) return prev;
-        const arr = [...prev];
-        const sec = arr[idx];
-        arr[idx] = { ...sec, text: append ? (sec.text ? `${sec.text}\n${text}` : text) : text };
-        return arr;
-      });
-      setHasStreamed(h => h || true);
+      const [i, sec] = byKey(key);
+      if (i < 0) return;
+      const arr = [...soap];
+      arr[i] = { ...sec, text: append ? (sec.text ? `${sec.text}\n${text}` : text) : text };
+      setAndCache(arr);
     };
 
     const onRename = (e) => {
       const { key, new_title, new_key } = e.detail || {};
-      setSoap(prev => {
-        const idx = prev.findIndex(s => (s.key || "").toLowerCase() === String(key || "").toLowerCase());
-        if (idx < 0) return prev;
-        const arr = [...prev];
-        const sec = arr[idx];
-        arr[idx] = { ...sec, title: new_title || sec.title, key: new_key || slugify(new_title || sec.title) };
-        return arr;
-      });
-      setHasStreamed(h => h || true);
+      const [i, sec] = byKey(key);
+      if (i < 0) return;
+      const arr = [...soap];
+      arr[i] = { ...sec, title: new_title || sec.title, key: new_key || slugify(new_title || sec.title) };
+      setAndCache(arr);
     };
 
     const onApply = (e) => {
       const md = e.detail?.markdown || "";
       if (!md) return;
       const parsed = parseMarkdownToSoap(md);
-      setSoap(parsed);
+      setAndCache(parsed);
       setHasStreamed(true);
+    };
+
+    // NEW: open add modal prefilled from agent
+    const onAddOpen = (e) => {
+      const d = e.detail || {};
+      openAdd(d.title || "", d.anchor_key || (soap[soap.length-1]?.key), d.position || "after", d.style || "paragraph");
     };
 
     const onSave = () => { approveAndSave(); };
@@ -287,6 +294,7 @@ export default function ClinicalNotes({ sessionId, transcript, autostart = true 
     window.addEventListener("cn:apply", onApply);
     window.addEventListener("cn:save", onSave);
     window.addEventListener("cn:preview", onPreview);
+    window.addEventListener("cn:add.open", onAddOpen);
 
     return () => {
       window.removeEventListener("cn:section.add", onAdd);
@@ -296,9 +304,161 @@ export default function ClinicalNotes({ sessionId, transcript, autostart = true 
       window.removeEventListener("cn:apply", onApply);
       window.removeEventListener("cn:save", onSave);
       window.removeEventListener("cn:preview", onPreview);
+      window.removeEventListener("cn:add.open", onAddOpen);
     };
-  }, []); // 🔒 listeners mounted once (no stale closures)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [soap, hasStreamed]);
 
+  // =======================
+  // Add Section (centered modal)
+  // =======================
+  const [addOpen, setAddOpen] = useState(false);
+  const [addTitle, setAddTitle] = useState("");
+  const [addAnchor, setAddAnchor] = useState("plan");
+  const [addPos, setAddPos] = useState("after");
+  const [addStyle, setAddStyle] = useState("paragraph");
+  const [addPreview, setAddPreview] = useState("");
+  const [adding, setAdding] = useState(false);
+  const titleRef = useRef(null);
+
+  const openAdd = (title = "", anchorKey, pos = "after", style = "paragraph") => {
+    setAddTitle(title || "");
+    setAddAnchor(anchorKey || (soap[soap.length-1]?.key) || "plan");
+    setAddPos(pos);
+    setAddStyle(style);
+    setAddPreview("");
+    setAddOpen(true);
+  };
+  const closeAdd = () => setAddOpen(false);
+
+  useEffect(() => {
+    if (!addOpen) return;
+    const onEsc = (e) => { if (e.key === "Escape") closeAdd(); };
+    window.addEventListener("keydown", onEsc);
+    const prev = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    const t = setTimeout(() => titleRef.current?.focus?.(), 30);
+    return () => {
+      window.removeEventListener("keydown", onEsc);
+      document.body.style.overflow = prev;
+      clearTimeout(t);
+    };
+  }, [addOpen]);
+
+  const generateSuggestion = async () => {
+    if (!addTitle.trim()) return;
+    setAdding(true);
+    try {
+      const r = await fetch(`${backendBase}/api/clinical-notes/suggest-section`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          session_id: sessionId,
+          transcript,
+          title: addTitle.trim(),
+          style: addStyle
+        })
+      });
+      const j = await r.json();
+      if (j?.ok) setAddPreview(j.text || "");
+    } catch {}
+    finally { setAdding(false); }
+  };
+
+  const insertSuggestion = () => {
+    const obj = { title: addTitle.trim() || "Custom Section", key: slugify(addTitle||"Custom Section"), text: addPreview || "" };
+    if (addPos === "end" || !addAnchor) {
+      const next = [...soap, obj]; setSoap(next); saveCache({ soap: next, hasStreamed: true });
+    } else {
+      const idx = soap.findIndex(s => s.key === addAnchor);
+      const arr = [...soap];
+      if (idx < 0) arr.push(obj);
+      else if (addPos === "before") arr.splice(idx, 0, obj);
+      else arr.splice(idx+1, 0, obj);
+      setSoap(arr); saveCache({ soap: arr, hasStreamed: true });
+    }
+    setAddOpen(false);
+  };
+
+  const AddSectionModal = addOpen ? (
+    <div
+      className="cn-modal-overlay cn-modal-overlay--blur"
+      role="dialog"
+      aria-modal="true"
+      aria-label="Add Section Modal"
+      onClick={closeAdd}
+    >
+      <div className="cn-modal cn-modal--center" onClick={(e)=>e.stopPropagation()}>
+        <div className="cn-modal-header">
+          <div className="cn-modal-title">Add Section</div>
+          <button type="button" className="cn-modal-close" onClick={closeAdd}>×</button>
+        </div>
+
+        <div className="cn-add-body">
+          <div className="cn-field">
+            <label>Title</label>
+            <input
+              ref={titleRef}
+              className="cn-input"
+              value={addTitle}
+              onChange={(e)=>setAddTitle(e.target.value)}
+              placeholder="e.g., Investigations"
+            />
+          </div>
+
+          <div className="cn-row">
+            <div className="cn-field" style={{flex:1}}>
+              <label>Anchor</label>
+              <select className="cn-input" value={addAnchor} onChange={(e)=>setAddAnchor(e.target.value)}>
+                {soap.map(s => <option key={s.key} value={s.key}>{s.title}</option>)}
+              </select>
+              <div className="cn-help">Where to insert relative to this section</div>
+            </div>
+            <div className="cn-field" style={{flex:1}}>
+              <label>Position</label>
+              <div className="cn-radio-row">
+                {["before","after","end"].map(p => (
+                  <label key={p}><input type="radio" name="addpos" value={p} checked={addPos===p} onChange={()=>setAddPos(p)} /> {p}</label>
+                ))}
+              </div>
+            </div>
+          </div>
+
+          <div className="cn-field">
+            <label>Style</label>
+            <div className="cn-radio-row">
+              <label><input type="radio" name="addstyle" value="paragraph" checked={addStyle==="paragraph"} onChange={()=>setAddStyle("paragraph")} /> Paragraph</label>
+              <label><input type="radio" name="addstyle" value="bullets" checked={addStyle==="bullets"} onChange={()=>setAddStyle("bullets")} /> Bullets</label>
+            </div>
+          </div>
+
+          <div className="cn-modal-actions">
+            <button type="button" className="cn-btn" onClick={generateSuggestion} disabled={!addTitle || adding}>
+              {adding ? "Generating…" : "Generate with AI"}
+            </button>
+            <div className="cn-spacer" />
+            <button type="button" className="cn-btn ghost" onClick={closeAdd}>Cancel</button>
+            <button type="button" className="cn-btn primary" onClick={insertSuggestion} disabled={!addTitle}>Insert</button>
+          </div>
+
+          <div className="cn-field" style={{marginTop: 10}}>
+            <label>Preview / Edit</label>
+            <textarea
+              className="cn-textarea"
+              rows={10}
+              value={addPreview}
+              onChange={(e)=>setAddPreview(e.target.value)}
+              placeholder="(generated content appears here; you can edit before inserting)"
+            />
+          </div>
+        </div>
+      </div>
+    </div>
+  ) : null;
+
+  // =======================
+  // Section Card
+  // =======================
   const SectionCard = ({ sec, idx }) => (
     <div className="cn-card" key={`${sec.key}-${idx}`}>
       <div className="cn-card-head">
@@ -307,19 +467,18 @@ export default function ClinicalNotes({ sessionId, transcript, autostart = true 
           value={sec.title}
           onChange={(e) => {
             const v = e.target.value;
-            setSoap(prev => prev.map((x,i)=> i===idx ? {...x, title: v, key: slugify(v)} : x));
-            setHasStreamed(h => h || true);
+            const arr = soap.map((x,i)=> i===idx ? {...x, title: v, key: slugify(v)} : x);
+            setSoap(arr); saveCache({ soap: arr, hasStreamed: hasStreamed || true });
           }}
         />
         <div className="cn-card-actions">
-          <button className="cn-chip" onClick={() => {
-            setSoap(prev => { const arr=[...prev]; arr.splice(idx,1); return arr; });
-            setHasStreamed(h => h || true);
+          <button type="button" className="cn-chip" onClick={() => {
+            const arr = [...soap]; arr.splice(idx, 1); setSoap(arr); saveCache({ soap: arr, hasStreamed: hasStreamed || true });
           }}>Remove</button>
-          <button className="cn-chip" onClick={() => {
+          <button type="button" className="cn-chip" onClick={() => {
             const custom = { title: "Custom Section", key: slugify("Custom Section"), text: "" };
-            setSoap(prev => { const arr=[...prev]; arr.splice(idx+1,0,custom); return arr; });
-            setHasStreamed(h => h || true);
+            const arr = [...soap]; arr.splice(idx + 1, 0, custom);
+            setSoap(arr); saveCache({ soap: arr, hasStreamed: hasStreamed || true });
           }}>+ Section</button>
         </div>
       </div>
@@ -329,8 +488,8 @@ export default function ClinicalNotes({ sessionId, transcript, autostart = true 
         value={sec.text}
         onChange={(e) => {
           const v = e.target.value;
-          setSoap(prev => prev.map((x,i)=> i===idx ? {...x, text: v} : x));
-          setHasStreamed(h => h || true);
+          const arr = soap.map((x,i)=> i===idx ? {...x, text: v} : x);
+          setSoap(arr); saveCache({ soap: arr, hasStreamed: hasStreamed || true });
         }}
       />
     </div>
@@ -340,39 +499,40 @@ export default function ClinicalNotes({ sessionId, transcript, autostart = true 
     <div className="cn-root">
       <div className="cn-toolbar">
         <div className="cn-tabs-inline">
-          <button className={`cn-chip ${mode==='markdown'?'active':''}`} onClick={() => setMode("markdown")} disabled={streaming}>Markdown</button>
-          <button className={`cn-chip ${mode==='json'?'active':''}`} onClick={() => setMode("json")} disabled={streaming}>JSON</button>
+          <button type="button" className={`cn-chip ${mode==='markdown'?'active':''}`} onClick={() => setMode("markdown")} disabled={streaming}>Markdown</button>
+          <button type="button" className={`cn-chip ${mode==='json'?'active':''}`} onClick={() => setMode("json")} disabled={streaming}>JSON</button>
         </div>
         <div className="cn-spacer" />
         {!streaming && !hasStreamed ? (
-          <button className="cn-btn" onClick={() => startStream(false)} disabled={!transcript}>Generate</button>
+          <button type="button" className="cn-btn" onClick={() => startStream(false)} disabled={!transcript}>Generate</button>
         ) : !streaming && hasStreamed ? (
-          <button className="cn-btn" onClick={() => startStream(true)}>Regenerate</button>
+          <button type="button" className="cn-btn" onClick={() => startStream(true)}>Regenerate</button>
         ) : (
-          <button className="cn-btn danger" onClick={() => { try { controllerRef.current?.abort(); } catch {}; setStreaming(false); }}>
+          <button
+            type="button"
+            className="cn-btn danger"
+            onClick={() => { try { controllerRef.current?.abort(); } catch {}; setStreaming(false); }}
+          >
             Stop
           </button>
         )}
-        <button className="cn-btn ghost" onClick={() => setEditMode(v=>!v)}>{editMode ? "Preview" : "Edit"}</button>
-        <button className="cn-btn ghost" onClick={() => setOrganized(v=>!v)}>{organized ? "Ungroup" : "Organize"}</button>
-        <button className="cn-btn primary" onClick={approveAndSave} disabled={streaming || !soap?.length}>Approve & Save</button>
+        <button type="button" className="cn-btn ghost" onClick={() => setEditMode(v=>!v)}>{editMode ? "Preview" : "Edit"}</button>
+        <button type="button" className="cn-btn ghost" onClick={() => setOrganized(v=>!v)}>{organized ? "Ungroup" : "Organize"}</button>
+
+        {/* NEW: Add Section (center modal) */}
+        <button type="button" className="cn-btn ghost" onClick={() => openAdd()}>Add Section</button>
+
+        <button type="button" className="cn-btn primary" onClick={approveAndSave} disabled={streaming || !soap?.length}>Approve & Save</button>
       </div>
 
       {error && <div className="cn-error">{error}</div>}
 
       {editMode ? (
-        <div
-          className="cn-grid"
-          style={{ overflow: "auto", minHeight: 0, maxHeight: "calc(100vh - 220px)" }}  // ✅ يضمن التمرير
-        >
+        <div className="cn-grid" role="region" aria-label="Edit Sections">
           {soap.map((sec, idx) => <SectionCard key={`${sec.key}-${idx}`} sec={sec} idx={idx} />)}
         </div>
       ) : (
-        <div
-          className="cn-card"
-          ref={previewRef}
-          style={{ overflow: "auto", minHeight: 0, maxHeight: "calc(100vh - 220px)" }} // ✅ التمرير في المعاينة الطويلة
-        >
+        <div className="cn-card" ref={previewRef}>
           <div className="markdown">
             <ReactMarkdown remarkPlugins={[remarkGfm]}>
 {`# Clinical Note (${organized ? "Organized" : "SOAP"})\n\n${mdNow}\n`}
@@ -410,6 +570,10 @@ export default function ClinicalNotes({ sessionId, transcript, autostart = true 
           </div>
         </div>
       )}
+
+      {/* Centered modal */}
+      {AddSectionModal}
     </div>
   );
 }
+

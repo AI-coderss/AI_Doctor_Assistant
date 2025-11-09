@@ -175,7 +175,17 @@ CORS(
         },
 
         # --- Medication checker endpoints ---
-
+       r"/api/share/compose":{
+            "origins": [
+                "https://ai-doctor-assistant-app-dev.onrender.com",
+                "http://localhost:3000",
+            ],
+            "methods": ["POST", "OPTIONS"],
+            "allow_headers": ["Content-Type", "Authorization", "Accept", "X-Requested-With", "X-Session-Id"],
+            "expose_headers": ["Content-Type"],
+            "supports_credentials": True,
+            "max_age": 86400,
+       },
         r"/meds/parse": {
             "origins": [
                 "https://ai-doctor-assistant-app-dev.onrender.com",
@@ -4736,5 +4746,132 @@ def clinical_notes_icd10_search():
 
     except Exception as e:
         return _corsify(jsonify({"ok": False, "error": f"ICD-10 search failed: {str(e)}"})), 500
+# =======================
+# Share / Compose & Send
+# =======================
+
+def _build_share_compose_prompt(note_markdown: str, patient: dict, ctx: dict, to_email: str | None):
+    """
+    Returns an instruction that makes GPT return STRICT JSON ONLY for an email draft.
+    The JSON must include: subject, body, summary.
+    """
+    patient_name = (patient or {}).get("name") or ""
+    patient_id = (patient or {}).get("id") or ""
+    condition = (ctx or {}).get("condition") or ""
+    desc = (ctx or {}).get("description") or ""
+
+    return (
+        "You are a clinical communications assistant. Return STRICT JSON ONLY with keys:\n"
+        '{ "subject": "string", "body": "string", "summary": "string" }\n'
+        "Rules:\n"
+        "- English only. Professional, concise, courteous.\n"
+        "- Address to a clinic secretary; do not include PHI beyond patient name/ID.\n"
+        "- Subject <= 90 chars. Body <= 170 words. Keep it readable, short paragraphs.\n"
+        "- Include brief case context and the purpose of the attachment (clinical note PDF).\n"
+        "- If patient name/ID missing, gracefully omit.\n"
+        "- No Markdown code-fences. No extra keys.\n\n"
+        f"Patient Name: {patient_name}\n"
+        f"Patient ID / File #: {patient_id}\n"
+        f"Condition (if known): {condition}\n"
+        f"Case description (if known): {desc}\n"
+        f"Recipient email (if provided): {to_email or ''}\n\n"
+        "Clinical Note (Markdown):\n"
+        f"{note_markdown}\n"
+    )
+
+@app.post("/api/share/compose")
+def share_compose():
+    """
+    Body:
+      {
+        "session_id": "optional",
+        "note_markdown": "required",
+        "patient": {"name":"...", "id":"..."},
+        "to_email": "optional",
+        "transcript": "optional"
+      }
+    Returns:
+      { "subject":"...", "body":"...", "summary":"...", "session_id":"..." }
+    """
+    data = request.get_json() or {}
+    session_id = data.get("session_id", str(uuid4()))
+    note_md = (data.get("note_markdown") or "").strip()
+    patient = data.get("patient") or {}
+    to_email = (data.get("to_email") or "").strip() or None
+    transcript = (data.get("transcript") or "").strip() or None
+
+    if not note_md:
+        return jsonify({"error": "note_markdown is required"}), 400
+
+    # ensure session context so the compose is context-aware
+    ctx = _ensure_context(session_id, transcript=transcript)
+
+    prompt = _build_share_compose_prompt(note_md, patient, ctx, to_email)
+
+    try:
+        resp = conversation_rag_chain.invoke({
+            "chat_history": chat_sessions.get(session_id, []),
+            "input": prompt
+        })
+        raw = (resp.get("answer") or "").strip()
+        parsed = _extract_json_dict(raw) or {}
+        subject = (parsed.get("subject") or "").strip() or f"Clinical note for {(patient.get('name') or 'patient')}"
+        body    = (parsed.get("body") or "").strip() or "Please find the attached clinical note PDF."
+        summary = (parsed.get("summary") or "").strip()
+
+        chat_sessions.setdefault(session_id, [])
+        chat_sessions[session_id].append({"role": "user", "content": "[Share compose request]"})
+        chat_sessions[session_id].append({"role": "assistant", "content": raw})
+
+        return jsonify({
+            "subject": subject,
+            "body": body,
+            "summary": summary,
+            "session_id": session_id
+        }), 200
+
+    except Exception as e:
+        return jsonify({"error": f"compose failed: {str(e)}"}), 500
+
+
+@app.post("/api/share/send")
+def share_send():
+    """
+    Placeholder 'send' endpoint. Accepts payload, echoes success.
+    Later you can wire to SMTP/Mailgun/etc. or your N8N automation.
+    Body:
+      {
+        "session_id":"..",
+        "to":"person@clinic.com",
+        "subject":"...",
+        "body":"...",
+        "attachment": {
+          "filename":"clinical-note.pdf",
+          "content_base64":"<base64>"
+        }
+      }
+    """
+    data = request.get_json() or {}
+    to = (data.get("to") or "").strip()
+    subject = (data.get("subject") or "").strip()
+    body = (data.get("body") or "").strip()
+    # Attachment is optional for now
+    attachment = data.get("attachment") or None
+
+    if not (to and subject and body):
+        return jsonify({"error": "Missing 'to', 'subject', or 'body'"}), 400
+
+    # No-op delivery for now; just acknowledge and log
+    payload = {
+        "to": to,
+        "subject": subject,
+        "body": body,
+        "has_attachment": bool(attachment and attachment.get("content_base64")),
+        "attachment_name": (attachment or {}).get("filename"),
+    }
+    logging.info("DRY SEND (queued=False): %s", payload)
+
+    return jsonify({"ok": True, "queued": False, "dry_run": True, "echo": payload}), 200
+
 if __name__ == "__main__":
     app.run(host="127.0.0.1", port=5050, debug=True)

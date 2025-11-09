@@ -1,3 +1,4 @@
+/* eslint-disable react-hooks/exhaustive-deps */
 /* eslint-disable no-unused-vars */
 /* ClinicalNotes.jsx (centered modal, no restreams, ReactMarkdown preview, PDF download) */
 /* eslint-disable no-unused-vars */
@@ -6,6 +7,7 @@
 /* ClinicalNotes.jsx — Preview shows a proper ICD-10 Differential Diagnosis table (no backend call) */
 /* eslint-disable no-unused-vars */
 /* ClinicalNotes.jsx — function-call aware, no restream on tab switch, DDx table in Preview */
+/* ClinicalNotes.jsx — function-call aware, stable listeners, smooth scrolling + DDx table */
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
@@ -50,7 +52,7 @@ function stringifySoapMarkdown(soapArr) {
     .join("\n\n");
 }
 
-/** extract DDx rows from current SOAP (same parser you saw before) */
+/** extract DDx rows from current SOAP */
 function extractDdxFromSoap(sections) {
   const normalizeProb = (p) => {
     if (p === undefined || p === null || p === "") return null;
@@ -132,10 +134,12 @@ export default function ClinicalNotes({ sessionId, transcript, autostart = true 
   const mdNow = useMemo(() => stringifySoapMarkdown(soap), [soap]);
   const ddxRows = useMemo(() => extractDdxFromSoap(soap), [soap]);
 
+  // Load / Save cache
   const loadCache = () => {
     try { const raw = sessionStorage.getItem(storageKey(sessionId, mode)); return raw ? JSON.parse(raw) : null; } catch { return null; }
   };
   const saveCache = (payload) => { try { sessionStorage.setItem(storageKey(sessionId, mode), JSON.stringify(payload)); } catch {} };
+  useEffect(() => { saveCache({ soap, hasStreamed }); /* autosave on change */ }, [soap, hasStreamed, sessionId, mode]);
 
   const startStream = async (force = false) => {
     if (!transcript || streaming) return;
@@ -166,16 +170,16 @@ export default function ClinicalNotes({ sessionId, transcript, autostart = true 
         try {
           const obj = JSON.parse(acc.replace(/```json|```/gi, "").trim());
           const parsed = DEFAULT_SOAP.map(s => ({ ...s, text: String(obj[s.key] || obj[s.title?.toLowerCase()] || "—") }));
-          if (mountedRef.current) { setSoap(parsed); setHasStreamed(true); saveCache({ soap: parsed, hasStreamed: true }); }
+          if (mountedRef.current) { setSoap(parsed); setHasStreamed(true); }
         } catch {
           if (mountedRef.current) {
             const fallback = DEFAULT_SOAP.map((s,i)=> i===0 ? {...s, text: acc.trim()} : s);
-            setSoap(fallback); setHasStreamed(true); saveCache({ soap: fallback, hasStreamed: true });
+            setSoap(fallback); setHasStreamed(true);
           }
         }
       } else {
         const parsed = parseMarkdownToSoap(acc);
-        if (mountedRef.current) { setSoap(parsed); setHasStreamed(true); saveCache({ soap: parsed, hasStreamed: true }); }
+        if (mountedRef.current) { setSoap(parsed); setHasStreamed(true); }
       }
     } catch (e) {
       const msg = String(e || "").toLowerCase();
@@ -197,7 +201,7 @@ export default function ClinicalNotes({ sessionId, transcript, autostart = true 
         body: JSON.stringify({ session_id: sessionId, note_markdown }),
       });
       if (!res.ok) throw new Error();
-      saveCache({ soap, hasStreamed: true });
+      // cache happens via effect
     } catch { setError("Failed to save the note."); }
   };
 
@@ -211,59 +215,65 @@ export default function ClinicalNotes({ sessionId, transcript, autostart = true 
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sessionId]);
 
-  /** ===== HelperAgent event bridge ===== **/
+  /** ===== HelperAgent event bridge (stable listeners + functional updates) ===== **/
   useEffect(() => {
-    const byKey = (k) => {
-      const idx = (soap || []).findIndex(s => (s.key || "").toLowerCase() === String(k || "").toLowerCase());
-      return [idx, idx >= 0 ? soap[idx] : null];
-    };
-    const setAndCache = (next) => { setSoap(next); saveCache({ soap: next, hasStreamed: hasStreamed || true }); };
-
     const onAdd = (e) => {
       const { title, key, text = "", position = "after", anchor_key } = e.detail || {};
       const obj = { key: key || slugify(title || "Custom Section"), title: title || "Custom Section", text: String(text || "") };
-      if (!anchor_key || position === "end") {
-        setAndCache([...(soap || []), obj]);
-        return;
-      }
-      const [i] = byKey(anchor_key);
-      if (i < 0) { setAndCache([...(soap || []), obj]); return; }
-      const arr = [...soap];
-      if (position === "before") arr.splice(i, 0, obj);
-      else arr.splice(i + 1, 0, obj);
-      setAndCache(arr);
+      setSoap(prev => {
+        if (!anchor_key || position === "end") return [...prev, obj];
+        const idx = prev.findIndex(s => (s.key || "").toLowerCase() === String(anchor_key || "").toLowerCase());
+        if (idx < 0) return [...prev, obj];
+        const arr = [...prev];
+        if (position === "before") arr.splice(idx, 0, obj);
+        else arr.splice(idx + 1, 0, obj);
+        return arr;
+      });
+      setHasStreamed(h => h || true);
     };
 
     const onRemove = (e) => {
       const { key } = e.detail || {};
-      const [i] = byKey(key);
-      if (i < 0) return;
-      const arr = [...soap]; arr.splice(i, 1); setAndCache(arr);
+      setSoap(prev => {
+        const idx = prev.findIndex(s => (s.key || "").toLowerCase() === String(key || "").toLowerCase());
+        if (idx < 0) return prev;
+        const arr = [...prev]; arr.splice(idx, 1);
+        return arr;
+      });
+      setHasStreamed(h => h || true);
     };
 
     const onUpdate = (e) => {
       const { key, text = "", append = false } = e.detail || {};
-      const [i, sec] = byKey(key);
-      if (i < 0) return;
-      const arr = [...soap];
-      arr[i] = { ...sec, text: append ? (sec.text ? `${sec.text}\n${text}` : text) : text };
-      setAndCache(arr);
+      setSoap(prev => {
+        const idx = prev.findIndex(s => (s.key || "").toLowerCase() === String(key || "").toLowerCase());
+        if (idx < 0) return prev;
+        const arr = [...prev];
+        const sec = arr[idx];
+        arr[idx] = { ...sec, text: append ? (sec.text ? `${sec.text}\n${text}` : text) : text };
+        return arr;
+      });
+      setHasStreamed(h => h || true);
     };
 
     const onRename = (e) => {
       const { key, new_title, new_key } = e.detail || {};
-      const [i, sec] = byKey(key);
-      if (i < 0) return;
-      const arr = [...soap];
-      arr[i] = { ...sec, title: new_title || sec.title, key: new_key || slugify(new_title || sec.title) };
-      setAndCache(arr);
+      setSoap(prev => {
+        const idx = prev.findIndex(s => (s.key || "").toLowerCase() === String(key || "").toLowerCase());
+        if (idx < 0) return prev;
+        const arr = [...prev];
+        const sec = arr[idx];
+        arr[idx] = { ...sec, title: new_title || sec.title, key: new_key || slugify(new_title || sec.title) };
+        return arr;
+      });
+      setHasStreamed(h => h || true);
     };
 
     const onApply = (e) => {
       const md = e.detail?.markdown || "";
       if (!md) return;
       const parsed = parseMarkdownToSoap(md);
-      setAndCache(parsed);
+      setSoap(parsed);
       setHasStreamed(true);
     };
 
@@ -287,8 +297,7 @@ export default function ClinicalNotes({ sessionId, transcript, autostart = true 
       window.removeEventListener("cn:save", onSave);
       window.removeEventListener("cn:preview", onPreview);
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [soap, hasStreamed]);
+  }, []); // 🔒 listeners mounted once (no stale closures)
 
   const SectionCard = ({ sec, idx }) => (
     <div className="cn-card" key={`${sec.key}-${idx}`}>
@@ -298,18 +307,19 @@ export default function ClinicalNotes({ sessionId, transcript, autostart = true 
           value={sec.title}
           onChange={(e) => {
             const v = e.target.value;
-            const arr = soap.map((x,i)=> i===idx ? {...x, title: v, key: slugify(v)} : x);
-            setSoap(arr); saveCache({ soap: arr, hasStreamed: hasStreamed || true });
+            setSoap(prev => prev.map((x,i)=> i===idx ? {...x, title: v, key: slugify(v)} : x));
+            setHasStreamed(h => h || true);
           }}
         />
         <div className="cn-card-actions">
           <button className="cn-chip" onClick={() => {
-            const arr = [...soap]; arr.splice(idx, 1); setSoap(arr); saveCache({ soap: arr, hasStreamed: hasStreamed || true });
+            setSoap(prev => { const arr=[...prev]; arr.splice(idx,1); return arr; });
+            setHasStreamed(h => h || true);
           }}>Remove</button>
           <button className="cn-chip" onClick={() => {
             const custom = { title: "Custom Section", key: slugify("Custom Section"), text: "" };
-            const arr = [...soap]; arr.splice(idx + 1, 0, custom);
-            setSoap(arr); saveCache({ soap: arr, hasStreamed: hasStreamed || true });
+            setSoap(prev => { const arr=[...prev]; arr.splice(idx+1,0,custom); return arr; });
+            setHasStreamed(h => h || true);
           }}>+ Section</button>
         </div>
       </div>
@@ -319,8 +329,8 @@ export default function ClinicalNotes({ sessionId, transcript, autostart = true 
         value={sec.text}
         onChange={(e) => {
           const v = e.target.value;
-          const arr = soap.map((x,i)=> i===idx ? {...x, text: v} : x);
-          setSoap(arr); saveCache({ soap: arr, hasStreamed: hasStreamed || true });
+          setSoap(prev => prev.map((x,i)=> i===idx ? {...x, text: v} : x));
+          setHasStreamed(h => h || true);
         }}
       />
     </div>
@@ -351,11 +361,18 @@ export default function ClinicalNotes({ sessionId, transcript, autostart = true 
       {error && <div className="cn-error">{error}</div>}
 
       {editMode ? (
-        <div className="cn-grid">
+        <div
+          className="cn-grid"
+          style={{ overflow: "auto", minHeight: 0, maxHeight: "calc(100vh - 220px)" }}  // ✅ يضمن التمرير
+        >
           {soap.map((sec, idx) => <SectionCard key={`${sec.key}-${idx}`} sec={sec} idx={idx} />)}
         </div>
       ) : (
-        <div className="cn-card" ref={previewRef}>
+        <div
+          className="cn-card"
+          ref={previewRef}
+          style={{ overflow: "auto", minHeight: 0, maxHeight: "calc(100vh - 220px)" }} // ✅ التمرير في المعاينة الطويلة
+        >
           <div className="markdown">
             <ReactMarkdown remarkPlugins={[remarkGfm]}>
 {`# Clinical Note (${organized ? "Organized" : "SOAP"})\n\n${mdNow}\n`}
@@ -396,4 +413,3 @@ export default function ClinicalNotes({ sessionId, transcript, autostart = true 
     </div>
   );
 }
-

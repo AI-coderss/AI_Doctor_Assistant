@@ -121,3 +121,160 @@
 /* No FAB styles here — we REUSE your validator FAB (.drg-fab) in Chat.jsx */
 
 /* No FAB styles here — use your existing .drg-fab from the validator */
+:root{
+  --va-width: clamp(360px, 28vw, 450px);
+  --ha-brand: #534CE8;
+
+  --ha-panel-bg: #ffffff;
+  --ha-panel-ink: #0f172a;
+  --ha-panel-border: rgba(15, 23, 42, 0.12);
+}
+
+@media (prefers-color-scheme: dark){
+  :root{
+    --ha-panel-bg:#151A21;
+    --ha-panel-ink:#f5f7ff;
+    --ha-panel-border:rgba(255,255,255,.12);
+  }
+}
+:root[data-theme="dark"]{
+  --ha-panel-bg:#151A21;
+  --ha-panel-ink:#f5f7ff;
+  --ha-panel-border:rgba(255,255,255,.12);
+}
+
+/* ===== Right dock (same geometry as LabVoiceAgent) ===== */
+.helper-assistant{
+  position: fixed;
+  right: 0;
+  top: 80px;
+  width: var(--va-width);
+  max-width: var(--va-width);
+  height: calc(90vh - 80px);
+
+  background: var(--ha-panel-bg);
+  color: var(--ha-panel-ink);
+  border-left: 1px solid var(--ha-panel-border);
+  box-shadow: -6px 0 16px rgba(0,0,0,.20);
+
+  z-index: 1000;
+  display: flex;
+  flex-direction: column;
+  box-sizing: border-box;
+  padding: 70px 16px 88px 16px; /* space for top controls + bottom mic */
+}
+
+/* Top-right controls */
+.ha-controls{
+  position: absolute;
+  top: 12px; right: 12px;
+  display: flex; gap: 8px; align-items: center;
+  z-index: 1003;
+}
+.ha-btn{
+  display:inline-flex; align-items:center; gap:8px;
+  padding:8px 12px; border-radius:10px; border:1px solid transparent;
+  font-size:12.5px; cursor:pointer; color:#fff;
+  background: linear-gradient(180deg, var(--ha-brand), #4238e0);
+  box-shadow: 0 6px 16px rgba(83,76,232,.26);
+  transition: transform .12s ease, box-shadow .2s ease;
+}
+.ha-btn:hover{ transform: translateY(-1px); box-shadow: 0 10px 22px rgba(83,76,232,.32); }
+.ha-btn.is-danger{ background: linear-gradient(180deg, #ef4444, #b91c1c); box-shadow: 0 8px 18px rgba(239,68,68,.28); }
+.ha-close{
+  width:40px; height:40px; border-radius:50%; border:none; cursor:pointer;
+  display:grid; place-items:center; background: var(--ha-brand); color:#fff;
+  box-shadow: 0 6px 14px rgba(83,76,232,.25);
+}
+
+/* Header */
+.ha-header{ display:flex; justify-content:space-between; align-items:center; margin-bottom:10px; z-index: 1001; }
+.ha-title{ font-weight:900; font-size:18px; }
+.ha-status{ font-size:12.5px; opacity:.85; }
+.ha-status.prepping{ color:#2c40c6; }
+.ha-status.connected{ color:#065f46; }
+.ha-status.error{ color:#b91c1c; }
+
+/* ===== Orb at the TOP, above ring and content ===== */
+.ha-orb{
+  position:absolute;
+  top: 22%;                 /* higher than before */
+  left:50%;
+  transform: translate(-50%, -50%);
+  width:240px; height:240px;
+  pointer-events:none;
+  z-index: 1002;            /* ← above header/status ring etc. */
+}
+
+/* Decorative ring only (no background tint) */
+.ha-orb-ring{
+  position:absolute;
+  inset:-3px;
+  border-radius:50%;
+  border:2px solid rgba(57, 81, 218, 0.28);
+  /* faint halo */
+  box-shadow:
+    0 0 0 12px rgba(57, 81, 218, 0.06),
+    0 0 0 24px rgba(57, 81, 218, 0.03);
+}
+
+/* Let Orb canvas sit on top of the ring */
+.ha-orb .orbfx-host{ position:absolute; inset:0; z-index:1002; }
+.ha-orb .orbfx-canvas{ z-index:1002; }
+
+/* AudioWave below the orb */
+.ha-audiowave{
+  margin-top: auto;
+  border: 1px solid var(--ha-panel-border);
+  border-radius: 12px;
+  padding: 8px;
+  background: var(--ha-panel-bg);
+  z-index: 1001;
+}
+
+/* Mic FAB inside the panel (bottom center) */
+.ha-mic{
+  position:absolute; left:50%; bottom:20px; transform: translateX(-50%);
+  width:64px; height:64px; border:none; border-radius:50%; cursor:pointer;
+  display:grid; place-items:center; color:#fff; font-size:1.6rem;
+  background: linear-gradient(180deg, #22c55e, #16a34a);
+  box-shadow: 0 14px 26px rgba(34,197,94,.28), 0 6px 10px rgba(34,197,94,.22),
+              inset 0 -6px 10px rgba(0,0,0,.20), inset 0 2px 3px rgba(255,255,255,.45);
+  z-index: 1001;
+}
+.ha-mic.on{ box-shadow: 0 16px 30px rgba(34,197,94,.34), 0 8px 14px rgba(34,197,94,.26); }
+
+/* Keep the pulsing rectangular FAB position consistent with validator (if you use it) */
+.drg-fab.ha-fab{
+  right: 16px;
+  bottom: 24px;
+  z-index: 3001;
+}
+
+/* ...keep your existing variables and rules... */
+
+/* ===== Orb at the TOP, above ring and content ===== */
+.ha-orb{
+  position:absolute;
+  top: 25%;
+  left:50%;
+  transform: translate(-50%, -50%);
+  width:240px;
+  height:240px;
+  pointer-events:none;
+  z-index: 1002; /* on top of panel content */
+}
+
+/* Decorative ring (outside the clip so glow isn't cut) */
+.ha-orb-ring{
+  position:absolute;
+  inset:-3px;
+  border-radius:50%;
+  border:2px solid rgba(57, 81, 218, 0.28);
+  box-shadow:
+    0 0 0 12px rgba(57, 81, 218, 0.06),
+    0 0 0 24px rgba(57, 81, 218, 0.03);
+  z-index: 1001; /* under the Orb canvas */
+}
+
+

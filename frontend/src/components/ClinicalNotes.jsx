@@ -1,33 +1,25 @@
 /* eslint-disable no-unused-vars */
-/* ClinicalNotes.jsx (centered modal, no restreams, ReactMarkdown preview, PDF download) */
-/* eslint-disable no-unused-vars */
-/* ClinicalNotes.jsx */
-/* eslint-disable no-unused-vars */
 /* ClinicalNotes.jsx — function-call aware, RAG-ready suggest endpoint,
-   centered Add Section modal, horizontal mini buttons, responsive editor grid,
-   and high-fidelity PDF export via @react-pdf/renderer (logo header, bold, lists, non-splitting table).
-*/
-/* ClinicalNotes.jsx — function-call aware, RAG-ready suggest endpoint,
-   centered Add Section modal, horizontal mini buttons, responsive editor grid,
-   and high-fidelity PDF export with logo header. */
-
-/* ClinicalNotes.jsx — function-call aware, RAG-ready suggest endpoint,
-   centered Add Section modal, horizontal mini buttons, responsive editor grid,
-   high-fidelity PDF export (logo header, bold & bullets), and ICD-10 Finder.
-*/
-
-/* eslint-disable no-unused-vars */
-/* ClinicalNotes.jsx — function-call aware, RAG-ready suggest endpoint,
-   centered Add Section modal, horizontal mini buttons, responsive editor grid,
-   high-fidelity PDF export (logo header, bold & bullets),
-   ICD-10 Finder + Quick Search, and EDITABLE DDx table in Preview.
+   centered Add Section modal, responsive editor grid, high-fidelity PDF export (no logo),
+   safe remark-gfm import, ICD-10 Finder (Edit panel), and
+   editable ICD-10 table in Preview with row-level animated search + add/remove rows.
+   CHANGE: After clicking “Apply”, suggestion list collapses/clears.
 */
 
 /* eslint-disable no-unused-vars */
 /* ClinicalNotes.jsx — function-call aware, RAG-ready suggest endpoint,
    centered Add Section modal, responsive editor grid, high-fidelity PDF export (no logo),
    safe remark-gfm import, ICD-10 Finder (Edit panel), and
-   **editable ICD-10 table in Preview** with row-level animated search + add/remove rows.
+   editable ICD-10 table in Preview with row-level animated search + add/remove rows.
+   CLEAN FORMAT: DDX serialized as "Diagnosis | CODE | 80%" (no dashes/backticks/asterisks).
+*/
+
+/* eslint-disable no-unused-vars */
+/* ClinicalNotes.jsx — function-call aware, RAG-ready suggest endpoint,
+   centered Add Section modal, responsive editor grid, high-fidelity PDF export (no logo),
+   safe remark-gfm import, ICD-10 Finder (Edit panel), and
+   editable ICD-10 table in Preview with row-level animated search + add/remove rows.
+   CLEAN FORMAT: DDX serialized as "Diagnosis | CODE | 80%" (no dashes/backticks/asterisks).
 */
 
 import React, { useEffect, useMemo, useRef, useState } from "react";
@@ -115,7 +107,9 @@ function extractDdxFromSoap(sections) {
 
   const lines = text.split(/\n+/).map((l) => l.trim()).filter(Boolean);
   const out = [];
-  for (const line of lines) {
+  for (const raw of lines) {
+    // strip leading bullets if any, then split by pipes
+    const line = raw.replace(/^(?:[-*]|\d+[.)])\s*/, "");
     const parts = line.split("|").map((s) => s.trim());
     let diagnosis = "",
       code = "",
@@ -132,7 +126,6 @@ function extractDdxFromSoap(sections) {
       const pDec = !pPct && line.match(/\b(0\.\d+|1(?:\.0+)?)\b/);
       prob = normalizeProb(pPct ? pPct[1] : (pDec ? pDec[1] : null));
       diagnosis = line
-        .replace(/^(?:[-*]|\d+[.)])\s*/, "")
         .replace(/\(.*?ICD[-–]?\s*10.*?\)/i, "")
         .replace(/\bICD[-–]?\s*10[: ]?[A-Z0-9.]+\b/i, "")
         .replace(/\s[-–]\s*\d+%/,"")
@@ -649,6 +642,39 @@ export default function ClinicalNotes({
     </div>
   ) : null;
 
+  /* ===== Utilities to sanitize DDX lines to clean text ===== */
+  const parseProbFrom = (s) => {
+    if (!s) return null;
+    const m = String(s).match(/(\d{1,3})(?:\.\d+)?\s*%?/);
+    if (!m) return null;
+    const n = Math.max(0, Math.min(100, Number(m[1])));
+    return isFinite(n) ? n : null;
+  };
+  const sanitizeLine = (raw) => {
+    const base = String(raw || "").replace(/^(?:[-*]|\d+[.)])\s*/, "").trim();
+    const parts = base.split("|").map(x => x.trim());
+    let name = "", code = "", prob = null;
+
+    if (parts.length >= 2) {
+      name = parts[0];
+      code = parts[1].replace(/`/g, "");
+      prob = parseProbFrom(parts[2]);
+    } else {
+      // fallback parsing
+      name = base
+        .replace(/\(.*?ICD[-–]?\s*10.*?\)/i, "")
+        .replace(/\bICD[-–]?\s*10[: ]?[A-Z0-9.]+\b/i, "")
+        .trim();
+      const codeM = base.match(/\b([A-Z][0-9][A-Z0-9.]{1,6})\b/);
+      if (codeM) code = codeM[1];
+      const pPct = base.match(/(\d{1,3})\s*%/);
+      if (pPct) prob = parseProbFrom(pPct[1]);
+    }
+    const probStr = prob == null ? "" : ` | ${prob}%`;
+    const codeStr = code ? ` | ${code}` : "";
+    return { name, code, prob, line: `${name}${codeStr}${probStr}`.trim() };
+  };
+
   /* ===== ICD-10 Finder (RAG) in Edit mode ===== */
   const [icdBusy, setIcdBusy] = useState({});        // { [dx]: true/false }
   const [icdResults, setIcdResults] = useState({});   // { [dx]: [{code, label}] }
@@ -683,42 +709,40 @@ export default function ClinicalNotes({
     }
   };
 
+  // UPDATED: Apply (Edit panel) writes clean lines (no dashes/backticks) and clears suggestions
   const applyICD = (dx, code) => {
     const arr = [...soap];
     let idx = arr.findIndex((s) =>
       /^(differential\s+diagnosis|differentials?)$/i.test((s.title || "").trim())
     );
     if (idx < 0) {
-      const block = `- ${dx} | \`${code}\``;
-      arr.push({ key: "differential_diagnosis", title: "Differential Diagnosis", text: block });
+      const newLine = `${dx} | ${code}`;
+      arr.push({ key: "differential_diagnosis", title: "Differential Diagnosis", text: newLine });
       setSoap(arr); saveCache({ soap: arr, hasStreamed: hasStreamed || true });
-      return;
+    } else {
+      const text = arr[idx].text || "";
+      const lines = text.split(/\n/).filter(Boolean);
+      let found = false;
+      const newLines = lines.map((line) => {
+        const s = sanitizeLine(line);
+        if (s.name.toLowerCase() === String(dx).toLowerCase()) {
+          found = true;
+          const probStr = s.prob == null ? "" : ` | ${s.prob}%`;
+          return `${s.name} | ${code}${probStr}`;
+        }
+        // also sanitize non-matching lines to remove any bullets/backticks
+        return s.line;
+      });
+      if (!found) newLines.push(`${dx} | ${code}`);
+      arr[idx] = { ...arr[idx], text: newLines.join("\n") };
+      setSoap(arr); saveCache({ soap: arr, hasStreamed: hasStreamed || true });
     }
-    const text = arr[idx].text || "";
-    const lines = text.split(/\n/);
-    let found = false;
-    const newLines = lines.map((line) => {
-      const base = line.replace(/^(?:[-*]|\d+[.)])\s*/, "").trim();
-      const nameGuess = base.split("|")[0].split("(")[0].trim().toLowerCase();
-      if (nameGuess === String(dx).toLowerCase()) {
-        found = true;
-        const left = base
-          .replace(/\|\s*`?[A-Z0-9.]+`?\s*$/i, "")
-          .replace(/\(ICD[-–]?\s*10:.*?\)/i, "")
-          .trim();
-        return `- ${left} | \`${code}\``;
-      }
-      return line;
-    });
-    if (!found) newLines.push(`- ${dx} | \`${code}\``);
-    arr[idx] = { ...arr[idx], text: newLines.join("\n") };
-    setSoap(arr); saveCache({ soap: arr, hasStreamed: hasStreamed || true });
+    setIcdResults(prev => ({ ...prev, [dx]: [] })); // Clear suggestions
   };
 
   /* ========= Preview: Editable DDX table ========= */
   const [ddxEditRows, setDdxEditRows] = useState([]);
   useEffect(() => {
-    // Sync local editable copy whenever the underlying SOAP changes
     setDdxEditRows((ddxRows || []).map(r => ({ ...r })));
   }, [ddxRows]);
 
@@ -727,12 +751,12 @@ export default function ClinicalNotes({
       .filter(r => (r.diagnosis && r.diagnosis.trim()))
       .map(r => {
         const dx = r.diagnosis.trim();
-        const code = (r.icd10 && String(r.icd10).trim()) ? `\`${String(r.icd10).trim()}\`` : "`—`";
+        const code = (r.icd10 && String(r.icd10).trim()) ? ` | ${String(r.icd10).trim()}` : "";
         const prob =
           r.probability === "" || r.probability === null || r.probability === undefined
             ? ""
             : ` | ${Math.max(0, Math.min(100, Math.round(Number(r.probability))))}%`;
-        return `- ${dx} | ${code}${prob}`;
+        return `${dx}${code}${prob}`.trim();
       })
       .join("\n");
 
@@ -741,7 +765,7 @@ export default function ClinicalNotes({
       /^(differential\s+diagnosis|differentials?)$/i.test((s.title || "").trim())
     );
     if (idx < 0) {
-      if (!lines) return; // nothing to create
+      if (!lines) return;
       arr.push({ key: "differential_diagnosis", title: "Differential Diagnosis", text: lines });
     } else {
       arr[idx] = { ...arr[idx], text: lines };
@@ -804,6 +828,11 @@ export default function ClinicalNotes({
     const next = ddxEditRows.map((r, i) => i === rowIndex ? { ...r, icd10: code } : r);
     setDdxEditRows(next);
     writeBackDdx(next);
+    setPIcdResults(prev => {
+      const copy = { ...prev };
+      delete copy[rowIndex];
+      return copy;
+    });
   };
 
   /* ===== Section Card (Edit mode) ===== */
@@ -881,7 +910,7 @@ export default function ClinicalNotes({
       <div className="cn-toolbar">
         <div className="cn-tabs-inline">
           <button type="button" className={`cn-chip ${mode==='markdown'?'active':''}`} onClick={() => setMode("markdown")} disabled={streaming}>Markdown</button>
-        <button type="button" className={`cn-chip ${mode==='json'?'active':''}`} onClick={() => setMode("json")} disabled={streaming}>JSON</button>
+          <button type="button" className={`cn-chip ${mode==='json'?'active':''}`} onClick={() => setMode("json")} disabled={streaming}>JSON</button>
         </div>
         <div className="cn-spacer" />
         {!streaming && !hasStreamed ? (
@@ -936,7 +965,7 @@ export default function ClinicalNotes({
                     <div style={{ display: "flex", gap: 8, alignItems: "center", justifyContent: "space-between", flexWrap: "wrap" }}>
                       <div style={{ fontWeight: 700 }}>{dx}</div>
                       <div style={{ marginLeft: "auto", opacity: 0.8 }}>
-                        Current: <code>{(r.icd10 || "—")}</code>
+                        Current: <span style={{ fontFamily:"ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace" }}>{(r.icd10 || "—")}</span>
                       </div>
                       <button
                         className={`cn-mini is-primary ${busy ? "is-busy" : ""}`}
@@ -1003,7 +1032,7 @@ export default function ClinicalNotes({
 {`# Clinical Note (${organized ? "Organized" : "SOAP"})\n\n${mdNow}\n`}
             </ReactMarkdown>
 
-            {/* Editable Differential Diagnosis table */}
+            {/* Editable Differential Diagnosis table (CLEAN TEXT) */}
             <div className="cn-ddx">
               <h2>Differential Diagnosis</h2>
 
@@ -1135,3 +1164,4 @@ export default function ClinicalNotes({
     </div>
   );
 }
+

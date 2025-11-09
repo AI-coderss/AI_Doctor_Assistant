@@ -4536,6 +4536,205 @@ def clinical_notes_suggest_section():
     except Exception as e:
         log.exception("suggest-section crashed")
         return jsonify({"ok": False, "error": f"{type(e).__name__}: {str(e)}"}), 200
+def _corsify(resp: Response) -> Response:
+    try:
+        origin = request.headers.get("Origin", "*")
+        resp.headers["Access-Control-Allow-Origin"] = "*" if origin == "null" else origin
+        resp.headers["Access-Control-Allow-Credentials"] = "true"
+        resp.headers["Access-Control-Allow-Headers"] = "Content-Type, Authorization, *"
+        resp.headers["Access-Control-Allow-Methods"] = "GET, POST, OPTIONS"
+    except Exception:
+        pass
+    return resp
 
+def _cors_preflight() -> Response:
+    return _corsify(Response(status=204))
+
+def _safe_json_obj(text: str):
+    """Robustly parse JSON out of LLM output (with/without fences)."""
+    if not text:
+        return None
+    t = (text or "").strip()
+    try:
+        return json.loads(re.sub(r"^```json|```$", "", t, flags=re.I | re.M))
+    except Exception:
+        pass
+    m = re.search(r"\{[\s\S]*\}|\[[\s\S]*\]", t)
+    if m:
+        try:
+            return json.loads(m.group(0))
+        except Exception:
+            return None
+    return None
+
+def _norm_icd_doc(doc) -> dict:
+    """
+    Normalize a retriever 'Document' (LangChain-like) OR dict to {code,label,score,source_id,metadata}
+    Expected doc fields in priority order:
+      code: metadata.code | metadata.icd10 | metadata.icd_10 | metadata["ICD-10"] | regex from page_content
+      label: metadata.label | title | name | page_content first line
+    """
+    meta = {}
+    score = None
+    source_id = None
+    code = ""
+    label = ""
+
+    # LangChain Document-like
+    if hasattr(doc, "metadata"):
+        meta = dict(getattr(doc, "metadata", {}) or {})
+        source_id = meta.get("id") or meta.get("pk") or meta.get("source")
+        score = getattr(doc, "score", None) or meta.get("score")
+        page = getattr(doc, "page_content", "") or meta.get("text", "")
+    elif isinstance(doc, dict):
+        meta = dict(doc.get("metadata", {}) or {})
+        source_id = doc.get("id") or meta.get("id") or meta.get("source")
+        score = doc.get("score") or meta.get("score")
+        page = doc.get("page_content") or doc.get("text") or meta.get("text") or ""
+    else:
+        page = ""
+
+    # Code candidates
+    code = (
+        meta.get("code")
+        or meta.get("icd10")
+        or meta.get("icd_10")
+        or meta.get("ICD-10")
+        or ""
+    )
+    if not code and page:
+        m = re.search(r"\b([A-TV-Z][0-9][A-Z0-9](?:\.[A-Z0-9]{1,4})?)\b", page)
+        if m:
+            code = m.group(1)
+
+    # Label candidates
+    label = (
+        meta.get("label")
+        or meta.get("title")
+        or meta.get("name")
+        or ""
+    )
+    if not label and page:
+        first = page.strip().splitlines()[0] if page.strip() else ""
+        label = first.strip()[:200]
+
+    out = {"code": code or "", "label": label or ""}
+    if score is not None: out["score"] = float(score)
+    if source_id: out["source_id"] = str(source_id)
+    if meta: out["metadata"] = meta
+    return out
+
+def _dedupe_by_code(rows: list[dict]) -> list[dict]:
+    seen = set()
+    deduped = []
+    for r in rows:
+        code = (r.get("code") or "").upper()
+        if not code or code in seen:
+            continue
+        seen.add(code)
+        deduped.append(r)
+    return deduped
+
+@app.route("/api/clinical-notes/icd10-search", methods=["POST", "OPTIONS"])
+def clinical_notes_icd10_search():
+    # Handle preflight explicitly (fixes “Response to preflight request doesn't pass access control check”)
+    if request.method == "OPTIONS":
+        return _cors_preflight()
+
+    data = request.get_json(silent=True) or {}
+    query = (data.get("query") or "").strip()
+    session_id = data.get("session_id") or ""
+    transcript = (data.get("transcript") or "").strip()
+    top_k = int(data.get("top_k") or 6)
+    top_k = max(1, min(top_k, 15))
+
+    if not query:
+        return _corsify(jsonify({"ok": False, "error": "Missing 'query'"})), 400
+
+    # 1) Prefer an explicit ICD-10 retriever if you wired it when booting the app
+    #    e.g., ICD10_RETRIEVER = vectorstore.as_retriever(search_type="mmr", k=8)
+    retriever = None
+    try:
+        retriever = ICD10_RETRIEVER  # type: ignore  # noqa
+    except NameError:
+        retriever = None
+    if retriever is None:
+        try:
+            retriever = retriever_icd10  # type: ignore  # noqa
+        except NameError:
+            retriever = None
+
+    results = []
+    via = "empty"
+
+    try:
+        if retriever is not None:
+            # Try LangChain-like interface
+            docs = []
+            if hasattr(retriever, "get_relevant_documents"):
+                docs = retriever.get_relevant_documents(query)
+            elif callable(retriever):
+                # Supports callables like: retriever(query, k=top_k)
+                try:
+                    docs = retriever(query, k=top_k)
+                except TypeError:
+                    docs = retriever(query)
+            # Normalize & score-trim
+            rows = [_norm_icd_doc(d) for d in (docs or [])]
+            rows = [r for r in rows if r.get("code") and r.get("label")]
+            rows = _dedupe_by_code(rows)[:top_k]
+            results = rows
+            via = "retriever"
+
+        # 2) Fallback: ask your conversation RAG chain to return STRICT JSON
+        if not results:
+            try:
+                system = (
+                    "You are an ICD-10 coding assistant. "
+                    "Return STRICT JSON ONLY. "
+                    "Schema: {\"results\":[{\"code\":\"string\",\"label\":\"string\"}]}. "
+                    f"Return up to {top_k} high-confidence codes; no commentary."
+                )
+                user = (
+                    f"Find ICD-10 codes for: {query}\n"
+                    + (f"\nTranscript context:\n{transcript}\n" if transcript else "")
+                )
+                # Try sync call (invoke) or streaming accumulate
+                payload = {"chat_history": [], "input": f"{system}\n\n{user}"}
+                raw = ""
+                if "conversation_rag_chain" in globals():
+                    try:
+                        out = conversation_rag_chain.invoke(payload)  # type: ignore  # noqa
+                        raw = (out.get("answer") if isinstance(out, dict) else str(out)) or ""
+                    except Exception:
+                        # stream fallback
+                        try:
+                            for ch in conversation_rag_chain.stream(payload):  # type: ignore  # noqa
+                                raw += ch.get("answer", "")
+                        except Exception:
+                            raw = ""
+                obj = _safe_json_obj(raw)
+                if isinstance(obj, dict) and isinstance(obj.get("results"), list):
+                    rows = []
+                    for it in obj["results"]:
+                        code = (it.get("code") or "").strip()
+                        label = (it.get("label") or "").strip()
+                        if code and label:
+                            rows.append({"code": code, "label": label})
+                    rows = _dedupe_by_code(rows)[:top_k]
+                    results = rows
+                    via = "chain"
+            except Exception:
+                pass
+
+        return _corsify(jsonify({
+            "ok": True,
+            "via": via,
+            "query": query,
+            "results": results
+        })), 200
+
+    except Exception as e:
+        return _corsify(jsonify({"ok": False, "error": f"ICD-10 search failed: {str(e)}"})), 500
 if __name__ == "__main__":
     app.run(host="127.0.0.1", port=5050, debug=True)

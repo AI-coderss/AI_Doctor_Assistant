@@ -3576,32 +3576,32 @@ def lab_agent_suggest_stream():
     return Response(generate(), headers=headers)
 
 
-# ---------- Lab Agent: WebRTC ----------
-FRONTEND_ORIGIN = "https://ai-doctor-assistant-app-dev.onrender.com"
-
-
-# ---- CORS helpers ----
-
-@app.after_request
-def add_cors_headers(resp):
-    """
-    Add CORS headers for all responses so the React app on Render can call the API.
-    """
-    resp.headers["Access-Control-Allow-Origin"] = FRONTEND_ORIGIN
-    resp.headers["Vary"] = "Origin"
-    resp.headers["Access-Control-Allow-Credentials"] = "true"
-    resp.headers["Access-Control-Allow-Headers"] = "Content-Type, Authorization"
-    resp.headers["Access-Control-Allow-Methods"] = "GET, POST, OPTIONS"
-    return resp
-
 @app.route("/lab-agent/rtc-connect", methods=["POST", "OPTIONS"])
 def lab_agent_rtc_connect():
-    if request.method == "OPTIONS":
-        return ("", 204)
+    # --- CORS settings (adjust origin if you want it stricter) ---
+    CORS_ORIGIN = "https://ai-doctor-assistant-app-dev.onrender.com"
+    CORS_HEADERS = "Content-Type, X-Session-Id"
+    CORS_METHODS = "POST, OPTIONS"
 
+    def _corsify(resp, status=200):
+        if resp is None:
+            from flask import Response as _Resp
+            resp = _Resp("", status=status)
+        resp.headers["Access-Control-Allow-Origin"] = CORS_ORIGIN
+        resp.headers["Access-Control-Allow-Methods"] = CORS_METHODS
+        resp.headers["Access-Control-Allow-Headers"] = CORS_HEADERS
+        resp.headers["Access-Control-Max-Age"] = "86400"
+        return resp
+
+    # ---- Preflight (OPTIONS) ----
+    if request.method == "OPTIONS":
+        # Must return 200/204 + CORS headers so browser allows the POST
+        return _corsify(None, status=204)
+
+    # ---- Actual POST handling ----
     offer_sdp = request.get_data(as_text=True)
     if not offer_sdp:
-        return Response("No SDP provided", status=400, mimetype="text/plain")
+        return _corsify(Response("No SDP provided", status=400, mimetype="text/plain"))
 
     session_id = request.args.get("session_id") or request.headers.get("X-Session-Id") or "anon"
     st = _sess(session_id)
@@ -3737,7 +3737,7 @@ def lab_agent_rtc_connect():
             "parameters": {"type": "object", "additionalProperties": False, "properties": {}}
         },
 
-        # -------------- Share Widget / Email (NEW) --------------
+        # -------------- Share Widget / Email (new) --------------
         {
             "type": "function",
             "name": "share_open_widget",
@@ -3830,10 +3830,10 @@ def lab_agent_rtc_connect():
         sess.raise_for_status()
         eph = sess.json().get("client_secret", {}).get("value")
         if not eph:
-            return Response("Missing ephemeral token", status=502, mimetype="text/plain")
+            return _corsify(Response("Missing ephemeral token", status=502, mimetype="text/plain"))
     except Exception as e:
         app.logger.exception("Realtime session error")
-        return Response(f"Realtime session error: {e}", status=502, mimetype="text/plain")
+        return _corsify(Response(f"Realtime session error: {e}", status=502, mimetype="text/plain"))
 
     try:
         rtc_headers = {"Authorization": f"Bearer {eph}", "Content-Type": "application/sdp"}
@@ -3841,15 +3841,16 @@ def lab_agent_rtc_connect():
         r = requests.post(OPENAI_RTC_URL, headers=rtc_headers, params=rtc_params, data=offer_sdp, timeout=60)
         if not r.ok:
             app.logger.error(f"RTC SDP exchange failed: {r.status_code} {r.text}")
-            return Response("SDP exchange error", status=502, mimetype="text/plain")
+            return _corsify(Response("SDP exchange error", status=502, mimetype="text/plain"))
         answer = r.content
     except Exception as e:
         app.logger.exception("RTC upstream error")
-        return Response(f"RTC upstream error: {e}", status=502, mimetype="text/plain")
+        return _corsify(Response(f"RTC upstream error: {e}", status=502, mimetype="text/plain"))
 
     resp = Response(answer, status=200, mimetype="application/sdp")
     resp.headers["Cache-Control"] = "no-cache"
-    return resp
+    return _corsify(resp, status=200)
+
 
 
 ############## Highcharts endpoints #################

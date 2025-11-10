@@ -1,5 +1,7 @@
 /* eslint-disable react-hooks/exhaustive-deps */
 /* eslint-disable no-unused-vars */
+/* eslint-disable react-hooks/exhaustive-deps */
+/* eslint-disable no-unused-vars */
 import React, { useEffect, useMemo, useRef, useState, useCallback } from "react";
 import { useReactMediaRecorder } from "react-media-recorder";
 import SendIcon from "@mui/icons-material/Send";
@@ -69,7 +71,10 @@ const ChatInputWidget = ({ onSendMessage }) => {
     stopTimer();
     timerStartRef.current = Date.now();
     setElapsedMs(0);
-    timerIdRef.current = setInterval(() => setElapsedMs(Date.now() - timerStartRef.current), 1000);
+    timerIdRef.current = setInterval(
+      () => setElapsedMs(Date.now() - timerStartRef.current),
+      1000
+    );
   };
 
   const stopTimer = () => {
@@ -155,7 +160,7 @@ const ChatInputWidget = ({ onSendMessage }) => {
       } catch {}
       setVizStream(null);
     }
-  }, [startRecording]);
+  }, [startRecording, vizStream]);
 
   /** ====== Stop recording ====== */
   const handleStopRecording = useCallback(async () => {
@@ -174,10 +179,20 @@ const ChatInputWidget = ({ onSendMessage }) => {
     }
   }, [stopRecording, vizStream]);
 
-  /** ====== Upload to backend ====== */
+  /** ====== Upload to backend (FIXED: prevent duplicate runs) ====== */
+
+  // 🔒 Lock to ensure we don't transcribe the same blob multiple times
+  const transcribeLockRef = useRef(false);
+
   useEffect(() => {
     const go = async () => {
+      // guard: only when we actually have a blob AND are in transcribing phase
       if (!mediaBlobUrl || phase !== "transcribing") return;
+
+      // if already transcribing this blob, do nothing (prevents loops)
+      if (transcribeLockRef.current) return;
+      transcribeLockRef.current = true;
+
       try {
         const blob = await (await fetch(mediaBlobUrl)).blob();
         const type = blob.type || chosenMime || "audio/webm";
@@ -218,10 +233,15 @@ const ChatInputWidget = ({ onSendMessage }) => {
         setVizStream(null);
         setMode("chat");
         setPhase("idle");
+        transcribeLockRef.current = false;
       }
     };
+
     go();
-  }, [mediaBlobUrl, phase, chosenMime, clearBlobUrl, vizStream]);
+  }, [
+    mediaBlobUrl,
+    phase, // ✅ only react when blob/phase change; avoids re-triggering due to other state
+  ]);
 
   /** ====== Keyboard + send ====== */
   const handleSend = () => {
@@ -354,6 +374,7 @@ const ChatInputWidget = ({ onSendMessage }) => {
 };
 
 export default ChatInputWidget;
+
 
 
 

@@ -1,10 +1,12 @@
 /* eslint-disable react-hooks/exhaustive-deps */
 /* eslint-disable no-unused-vars */
+/* eslint-disable react-hooks/exhaustive-deps */
+/* eslint-disable no-unused-vars */
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import { FaDownload, FaSearch, FaShareAlt } from "react-icons/fa";
 import { pdf, Document, Page, Text, View, StyleSheet } from "@react-pdf/renderer";
-import ShareWidget from "../components/ShareWidget";       // <-- NEW
+import ShareWidget from "../components/ShareWidget";       // <-- Share widget
 import "../styles/clinical-notes.css";
 
 // ---- Lazy/safe GFM plugin: loaded at runtime, falls back to none ----
@@ -246,7 +248,7 @@ export default function ClinicalNotes({
   transcript,
   autostart = true,
   backendBase = BACKEND_BASE,
-  patient = { name: "", id: "" },        // <-- NEW: pass patient {name,id} if you have it
+  patient = { name: "", id: "" },        // pass patient {name,id} if you have it
 }) {
   const [mode, setMode] = useState("markdown");
   const [streaming, setStreaming] = useState(false);
@@ -691,7 +693,7 @@ export default function ClinicalNotes({
     );
     if (idx < 0) {
       const newLine = `${dx} | ${code}`;
-            arr.push({ key: "differential_diagnosis", title: "Differential Diagnosis", text: newLine });
+      arr.push({ key: "differential_diagnosis", title: "Differential Diagnosis", text: newLine });
       setSoap(arr);
       saveCache({ soap: arr, hasStreamed: hasStreamed || true });
     } else {
@@ -854,6 +856,9 @@ export default function ClinicalNotes({
     body: "",
   });
 
+  // optional counter we can later use to auto-send from voice agent
+  const [shareSendSignal, setShareSendSignal] = useState(0);
+
   const openShare = async () => {
     try {
       setShareBusy(true);
@@ -898,6 +903,47 @@ export default function ClinicalNotes({
       setShareBusy(false);
     }
   };
+
+  // Voice agent bridge for ShareWidget (sw:* events)
+  useEffect(() => {
+    // Open share widget when agent calls share_open_widget
+    const onSwOpen = () => {
+      if (!shareOpen) {
+        openShare();
+      }
+    };
+
+    // Update specific field when agent calls share_update_field
+    const onSwUpdate = (e) => {
+      const { field, value, append } = e.detail || {};
+      if (!field || !value) return;
+      if (!["to", "subject", "body"].includes(field)) return;
+
+      setShareDraft((prev) => {
+        const prevVal = prev[field] || "";
+        const nextVal = append
+          ? (prevVal ? prevVal + (field === "body" ? "\n" : " ") : "") + value
+          : value;
+        return { ...prev, [field]: nextVal };
+      });
+    };
+
+    // You can later use this to auto-send on voice confirmation:
+    const onSwSend = () => {
+      // just bump a counter that ShareWidget can listen to
+      setShareSendSignal((n) => n + 1);
+    };
+
+    window.addEventListener("sw:open", onSwOpen);
+    window.addEventListener("sw:update", onSwUpdate);
+    window.addEventListener("sw:send", onSwSend);
+
+    return () => {
+      window.removeEventListener("sw:open", onSwOpen);
+      window.removeEventListener("sw:update", onSwUpdate);
+      window.removeEventListener("sw:send", onSwSend);
+    };
+  }, [shareOpen]);
 
   return (
     <div className="cn-root">
@@ -1355,6 +1401,8 @@ export default function ClinicalNotes({
           sessionId={sessionId}
           backendBase={backendBase}
           patient={patient}
+          // optional auto-send hook for sw:send
+          autoSendSignal={shareSendSignal}
         />
       )}
     </div>

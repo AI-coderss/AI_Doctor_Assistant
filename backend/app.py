@@ -3577,6 +3577,23 @@ def lab_agent_suggest_stream():
 
 
 # ---------- Lab Agent: WebRTC ----------
+FRONTEND_ORIGIN = "https://ai-doctor-assistant-app-dev.onrender.com"
+
+
+# ---- CORS helpers ----
+
+@app.after_request
+def add_cors_headers(resp):
+    """
+    Add CORS headers for all responses so the React app on Render can call the API.
+    """
+    resp.headers["Access-Control-Allow-Origin"] = FRONTEND_ORIGIN
+    resp.headers["Vary"] = "Origin"
+    resp.headers["Access-Control-Allow-Credentials"] = "true"
+    resp.headers["Access-Control-Allow-Headers"] = "Content-Type, Authorization"
+    resp.headers["Access-Control-Allow-Methods"] = "GET, POST, OPTIONS"
+    return resp
+
 @app.route("/lab-agent/rtc-connect", methods=["POST", "OPTIONS"])
 def lab_agent_rtc_connect():
     if request.method == "OPTIONS":

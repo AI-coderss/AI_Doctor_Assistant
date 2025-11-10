@@ -24,7 +24,7 @@
 .sw-widget{
   position: fixed;
   /* LEFT COLUMN placement */
-  top: 72px;          /* adjust if you want higher/lower */
+  top: 185px;          /* adjust if you want higher/lower */
   left: 18px;
   right: auto;
   bottom: auto;

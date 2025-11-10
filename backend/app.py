@@ -114,17 +114,6 @@ CORS(
             "supports_credentials": True,
             "max_age": 86400,
         },
-        r"/lab-agent/rtc-connect": {
-            "origins": [
-                "https://ai-doctor-assistant-app-dev.onrender.com",
-                "http://localhost:3000",
-            ],
-            "methods": ["POST", "OPTIONS"],
-            "allow_headers": ["Content-Type", "Authorization", "Accept", "X-Requested-With", "X-Session-Id"],
-            "expose_headers": ["Content-Type"],
-            "supports_credentials": True,
-            "max_age": 86400,
-        },
         r"/transcribe": {
             "origins": [
                 "https://ai-doctor-assistant-app-dev.onrender.com",
@@ -243,7 +232,17 @@ CORS(
             "supports_credentials": True,
             "max_age": 86400,
         },
-
+        r"/lab-agent/rtc-connect": {
+            "origins": [
+                "https://ai-doctor-assistant-app-dev.onrender.com",
+                "http://localhost:3000",
+            ],
+            "methods": ["POST", "OPTIONS"],
+            "allow_headers": ["Content-Type", "Authorization", "Accept", "X-Requested-With", "X-Session-Id"],
+            "expose_headers": ["Content-Type"],
+            "supports_credentials": True,
+            "max_age": 86400,
+        },
         r"/lab-agent/suggest-stream": {
             "origins": [
                 "https://ai-doctor-assistant-app-dev.onrender.com",
@@ -3786,7 +3785,7 @@ def lab_agent_rtc_connect():
             }
         },
     ]
-
+    
     import requests, os
     OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
 
@@ -3823,6 +3822,7 @@ def lab_agent_rtc_connect():
     resp = Response(answer, status=200, mimetype="application/sdp")
     resp.headers["Cache-Control"] = "no-cache"
     return resp
+
 
 ############## Highcharts endpoints #################
 # ===================== Highcharts Pie: helpers + endpoints =====================

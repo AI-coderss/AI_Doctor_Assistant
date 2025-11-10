@@ -7,6 +7,9 @@
 /* eslint-disable no-use-before-define */
 // src/components/ShareWidget.jsx
 /* eslint-disable react-hooks/exhaustive-deps */
+/* eslint-disable no-use-before-define */
+// src/components/ShareWidget.jsx
+/* eslint-disable react-hooks/exhaustive-deps */
 import React, { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { FaTimes, FaPaperPlane, FaMagic, FaFilePdf } from "react-icons/fa";
@@ -16,7 +19,7 @@ import "../styles/share-widget.css";
  * Share Widget (fixed left column, glass, compact height)
  *
  * Props:
- *  - open: boolean
+ *  - open: boolean          // initial trigger (not authoritative for persistence)
  *  - onClose: fn()
  *  - backendBase: string
  *  - sessionId: string
@@ -47,6 +50,34 @@ export default function ShareWidget({
   const widgetRef = useRef(null);
   const bodyTextAreaRef = useRef(null); // auto-resize target
 
+  // ---- Persistent visibility (per session) ----
+  const [isVisible, setIsVisible] = useState(() => {
+    try {
+      if (typeof window === "undefined") return !!open;
+      const saved = window.sessionStorage.getItem("shareWidget:isVisible");
+      if (saved === "1") return true;
+      if (saved === "0") return false;
+      return !!open;
+    } catch {
+      return !!open;
+    }
+  });
+
+  useEffect(() => {
+    try {
+      if (typeof window === "undefined") return;
+      window.sessionStorage.setItem("shareWidget:isVisible", isVisible ? "1" : "0");
+    } catch {
+      /* ignore */
+    }
+  }, [isVisible]);
+
+  // If parent toggles `open` to true, ensure widget becomes visible.
+  // We deliberately do NOT auto-hide when `open` becomes false.
+  useEffect(() => {
+    if (open) setIsVisible(true);
+  }, [open]);
+
   const [to, setTo] = useState(toDefault || "");
   const [subject, setSubject] = useState(subjectDefault || "");
   const [body, setBody] = useState(bodyDefault || "");
@@ -55,34 +86,34 @@ export default function ShareWidget({
   const [error, setError] = useState("");
   const [sentOk, setSentOk] = useState(false);
 
-  // Sync defaults when widget (re)opens
+  // Sync defaults when widget (re)opens or defaults change
   useEffect(() => {
-    if (!open) return;
+    if (!isVisible) return;
     setTo(toDefault || "");
-  }, [toDefault, open]);
+  }, [toDefault, isVisible]);
 
   useEffect(() => {
-    if (!open) return;
+    if (!isVisible) return;
     setSubject(subjectDefault || "");
-  }, [subjectDefault, open]);
+  }, [subjectDefault, isVisible]);
 
   useEffect(() => {
-    if (!open) return;
+    if (!isVisible) return;
     setBody(bodyDefault || "");
-  }, [bodyDefault, open]);
+  }, [bodyDefault, isVisible]);
 
   // Auto-resize textarea whenever body changes
   useEffect(() => {
-    if (!open) return;
+    if (!isVisible) return;
     const el = bodyTextAreaRef.current;
     if (!el) return;
     el.style.height = "auto";
     el.style.height = `${el.scrollHeight}px`;
-  }, [body, open]);
+  }, [body, isVisible]);
 
   // Optional: auto-draft when opened and subject/body empty
   useEffect(() => {
-    if (!open) return;
+    if (!isVisible) return;
     if (subjectDefault || bodyDefault) return;
     let ignore = false;
     (async () => {
@@ -127,7 +158,7 @@ export default function ShareWidget({
       ignore = true;
     };
   }, [
-    open,
+    isVisible,
     backendBase,
     sessionId,
     patient?.id,
@@ -171,6 +202,19 @@ export default function ShareWidget({
       reader.readAsDataURL(blob);
     });
 
+  // Centralized close that respects persistence
+  function closeWidget() {
+    setIsVisible(false);
+    try {
+      if (typeof window !== "undefined") {
+        window.sessionStorage.setItem("shareWidget:isVisible", "0");
+      }
+    } catch {
+      /* ignore */
+    }
+    onClose?.();
+  }
+
   // HOISTED send handler
   async function handleSend() {
     setError("");
@@ -204,7 +248,10 @@ export default function ShareWidget({
       });
       if (!r.ok) throw new Error((await r.text()) || "Send failed");
       setSentOk(true);
-      setTimeout(() => onClose?.(), 1100);
+      // After a short delay, close the widget via our unified closer
+      setTimeout(() => {
+        closeWidget();
+      }, 1100);
     } catch (e) {
       setError(e?.message || "Failed to send message.");
     } finally {
@@ -214,17 +261,102 @@ export default function ShareWidget({
 
   // Optional auto-send trigger from parent (LabVoiceAgent -> ClinicalNotes -> ShareWidget)
   useEffect(() => {
-    if (!open) return;
+    if (!isVisible) return;
     if (!autoSendSignal) return;
     if (!to || !subject || !body) return;
     handleSend();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [autoSendSignal]);
 
-  if (!open) return null;
+  // ---- Function-calling bridge (global API + CustomEvents) ----
+  useEffect(() => {
+    const api = {
+      /**
+       * Open the widget and optionally prefill fields.
+       * fields: { to?, subject?, body? }
+       */
+      open: (fields = {}) => {
+        if (typeof fields.to === "string") setTo(fields.to);
+        if (typeof fields.subject === "string") setSubject(fields.subject);
+        if (typeof fields.body === "string") setBody(fields.body);
+        setIsVisible(true);
+      },
+      /**
+       * Update current fields without changing visibility.
+       */
+      update: (fields = {}) => {
+        if (typeof fields.to === "string") setTo(fields.to);
+        if (typeof fields.subject === "string") setSubject(fields.subject);
+        if (typeof fields.body === "string") setBody(fields.body);
+      },
+      /**
+       * Send the email. If fields are provided, override before sending.
+       * fields: { to?, subject?, body? }
+       */
+      send: async (fields = {}) => {
+        if (fields && typeof fields === "object") {
+          if (typeof fields.to === "string") setTo(fields.to);
+          if (typeof fields.subject === "string") setSubject(fields.subject);
+          if (typeof fields.body === "string") setBody(fields.body);
+        }
+        // give React a tick if we just updated state, then send
+        setTimeout(() => {
+          handleSend();
+        }, 0);
+      },
+      /**
+       * Close widget (persistent).
+       */
+      close: () => {
+        closeWidget();
+      },
+    };
+
+    // Expose on window for direct function-calling from the Realtime agent
+    try {
+      if (typeof window !== "undefined") {
+        window.shareWidgetAPI = api;
+      }
+    } catch {
+      /* ignore */
+    }
+
+    // CustomEvent listeners (if LabVoiceAgent dispatches events)
+    const onOpenEvt = (e) => api.open(e.detail || {});
+    const onUpdateEvt = (e) => api.update(e.detail || {});
+    const onSendEvt = (e) => api.send(e.detail || {});
+    const onCloseEvt = () => api.close();
+
+    if (typeof window !== "undefined") {
+      window.addEventListener("share:widget.open", onOpenEvt);
+      window.addEventListener("share:widget.update", onUpdateEvt);
+      window.addEventListener("share:widget.send", onSendEvt);
+      window.addEventListener("share:widget.close", onCloseEvt);
+    }
+
+    return () => {
+      try {
+        if (typeof window !== "undefined") {
+          if (window.shareWidgetAPI === api) {
+            delete window.shareWidgetAPI;
+          }
+          window.removeEventListener("share:widget.open", onOpenEvt);
+          window.removeEventListener("share:widget.update", onUpdateEvt);
+          window.removeEventListener("share:widget.send", onSendEvt);
+          window.removeEventListener("share:widget.close", onCloseEvt);
+        }
+      } catch {
+        /* ignore */
+      }
+    };
+    // We intentionally do NOT depend on to/subject/body to avoid recreating handlers every render.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  if (!isVisible) return null;
 
   return createPortal(
-    <div ref={viewportRef} className="sw-viewport" aria-hidden={!open}>
+    <div ref={viewportRef} className="sw-viewport" aria-hidden={!isVisible}>
       <div
         ref={widgetRef}
         className="sw-widget"
@@ -237,7 +369,11 @@ export default function ShareWidget({
             Share Note {patient?.name ? `• ${patient.name}` : ""}
           </div>
           <div className="sw-actions">
-            <button className="sw-icon-btn" onClick={onClose} aria-label="Close">
+            <button
+              className="sw-icon-btn"
+              onClick={closeWidget}
+              aria-label="Close"
+            >
               <FaTimes />
             </button>
           </div>
@@ -327,7 +463,7 @@ export default function ShareWidget({
           </div>
 
           <div className="sw-footer">
-            <button className="sw-btn ghost" onClick={onClose}>
+            <button className="sw-btn ghost" onClick={closeWidget}>
               Cancel
             </button>
             <button
@@ -354,3 +490,4 @@ export default function ShareWidget({
     document.body
   );
 }
+

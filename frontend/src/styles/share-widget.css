@@ -155,7 +155,7 @@
 @media (prefers-color-scheme: dark){
   .sw-attach{
     border-color: #333333;
-    background: #050505;
+    background: #000000;
     color: #ffffff;
   }
   .sw-attach-icon{
@@ -305,7 +305,7 @@
 @media (prefers-color-scheme: dark){
   .sw-btn{
     border-color: #444444;
-    background: #050505;
+    background: #000000;
     color: #ffffff;
   }
   .sw-btn.ghost{

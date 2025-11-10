@@ -3576,49 +3576,22 @@ def lab_agent_suggest_stream():
     return Response(generate(), headers=headers)
 
 
+# ---------- Lab Agent: WebRTC ----------
 @app.route("/lab-agent/rtc-connect", methods=["POST", "OPTIONS"])
 def lab_agent_rtc_connect():
-    # --- CORS settings (adjust origin if you want it stricter) ---
-    CORS_ORIGIN = "https://ai-doctor-assistant-app-dev.onrender.com"
-    CORS_HEADERS = "Content-Type, X-Session-Id"
-    CORS_METHODS = "POST, OPTIONS"
-
-    def _corsify(resp, status=200):
-        if resp is None:
-            from flask import Response as _Resp
-            resp = _Resp("", status=status)
-        resp.headers["Access-Control-Allow-Origin"] = CORS_ORIGIN
-        resp.headers["Access-Control-Allow-Methods"] = CORS_METHODS
-        resp.headers["Access-Control-Allow-Headers"] = CORS_HEADERS
-        resp.headers["Access-Control-Max-Age"] = "86400"
-        return resp
-
-    # ---- Preflight (OPTIONS) ----
     if request.method == "OPTIONS":
-        # Must return 200/204 + CORS headers so browser allows the POST
-        return _corsify(None, status=204)
+        return ("", 204)
 
-    # ---- Actual POST handling ----
     offer_sdp = request.get_data(as_text=True)
     if not offer_sdp:
-        return _corsify(Response("No SDP provided", status=400, mimetype="text/plain"))
+        return Response("No SDP provided", status=400, mimetype="text/plain")
 
-    session_id = request.args.get("session_id") or request.headers.get("X-Session-Id") or "anon"
+    session_id = request.args.get("session_id") or request.headers.get("X-Session-Id") or ""
+    if not session_id:
+        session_id = "anon"
+
     st = _sess(session_id)
-
-    merged_instructions = (
-        SYSTEM_PROMPT
-        + _build_context_instructions(st.get("context"), st.get("approved"))
-        + "\n\n### Clinical Notes actions (function calling)\n"
-          "- Only call a function after the clinician asks you to perform that action.\n"
-          "- Keep voice responses short. When you call a function, do not narrate its parameters.\n"
-          "- For adding a section: if the user does not provide the content, generate a concise draft first, then insert.\n"
-        + "\n\n### Share / Email actions (function calling)\n"
-          "- When the clinician asks you to share or email the clinical notes, use the share_* tools.\n"
-          "- Do NOT invent email addresses. Ask explicitly for the recipient email.\n"
-          "- Use share_fill_field to set or refine To / Subject / Body based on what the clinician dictates.\n"
-          "- Only call share_send_email when the clinician clearly confirms sending.\n"
-    )
+    merged_instructions = SYSTEM_PROMPT + _build_context_instructions(st.get("context"), st.get("approved"))
 
     tools = [
         # -------------- Labs (existing) --------------
@@ -3814,26 +3787,26 @@ def lab_agent_rtc_connect():
         },
     ]
 
-    # --- Exchange SDP with OpenAI Realtime (unchanged plumbing) ---
     import requests, os
     OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
-    headers = {"Authorization": f"Bearer {OPENAI_API_KEY}", "Content-Type": "application/json"}
-    payload = {
-        "model": REALTIME_MODEL,
-        "voice": REALTIME_VOICE,
-        "instructions": merged_instructions,
-        "tools": tools,
-        "turn_detection": {"type": "server_vad"},
-    }
+
     try:
+        headers = {"Authorization": f"Bearer {OPENAI_API_KEY}", "Content-Type": "application/json"}
+        payload = {
+            "model": REALTIME_MODEL,
+            "voice": REALTIME_VOICE,
+            "instructions": merged_instructions,
+            "tools": tools,
+            "turn_detection": {"type": "server_vad"},
+        }
         sess = requests.post(OPENAI_SESSION_URL, headers=headers, json=payload, timeout=30)
         sess.raise_for_status()
         eph = sess.json().get("client_secret", {}).get("value")
         if not eph:
-            return _corsify(Response("Missing ephemeral token", status=502, mimetype="text/plain"))
+            return Response("Missing ephemeral token", status=502, mimetype="text/plain")
     except Exception as e:
         app.logger.exception("Realtime session error")
-        return _corsify(Response(f"Realtime session error: {e}", status=502, mimetype="text/plain"))
+        return Response(f"Realtime session error: {e}", status=502, mimetype="text/plain")
 
     try:
         rtc_headers = {"Authorization": f"Bearer {eph}", "Content-Type": "application/sdp"}
@@ -3841,17 +3814,15 @@ def lab_agent_rtc_connect():
         r = requests.post(OPENAI_RTC_URL, headers=rtc_headers, params=rtc_params, data=offer_sdp, timeout=60)
         if not r.ok:
             app.logger.error(f"RTC SDP exchange failed: {r.status_code} {r.text}")
-            return _corsify(Response("SDP exchange error", status=502, mimetype="text/plain"))
+            return Response("SDP exchange error", status=502, mimetype="text/plain")
         answer = r.content
     except Exception as e:
         app.logger.exception("RTC upstream error")
-        return _corsify(Response(f"RTC upstream error: {e}", status=502, mimetype="text/plain"))
+        return Response(f"RTC upstream error: {e}", status=502, mimetype="text/plain")
 
     resp = Response(answer, status=200, mimetype="application/sdp")
     resp.headers["Cache-Control"] = "no-cache"
-    return _corsify(resp, status=200)
-
-
+    return resp
 
 ############## Highcharts endpoints #################
 # ===================== Highcharts Pie: helpers + endpoints =====================

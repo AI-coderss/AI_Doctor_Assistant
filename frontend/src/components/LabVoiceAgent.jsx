@@ -3,6 +3,8 @@
 /* eslint-disable no-unused-vars */
 /* eslint-disable no-useless-concat */
 /* eslint-disable react-hooks/exhaustive-deps */
+/* eslint-disable no-useless-concat */
+/* eslint-disable react-hooks/exhaustive-deps */
 /* eslint-disable no-unused-vars */
 /* eslint-disable no-useless-concat */
 /* eslint-disable react-hooks/exhaustive-deps */
@@ -20,7 +22,7 @@ import useAudioStore from "../store/audioStore.js";
 import { startVolumeMonitoring } from "./audioLevelAnalyzer";
 
 /**
- * LabVoiceAgent — now also drives ClinicalNotes + Share Widget via function-calling
+ * LabVoiceAgent — labs + clinical notes + share widget tools
  * Props:
  * - isVisible, onClose, sessionId, backendBase, context
  * - onApproveLab(item), onEndSession()
@@ -100,21 +102,22 @@ export default function LabVoiceAgent({
   const sendSessionUpdate = () => {
     const instruction = [
       "You are a concise clinical lab, notes, and sharing assistant.",
-      "For labs: ONLY call approve_lab after explicit confirmation.",
+      "For labs: ONLY call approve_lab after explicit confirmation from the clinician.",
       allowedLabs?.length
-        ? `Use ONLY names from this allowed list when approving: ${allowedLabs.join(", ")}.`
+        ? `Use ONLY names from this allowed lab list when approving: ${allowedLabs.join(", ")}.`
         : "Prefer standard test names when no list provided.",
       "For clinical notes: call a clinical_* tool only when asked; keep responses short.",
-      "For sharing clinical notes by email: use the share_* tools to open the widget, fill fields, and send only after explicit confirmation."
+      "For sharing: use share_* tools only when the clinician asks you to open the share widget, fill fields, or send the email. Never send without explicit confirmation.",
     ].join(" ");
 
     const TOOLS = [
-      // labs
+      // ---------- LABS ----------
       {
         name: "approve_lab",
         description: "Approve a lab test after explicit approval.",
         parameters: {
-          type: "object", additionalProperties: false,
+          type: "object",
+          additionalProperties: false,
           properties: {
             name: { type: "string" },
             priority: { type: "string", enum: ["STAT", "High", "Routine"] },
@@ -127,18 +130,23 @@ export default function LabVoiceAgent({
         name: "reject_lab",
         description: "Reject a proposed lab.",
         parameters: {
-          type: "object", additionalProperties: false,
-          properties: { name: { type: "string" }, reason: { type: "string" } },
+          type: "object",
+          additionalProperties: false,
+          properties: {
+            name: { type: "string" },
+            reason: { type: "string" }
+          },
           required: ["name"]
         }
       },
 
-      // clinical notes
+      // ---------- CLINICAL NOTES ----------
       {
         name: "clinical_add_section",
-        description: "Add a new section; draft if text is missing.",
+        description: "Add a new section to the clinical note; draft content if text is missing.",
         parameters: {
-          type: "object", additionalProperties: false,
+          type: "object",
+          additionalProperties: false,
           properties: {
             title: { type: "string" },
             text: { type: "string" },
@@ -153,16 +161,18 @@ export default function LabVoiceAgent({
         name: "clinical_remove_section",
         description: "Remove a section by key.",
         parameters: {
-          type: "object", additionalProperties: false,
+          type: "object",
+          additionalProperties: false,
           properties: { key: { type: "string" } },
           required: ["key"]
         }
       },
       {
         name: "clinical_update_section",
-        description: "Replace or append to a section.",
+        description: "Replace or append text to an existing section.",
         parameters: {
-          type: "object", additionalProperties: false,
+          type: "object",
+          additionalProperties: false,
           properties: {
             key: { type: "string" },
             text: { type: "string" },
@@ -173,9 +183,10 @@ export default function LabVoiceAgent({
       },
       {
         name: "clinical_rename_section",
-        description: "Rename a section; optionally set new key.",
+        description: "Rename a section; optionally set a new key.",
         parameters: {
-          type: "object", additionalProperties: false,
+          type: "object",
+          additionalProperties: false,
           properties: {
             key: { type: "string" },
             new_title: { type: "string" },
@@ -186,9 +197,10 @@ export default function LabVoiceAgent({
       },
       {
         name: "clinical_apply_markdown",
-        description: "Replace the entire note with given Markdown.",
+        description: "Replace the entire clinical note with the given Markdown.",
         parameters: {
-          type: "object", additionalProperties: false,
+          type: "object",
+          additionalProperties: false,
           properties: { markdown: { type: "string" } },
           required: ["markdown"]
         }
@@ -196,44 +208,59 @@ export default function LabVoiceAgent({
       {
         name: "clinical_save",
         description: "Save the current note now.",
-        parameters: { type: "object", additionalProperties: false, properties: {} }
+        parameters: {
+          type: "object",
+          additionalProperties: false,
+          properties: {}
+        }
       },
 
-      // share widget / email (NEW)
+      // ---------- SHARE WIDGET (EMAIL) ----------
       {
         name: "share_open_widget",
-        description: "Open the Share Widget for emailing the clinical note PDF.",
+        description: "Open the share widget so the clinician can review the email draft.",
         parameters: {
-          type: "object", additionalProperties: false,
+          type: "object",
+          additionalProperties: false,
           properties: {
-            to_email: { type: "string" },
-            subject_hint: { type: "string" },
-            body_hint: { type: "string" }
+            recipient_hint: {
+              type: "string",
+              description: "Short phrase describing who this is for (e.g. 'clinic secretary')."
+            }
           }
         }
       },
       {
-        name: "share_fill_field",
-        description: "Fill or update a specific field in the Share Widget (to, subject, body).",
+        name: "share_update_field",
+        description: "Update one field of the share widget: to, subject, or body.",
         parameters: {
-          type: "object", additionalProperties: false,
+          type: "object",
+          additionalProperties: false,
           properties: {
-            field: { type: "string", enum: ["to","subject","body"] },
-            value: { type: "string" },
-            mode: { type: "string", enum: ["replace","append"] }
+            field: {
+              type: "string",
+              enum: ["to", "subject", "body"],
+              description: "Which field to update."
+            },
+            value: {
+              type: "string",
+              description: "The new value or text to apply to that field."
+            },
+            append: {
+              type: "boolean",
+              description: "If true, append to existing text instead of replacing."
+            }
           },
-          required: ["field","value"]
+          required: ["field", "value"]
         }
       },
       {
-        name: "share_send_email",
-        description: "Send the currently composed email from the Share Widget after explicit confirmation.",
+        name: "share_send",
+        description: "Ask the UI to send the current email in the share widget after explicit confirmation.",
         parameters: {
-          type: "object", additionalProperties: false,
-          properties: {
-            confirm: { type: "boolean" }
-          },
-          required: ["confirm"]
+          type: "object",
+          additionalProperties: false,
+          properties: {}
         }
       },
     ];
@@ -302,11 +329,15 @@ export default function LabVoiceAgent({
     );
     await pc.setLocalDescription(offer);
 
-    const res = await fetch(`${backendBase}/lab-agent/rtc-connect?session_id=${encodeURIComponent(sessionId)}`, {
-      method: "POST",
-      headers: { "Content-Type": "application/sdp", "X-Session-Id": sessionId },
-      body: offer.sdp,
-    });
+    // CORS-FRIENDLY: no custom X-Session-Id header; session_id via query only
+    const res = await fetch(
+      `${backendBase}/lab-agent/rtc-connect?session_id=${encodeURIComponent(sessionId)}`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/sdp" },
+        body: offer.sdp,
+      }
+    );
     if (!res.ok) throw new Error(`/lab-agent/rtc-connect ${res.status}`);
     const answer = await res.text();
     await pc.setRemoteDescription({ type: "answer", sdp: answer });
@@ -316,7 +347,7 @@ export default function LabVoiceAgent({
   const dispatch = (name, detail) =>
     window.dispatchEvent(new CustomEvent(name, { detail }));
 
-  // ------- Clinical Notes handlers (existing) -------
+  // ----- Clinical Notes -----
   const handleClinicalAdd = async (args) => {
     const title = (args?.title || "").trim();
     if (!title) return;
@@ -338,6 +369,7 @@ export default function LabVoiceAgent({
       } catch {}
     }
 
+    // Insert into the live editor
     dispatch("cn:section.add", { title, key: slugify(title), text, anchor_key, position });
   };
 
@@ -370,34 +402,28 @@ export default function LabVoiceAgent({
   };
 
   const handleClinicalSave = async () => {
-    dispatch("cn:save");
+    dispatch("cn:save"); // your ClinicalNotes already wires this to /api/clinical-notes/save
   };
 
-  // ------- Share Widget handlers (NEW) -------
+  // ----- Share Widget -----
   const handleShareOpen = (args) => {
-    const to_email = (args?.to_email || "").trim();
-    const subject_hint = (args?.subject_hint || "").trim();
-    const body_hint = (args?.body_hint || "").trim();
-    // Parent component that owns <ShareWidget> should listen to this and set open=true.
-    dispatch("share:open", {
-      to: to_email || undefined,
-      subject: subject_hint || undefined,
-      body: body_hint || undefined,
-    });
+    const recipient_hint = (args?.recipient_hint || "").trim();
+    dispatch("sw:open", { recipient_hint: recipient_hint || undefined });
   };
 
-  const handleShareFill = (args) => {
-    const field = (args?.field || "").trim();
+  const handleShareUpdateField = (args) => {
+    const field = (args?.field || "").trim().toLowerCase();
     const value = (args?.value || "").trim();
-    const mode = (args?.mode || "replace").trim().toLowerCase();
+    const append = !!args?.append;
     if (!field || !value) return;
-    dispatch("share:fill", { field, value, mode });
+    if (!["to","subject","body"].includes(field)) return;
+
+    dispatch("sw:update", { field, value, append });
   };
 
   const handleShareSend = (args) => {
-    const confirm = !!args?.confirm;
-    if (!confirm) return;
-    dispatch("share:send", {});
+    // Model should only call this after explicit confirmation like "Yes, send it now."
+    dispatch("sw:send", {});
   };
 
   function slugify(s) {
@@ -446,7 +472,7 @@ export default function LabVoiceAgent({
         try { args = JSON.parse(buf.argsText || "{}"); } catch {}
         const name = buf.name || "";
 
-        // Route
+        // ----- Route by tool name -----
         if (name === "approve_lab") return approveFromTool(args);
         if (name === "reject_lab") return; // no UI change required here
 
@@ -458,9 +484,8 @@ export default function LabVoiceAgent({
         if (name === "clinical_save") return handleClinicalSave();
 
         if (name === "share_open_widget") return handleShareOpen(args);
-        if (name === "share_fill_field") return handleShareFill(args);
-        if (name === "share_send_email") return handleShareSend(args);
-
+        if (name === "share_update_field") return handleShareUpdateField(args);
+        if (name === "share_send") return handleShareSend(args);
         return;
       }
     };
@@ -487,16 +512,30 @@ export default function LabVoiceAgent({
     try { sseAbortRef.current?.abort(); } catch {}
     sseAbortRef.current = null; sseReaderRef.current = null;
 
-    try { if (pcRef.current) { pcRef.current.getSenders?.().forEach(s => s.track?.stop()); pcRef.current.close(); } } catch {}
+    try {
+      if (pcRef.current) {
+        pcRef.current.getSenders?.().forEach(s => s.track?.stop());
+        pcRef.current.close();
+      }
+    } catch {}
     pcRef.current = null;
+
     try { localStreamRef.current?.getTracks?.().forEach(t => t.stop()); } catch {}
     localStreamRef.current = null;
+
     try {
-      if (remoteAudioRef.current) { remoteAudioRef.current.srcObject = null; remoteAudioRef.current.pause?.(); remoteAudioRef.current.src = ""; }
+      if (remoteAudioRef.current) {
+        remoteAudioRef.current.srcObject = null;
+        remoteAudioRef.current.pause?.();
+        remoteAudioRef.current.src = "";
+      }
     } catch {}
     remoteStreamRef.current = null;
 
-    setMicActive(false); setVizSource("mic"); setStatus("idle"); setPendingQueue([]);
+    setMicActive(false);
+    setVizSource("mic");
+    setStatus("idle");
+    setPendingQueue([]);
   };
 
   const startSuggestStream = async () => {
@@ -504,7 +543,8 @@ export default function LabVoiceAgent({
     sseAbortRef.current = ctrl;
     try {
       const res = await fetch(`${backendBase}/lab-agent/suggest-stream`, {
-        method: "POST", headers: { "Content-Type": "application/json" },
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ session_id: sessionId }),
         signal: ctrl.signal,
       });
@@ -535,7 +575,10 @@ export default function LabVoiceAgent({
 
   const makeId = (name) => {
     const seq = ++seqRef.current;
-    const slug = String(name || "").toLowerCase().replace(/\s+/g,"-").replace(/[^a-z0-9\-().+/]/g,"");
+    const slug = String(name || "")
+      .toLowerCase()
+      .replace(/\s+/g,"-")
+      .replace(/[^a-z0-9\-().+/]/g,"");
     return `${slug}::${Date.now()}::${seq}`;
   };
 
@@ -543,11 +586,24 @@ export default function LabVoiceAgent({
     if (!raw) return null;
     const name = ((raw.name || raw.test || "") + "").trim();
     if (!name) return null;
-    return { id: raw.id && !forceId ? String(raw.id) : makeId(name), name, why: raw.why ? String(raw.why).trim() : "", priority: raw.priority ? String(raw.priority).trim() : "" };
+    return {
+      id: raw.id && !forceId ? String(raw.id) : makeId(name),
+      name,
+      why: raw.why ? String(raw.why).trim() : "",
+      priority: raw.priority ? String(raw.priority).trim() : "",
+    };
   };
 
-  const hasByName = (arr, nm) => (arr || []).some(x => String(x.name||"").trim().toLowerCase() === String(nm||"").trim().toLowerCase());
-  const removePendingByName = (nm) => setPendingQueue(prev => prev.filter(x => (x.name||"").toLowerCase() !== String(nm||"").toLowerCase()));
+  const hasByName = (arr, nm) =>
+    (arr || []).some(
+      x => String(x.name||"").trim().toLowerCase() === String(nm||"").trim().toLowerCase()
+    );
+
+  const removePendingByName = (nm) =>
+    setPendingQueue(prev =>
+      prev.filter(x => (x.name||"").toLowerCase() !== String(nm||"").toLowerCase())
+    );
+
   const notifyManualAdd = (item) => {
     fetch(`${backendBase}/lab-agent/tool-bridge`, {
       method: "POST", headers: { "Content-Type": "application/json" },
@@ -563,13 +619,25 @@ export default function LabVoiceAgent({
   };
 
   const endSessionNow = async () => {
-    try { await fetch(`${backendBase}/lab-agent/reset`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ session_id: sessionId }) }); }
-    finally { stopAll(); resetAll(); onEndSession?.(); }
+    try {
+      await fetch(`${backendBase}/lab-agent/reset`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ session_id: sessionId }),
+      });
+    } finally {
+      stopAll();
+      resetAll();
+      onEndSession?.();
+    }
   };
 
   if (!isVisible) return null;
 
-  const waveStream = vizSource === "agent" && remoteStreamRef.current ? remoteStreamRef.current : (localStreamRef.current || null);
+  const waveStream =
+    vizSource === "agent" && remoteStreamRef.current
+      ? remoteStreamRef.current
+      : (localStreamRef.current || null);
 
   return (
     <>
@@ -595,11 +663,17 @@ export default function LabVoiceAgent({
 
         <div className="assistant-content" style={{ overflow: "hidden" }}>
           <div className="va-header" style={{ marginBottom: 12 }}>
-            <div className="va-title"><FaFlask style={{ marginRight: 8 }} /> Lab Agent</div>
+            <div className="va-title">
+              <FaFlask style={{ marginRight: 8 }} /> Lab Agent
+            </div>
             <div className={`va-status ${status}`}>
-              {status === "prepping" ? "Preparing • sending context…" :
-               status === "connected" ? (micActive ? "Connected • VAD listening" : "Connected • mic muted") :
-               status === "error" ? "Error • check connection" : "Idle"}
+              {status === "prepping"
+                ? "Preparing • sending context…"
+                : status === "connected"
+                ? (micActive ? "Connected • VAD listening" : "Connected • mic muted")
+                : status === "error"
+                ? "Error • check connection"
+                : "Idle"}
             </div>
           </div>
 
@@ -607,7 +681,11 @@ export default function LabVoiceAgent({
             <AudioWave stream={waveStream} />
           </div>
 
-          {askingText && <div className="va-hint" style={{ marginTop: 8 }}>{askingText}</div>}
+          {askingText && (
+            <div className="va-hint" style={{ marginTop: 8 }}>
+              {askingText}
+            </div>
+          )}
         </div>
 
         <button
@@ -625,36 +703,54 @@ export default function LabVoiceAgent({
         </button>
       </div>
 
-      {pendingQueue.length > 0 ? createPortal(
-        <div className="pending-dock pending-dock--left" aria-live="polite">
-          <div className="dock-title">Pending Lab Suggestions</div>
-          <div className="pending-list">
-            {pendingQueue.map((s) => (
-              <div key={s.id} className="pending-item">
-                <div className="sug-title">{s.name}</div>
-                {(s.priority || s.why) && (
-                  <div className="sug-meta">
-                    {s.priority ? <span className="badge">{s.priority}</span> : null}
-                    {s.priority && s.why ? " • " : null}
-                    {s.why ? <span className="why">Reason: {s.why}</span> : null}
+      {pendingQueue.length > 0
+        ? createPortal(
+            <div className="pending-dock pending-dock--left" aria-live="polite">
+              <div className="dock-title">Pending Lab Suggestions</div>
+              <div className="pending-list">
+                {pendingQueue.map((s) => (
+                  <div key={s.id} className="pending-item">
+                    <div className="sug-title">{s.name}</div>
+                    {(s.priority || s.why) && (
+                      <div className="sug-meta">
+                        {s.priority ? <span className="badge">{s.priority}</span> : null}
+                        {s.priority && s.why ? " • " : null}
+                        {s.why ? <span className="why">Reason: {s.why}</span> : null}
+                      </div>
+                    )}
+                    <div className="btn-row">
+                      <button
+                        className="va-btn is-primary"
+                        onClick={() => {
+                          applyApproved(s);
+                          notifyManualAdd(s);
+                        }}
+                      >
+                        Add to Table
+                      </button>
+                      <button
+                        className="va-btn is-ghost"
+                        onClick={() =>
+                          setPendingQueue((prev) => prev.filter((x) => x.id !== s.id))
+                        }
+                      >
+                        Skip
+                      </button>
+                    </div>
+                    <div className="tiny-hint">
+                      Say “yes / approve / add” to confirm via the agent.
+                    </div>
                   </div>
-                )}
-                <div className="btn-row">
-                  <button className="va-btn is-primary" onClick={() => { applyApproved(s); notifyManualAdd(s); }}>
-                    Add to Table
-                  </button>
-                  <button className="va-btn is-ghost" onClick={() => setPendingQueue(prev => prev.filter(x => x.id !== s.id))}>
-                    Skip
-                  </button>
-                </div>
-                <div className="tiny-hint">Say “yes / approve / add” to confirm via the agent.</div>
+                ))}
               </div>
-            ))}
-          </div>
-        </div>, document.body) : null}
+            </div>,
+            document.body
+          )
+        : null}
     </>
   );
 }
+
 
 
 

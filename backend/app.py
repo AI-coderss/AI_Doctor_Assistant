@@ -4760,6 +4760,40 @@ def clinical_notes_icd10_search():
 # =======================
 # Share / Compose & Send
 # =======================
+# Adjust if you have a different frontend origin
+FRONTEND_ORIGIN = "https://ai-doctor-assistant-app-dev.onrender.com"
+
+
+# ---- CORS helpers ----
+
+@app.after_request
+def add_cors_headers(resp):
+    """
+    Add CORS headers for all responses so the React app on Render can call the API.
+    """
+    resp.headers["Access-Control-Allow-Origin"] = FRONTEND_ORIGIN
+    resp.headers["Vary"] = "Origin"
+    resp.headers["Access-Control-Allow-Credentials"] = "true"
+    resp.headers["Access-Control-Allow-Headers"] = "Content-Type, Authorization"
+    resp.headers["Access-Control-Allow-Methods"] = "GET, POST, OPTIONS"
+    return resp
+
+
+@app.route("/api/share/compose", methods=["OPTIONS"])
+@app.route("/api/share/generate-message", methods=["OPTIONS"])
+@app.route("/api/share/send", methods=["OPTIONS"])
+def share_options():
+    """
+    CORS preflight handler for share endpoints.
+    Returns HTTP 200 with appropriate CORS headers.
+    """
+    resp = make_response("", 200)
+    resp.headers["Access-Control-Allow-Origin"] = FRONTEND_ORIGIN
+    resp.headers["Access-Control-Allow-Credentials"] = "true"
+    resp.headers["Access-Control-Allow-Headers"] = "Content-Type, Authorization"
+    resp.headers["Access-Control-Allow-Methods"] = "GET, POST, OPTIONS"
+    return resp
+
 
 def _build_share_compose_prompt(
     note_markdown: str,
@@ -4776,14 +4810,19 @@ def _build_share_compose_prompt(
     - A BODY that is still short, but clearly structured:
         * "Summary of case:"
         * "Clinical rationale and interpretation:"
-        * "Requested actions / next steps:" (instructions for the secretary)
+        * "Requested actions / next steps:"
     and uses the clinical context (ctx) as much as possible.
     """
     patient_name = (patient or {}).get("name") or ""
     patient_id = (patient or {}).get("id") or ""
     condition = (ctx or {}).get("condition") or ""
     desc = (ctx or {}).get("description") or ""
-    ctx_brief = (ctx or {}).get("summary") or (ctx or {}).get("plan") or ""
+    ctx_brief = (
+        (ctx or {}).get("summary")
+        or (ctx or {}).get("plan")
+        or (ctx or {}).get("assessment")
+        or ""
+    )
 
     return (
         "You are a clinical communications assistant. Return STRICT JSON ONLY with keys:\n"
@@ -4794,9 +4833,9 @@ def _build_share_compose_prompt(
         "- Subject <= 90 chars.\n"
         "- Body <= 220 words, but still focused and readable.\n"
         "- BODY MUST be structured with the following plain-text sections:\n"
-        '    1) "Summary of case:" — 2–4 sentences summarising the case and main issues.\n'
-        '    2) "Clinical rationale and interpretation:" — briefly explain key findings, differentials, and reasoning.\n'
-        '    3) "Requested actions / next steps:" — concrete, action-oriented instructions for the secretary (e.g. book tests, schedule follow-up, forward to consultant, etc.).\n'
+        '    1) \"Summary of case:\" — 2–4 sentences summarising the case and main issues.\n'
+        '    2) \"Clinical rationale and interpretation:\" — briefly explain key findings, differentials, and reasoning.\n'
+        '    3) \"Requested actions / next steps:\" — concrete, action-oriented instructions for the secretary (e.g. book tests, schedule follow-up, forward to consultant, etc.).\n'
         "- Use the clinical note + session context to make the message highly context-aware and specific to this case.\n"
         "- If patient name/ID are missing, gracefully omit them.\n"
         "- The `summary` field is a 1–2 sentence dashboard-style summary of the case and what is being requested (no headings).\n"
@@ -4828,9 +4867,6 @@ def share_compose():
       }
     Returns:
       { "subject":"...", "body":"...", "summary":"...", "session_id":"..." }
-
-    The reply is context-aware (uses the stored session context + note markdown)
-    and the BODY includes: Summary of case, Clinical rationale, and Requested actions.
     """
     data = request.get_json() or {}
     session_id = data.get("session_id", str(uuid4()))
@@ -4854,13 +4890,21 @@ def share_compose():
         })
         raw = (resp.get("answer") or "").strip()
         parsed = _extract_json_dict(raw) or {}
-        subject = (parsed.get("subject") or "").strip() or f"Clinical note for {(patient.get('name') or 'patient')}"
-        body    = (parsed.get("body") or "").strip() or "Please find the attached clinical note PDF."
+
+        subject = (parsed.get("subject") or "").strip() or (
+            f"Clinical note for {(patient.get('name') or 'patient')}"
+        )
+        body    = (parsed.get("body") or "").strip() or \
+                  "Please find the attached clinical note PDF."
         summary = (parsed.get("summary") or "").strip()
 
         chat_sessions.setdefault(session_id, [])
-        chat_sessions[session_id].append({"role": "user", "content": "[Share compose request]"})
-        chat_sessions[session_id].append({"role": "assistant", "content": raw})
+        chat_sessions[session_id].append(
+            {"role": "user", "content": "[Share compose request]"}
+        )
+        chat_sessions[session_id].append(
+            {"role": "assistant", "content": raw}
+        )
 
         return jsonify({
             "subject": subject,
@@ -4870,7 +4914,17 @@ def share_compose():
         }), 200
 
     except Exception as e:
+        logging.exception("share_compose failed")
         return jsonify({"error": f"compose failed: {str(e)}"}), 500
+
+
+@app.post("/api/share/generate-message")
+def share_generate_message():
+    """
+    Alias to /api/share/compose so the frontend can call
+    /api/share/generate-message without CORS/preflight issues.
+    """
+    return share_compose()
 
 
 @app.post("/api/share/send")
@@ -4902,15 +4956,20 @@ def share_send():
 
     # No-op delivery for now; just acknowledge and log
     payload = {
-      "to": to,
-      "subject": subject,
-      "body": body,
-      "has_attachment": bool(attachment and attachment.get("content_base64")),
-      "attachment_name": (attachment or {}).get("filename"),
+        "to": to,
+        "subject": subject,
+        "body": body,
+        "has_attachment": bool(attachment and attachment.get("content_base64")),
+        "attachment_name": (attachment or {}).get("filename"),
     }
     logging.info("DRY SEND (queued=False): %s", payload)
 
-    return jsonify({"ok": True, "queued": False, "dry_run": True, "echo": payload}), 200
+    return jsonify({
+        "ok": True,
+        "queued": False,
+        "dry_run": True,
+        "echo": payload
+    }), 200
 
 
 if __name__ == "__main__":

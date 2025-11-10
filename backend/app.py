@@ -114,7 +114,17 @@ CORS(
             "supports_credentials": True,
             "max_age": 86400,
         },
-
+        r"/lab-agent/rtc-connect": {
+            "origins": [
+                "https://ai-doctor-assistant-app-dev.onrender.com",
+                "http://localhost:3000",
+            ],
+            "methods": ["POST", "OPTIONS"],
+            "allow_headers": ["Content-Type", "Authorization", "Accept", "X-Requested-With", "X-Session-Id"],
+            "expose_headers": ["Content-Type"],
+            "supports_credentials": True,
+            "max_age": 86400,
+        },
         r"/transcribe": {
             "origins": [
                 "https://ai-doctor-assistant-app-dev.onrender.com",
@@ -228,18 +238,6 @@ CORS(
                 "http://localhost:3000",
             ],
             "methods": ["POST", "OPTIONS"],  # ensure OPTIONS allowed for preflight
-            "allow_headers": ["Content-Type", "Authorization", "Accept", "X-Requested-With", "X-Session-Id"],
-            "expose_headers": ["Content-Type"],
-            "supports_credentials": True,
-            "max_age": 86400,
-        },
-
-        r"/lab-agent/rtc-connect": {
-            "origins": [
-                "https://ai-doctor-assistant-app-dev.onrender.com",
-                "http://localhost:3000",
-            ],
-            "methods": ["POST", "OPTIONS"],
             "allow_headers": ["Content-Type", "Authorization", "Accept", "X-Requested-With", "X-Session-Id"],
             "expose_headers": ["Content-Type"],
             "supports_credentials": True,

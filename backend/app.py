@@ -3598,6 +3598,11 @@ def lab_agent_rtc_connect():
           "- Only call a function after the clinician asks you to perform that action.\n"
           "- Keep voice responses short. When you call a function, do not narrate its parameters.\n"
           "- For adding a section: if the user does not provide the content, generate a concise draft first, then insert.\n"
+        + "\n\n### Share / Email actions (function calling)\n"
+          "- When the clinician asks you to share or email the clinical notes, use the share_* tools.\n"
+          "- Do NOT invent email addresses. Ask explicitly for the recipient email.\n"
+          "- Use share_fill_field to set or refine To / Subject / Body based on what the clinician dictates.\n"
+          "- Only call share_send_email when the clinician clearly confirms sending.\n"
     )
 
     tools = [
@@ -3629,7 +3634,7 @@ def lab_agent_rtc_connect():
             },
         },
 
-        # -------------- Clinical Notes (new) --------------
+        # -------------- Clinical Notes (existing) --------------
         {
             "type": "function",
             "name": "clinical_add_section",
@@ -3640,9 +3645,20 @@ def lab_agent_rtc_connect():
                 "properties": {
                     "title": {"type": "string", "description": "Section title (e.g., Investigations)"},
                     "text": {"type": "string", "description": "Optional section content (Markdown)"},
-                    "style": {"type": "string", "enum": ["paragraph","bullets"], "description": "If text missing, how to draft"},
-                    "anchor_key": {"type": "string", "description": "Existing section key to insert near"},
-                    "position": {"type": "string", "enum": ["before","after","end"], "description": "Where to insert"}
+                    "style": {
+                        "type": "string",
+                        "enum": ["paragraph", "bullets"],
+                        "description": "If text missing, how to draft"
+                    },
+                    "anchor_key": {
+                        "type": "string",
+                        "description": "Existing section key to insert near"
+                    },
+                    "position": {
+                        "type": "string",
+                        "enum": ["before", "after", "end"],
+                        "description": "Where to insert"
+                    }
                 },
                 "required": ["title"]
             }
@@ -3670,7 +3686,7 @@ def lab_agent_rtc_connect():
                     "text": {"type": "string"},
                     "append": {"type": "boolean", "description": "true=append, false=replace"}
                 },
-                "required": ["key","text"]
+                "required": ["key", "text"]
             }
         },
         {
@@ -3685,7 +3701,7 @@ def lab_agent_rtc_connect():
                     "new_title": {"type": "string"},
                     "new_key": {"type": "string"}
                 },
-                "required": ["key","new_title"]
+                "required": ["key", "new_title"]
             }
         },
         {
@@ -3704,6 +3720,82 @@ def lab_agent_rtc_connect():
             "name": "clinical_save",
             "description": "Save the current note now.",
             "parameters": {"type": "object", "additionalProperties": False, "properties": {}}
+        },
+
+        # -------------- Share Widget / Email (NEW) --------------
+        {
+            "type": "function",
+            "name": "share_open_widget",
+            "description": (
+                "Open the Share Widget for emailing the clinical note PDF. "
+                "Use when the clinician asks you to share/email/send the clinical notes."
+            ),
+            "parameters": {
+                "type": "object",
+                "additionalProperties": False,
+                "properties": {
+                    "to_email": {
+                        "type": "string",
+                        "description": "Optional initial recipient email if the clinician dictated it."
+                    },
+                    "subject_hint": {
+                        "type": "string",
+                        "description": "Short hint for the email subject."
+                    },
+                    "body_hint": {
+                        "type": "string",
+                        "description": "Short hint about what the message should say."
+                    }
+                }
+            }
+        },
+        {
+            "type": "function",
+            "name": "share_fill_field",
+            "description": (
+                "Fill or update a specific field in the Share Widget (to, subject, or body) "
+                "based on what the clinician dictates."
+            ),
+            "parameters": {
+                "type": "object",
+                "additionalProperties": False,
+                "properties": {
+                    "field": {
+                        "type": "string",
+                        "enum": ["to", "subject", "body"],
+                        "description": "Which field to modify."
+                    },
+                    "value": {
+                        "type": "string",
+                        "description": "What to put into that field."
+                    },
+                    "mode": {
+                        "type": "string",
+                        "enum": ["replace", "append"],
+                        "description": "Replace the field or append to the end."
+                    }
+                },
+                "required": ["field", "value"]
+            }
+        },
+        {
+            "type": "function",
+            "name": "share_send_email",
+            "description": (
+                "Send the email currently composed in the Share Widget, "
+                "ONLY after explicit confirmation from the clinician."
+            ),
+            "parameters": {
+                "type": "object",
+                "additionalProperties": False,
+                "properties": {
+                    "confirm": {
+                        "type": "boolean",
+                        "description": "Must be true when the clinician clearly asked to send."
+                    }
+                },
+                "required": ["confirm"]
+            }
         },
     ]
 
@@ -3743,6 +3835,7 @@ def lab_agent_rtc_connect():
     resp = Response(answer, status=200, mimetype="application/sdp")
     resp.headers["Cache-Control"] = "no-cache"
     return resp
+
 
 ############## Highcharts endpoints #################
 # ===================== Highcharts Pie: helpers + endpoints =====================

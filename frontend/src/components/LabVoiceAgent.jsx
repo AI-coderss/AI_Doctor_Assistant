@@ -4,6 +4,9 @@
 /* eslint-disable no-useless-concat */
 /* eslint-disable react-hooks/exhaustive-deps */
 /* eslint-disable no-unused-vars */
+/* eslint-disable no-useless-concat */
+/* eslint-disable react-hooks/exhaustive-deps */
+/* eslint-disable no-unused-vars */
 import React, { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import "../styles/lab-voice-agent.css";
@@ -17,7 +20,7 @@ import useAudioStore from "../store/audioStore.js";
 import { startVolumeMonitoring } from "./audioLevelAnalyzer";
 
 /**
- * LabVoiceAgent — now also drives ClinicalNotes actions via function-calling
+ * LabVoiceAgent — now also drives ClinicalNotes + Share Widget via function-calling
  * Props:
  * - isVisible, onClose, sessionId, backendBase, context
  * - onApproveLab(item), onEndSession()
@@ -96,12 +99,13 @@ export default function LabVoiceAgent({
   // ------------ realtime session.update (tools list) ------------
   const sendSessionUpdate = () => {
     const instruction = [
-      "You are a concise clinical lab & notes assistant.",
+      "You are a concise clinical lab, notes, and sharing assistant.",
       "For labs: ONLY call approve_lab after explicit confirmation.",
       allowedLabs?.length
         ? `Use ONLY names from this allowed list when approving: ${allowedLabs.join(", ")}.`
         : "Prefer standard test names when no list provided.",
-      "For clinical notes: call a clinical_* tool only when asked; keep responses short."
+      "For clinical notes: call a clinical_* tool only when asked; keep responses short.",
+      "For sharing clinical notes by email: use the share_* tools to open the widget, fill fields, and send only after explicit confirmation."
     ].join(" ");
 
     const TOOLS = [
@@ -194,6 +198,44 @@ export default function LabVoiceAgent({
         description: "Save the current note now.",
         parameters: { type: "object", additionalProperties: false, properties: {} }
       },
+
+      // share widget / email (NEW)
+      {
+        name: "share_open_widget",
+        description: "Open the Share Widget for emailing the clinical note PDF.",
+        parameters: {
+          type: "object", additionalProperties: false,
+          properties: {
+            to_email: { type: "string" },
+            subject_hint: { type: "string" },
+            body_hint: { type: "string" }
+          }
+        }
+      },
+      {
+        name: "share_fill_field",
+        description: "Fill or update a specific field in the Share Widget (to, subject, body).",
+        parameters: {
+          type: "object", additionalProperties: false,
+          properties: {
+            field: { type: "string", enum: ["to","subject","body"] },
+            value: { type: "string" },
+            mode: { type: "string", enum: ["replace","append"] }
+          },
+          required: ["field","value"]
+        }
+      },
+      {
+        name: "share_send_email",
+        description: "Send the currently composed email from the Share Widget after explicit confirmation.",
+        parameters: {
+          type: "object", additionalProperties: false,
+          properties: {
+            confirm: { type: "boolean" }
+          },
+          required: ["confirm"]
+        }
+      },
     ];
 
     try {
@@ -274,6 +316,7 @@ export default function LabVoiceAgent({
   const dispatch = (name, detail) =>
     window.dispatchEvent(new CustomEvent(name, { detail }));
 
+  // ------- Clinical Notes handlers (existing) -------
   const handleClinicalAdd = async (args) => {
     const title = (args?.title || "").trim();
     if (!title) return;
@@ -295,7 +338,6 @@ export default function LabVoiceAgent({
       } catch {}
     }
 
-    // Insert into the live editor
     dispatch("cn:section.add", { title, key: slugify(title), text, anchor_key, position });
   };
 
@@ -328,7 +370,34 @@ export default function LabVoiceAgent({
   };
 
   const handleClinicalSave = async () => {
-    dispatch("cn:save"); // your ClinicalNotes already wires this to /api/clinical-notes/save
+    dispatch("cn:save");
+  };
+
+  // ------- Share Widget handlers (NEW) -------
+  const handleShareOpen = (args) => {
+    const to_email = (args?.to_email || "").trim();
+    const subject_hint = (args?.subject_hint || "").trim();
+    const body_hint = (args?.body_hint || "").trim();
+    // Parent component that owns <ShareWidget> should listen to this and set open=true.
+    dispatch("share:open", {
+      to: to_email || undefined,
+      subject: subject_hint || undefined,
+      body: body_hint || undefined,
+    });
+  };
+
+  const handleShareFill = (args) => {
+    const field = (args?.field || "").trim();
+    const value = (args?.value || "").trim();
+    const mode = (args?.mode || "replace").trim().toLowerCase();
+    if (!field || !value) return;
+    dispatch("share:fill", { field, value, mode });
+  };
+
+  const handleShareSend = (args) => {
+    const confirm = !!args?.confirm;
+    if (!confirm) return;
+    dispatch("share:send", {});
   };
 
   function slugify(s) {
@@ -387,6 +456,11 @@ export default function LabVoiceAgent({
         if (name === "clinical_rename_section") return handleClinicalRename(args);
         if (name === "clinical_apply_markdown") return handleClinicalApplyMarkdown(args);
         if (name === "clinical_save") return handleClinicalSave();
+
+        if (name === "share_open_widget") return handleShareOpen(args);
+        if (name === "share_fill_field") return handleShareFill(args);
+        if (name === "share_send_email") return handleShareSend(args);
+
         return;
       }
     };
@@ -581,7 +655,6 @@ export default function LabVoiceAgent({
     </>
   );
 }
-
 
 
 

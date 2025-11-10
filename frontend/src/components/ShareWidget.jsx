@@ -5,6 +5,8 @@
 /* eslint-disable react-hooks/exhaustive-deps */
 // src/components/ShareWidget.jsx
 /* eslint-disable react-hooks/exhaustive-deps */
+// src/components/ShareWidget.jsx
+/* eslint-disable react-hooks/exhaustive-deps */
 import React, { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { FaTimes, FaPaperPlane, FaMagic, FaFilePdf } from "react-icons/fa";
@@ -12,7 +14,6 @@ import "../styles/share-widget.css";
 
 /**
  * Draggable Share Widget (portal, glass, compact height)
- * - Dictation is handled by OpenAI Realtime via LabVoiceAgent (no Web Speech API here).
  *
  * Props:
  *  - open: boolean
@@ -24,7 +25,9 @@ import "../styles/share-widget.css";
  *  - fileName: string
  *  - subjectDefault?: string
  *  - bodyDefault?: string
+ *  - toDefault?: string
  *  - noteMarkdown?: string
+ *  - autoSendSignal?: number (increments when voice agent wants to send)
  */
 export default function ShareWidget({
   open,
@@ -36,7 +39,9 @@ export default function ShareWidget({
   fileName = "clinical-note.pdf",
   subjectDefault = "",
   bodyDefault = "",
+  toDefault = "",
   noteMarkdown = "",
+  autoSendSignal = 0,
 }) {
   const viewportRef = useRef(null);
   const widgetRef = useRef(null);
@@ -45,9 +50,9 @@ export default function ShareWidget({
   const [pos, setPos] = useState({ x: 0, y: 0 });
   const drag = useRef({ active: false, dx: 0, dy: 0, w: 560, h: 420 });
 
-  const [to, setTo] = useState("");
-  const [subject, setSubject] = useState(subjectDefault);
-  const [body, setBody] = useState(bodyDefault);
+  const [to, setTo] = useState(toDefault || "");
+  const [subject, setSubject] = useState(subjectDefault || "");
+  const [body, setBody] = useState(bodyDefault || "");
   const [genBusy, setGenBusy] = useState(false);
   const [sendBusy, setSendBusy] = useState(false);
   const [error, setError] = useState("");
@@ -55,11 +60,12 @@ export default function ShareWidget({
 
   const clamp = (v, min, max) => Math.min(Math.max(v, min), max);
 
-  // init placement when opened
+  // initial placement when opened
   useEffect(() => {
     if (!open) return;
     const place = () => {
-      const vw = window.innerWidth, vh = window.innerHeight;
+      const vw = window.innerWidth,
+        vh = window.innerHeight;
       const el = widgetRef.current;
       const r = el ? el.getBoundingClientRect() : { width: 560, height: 420 };
       const x = Math.max(18, vw - r.width - 18);
@@ -74,10 +80,11 @@ export default function ShareWidget({
   useEffect(() => {
     if (!open) return;
     const onResize = () => {
-      const vw = window.innerWidth, vh = window.innerHeight;
+      const vw = window.innerWidth,
+        vh = window.innerHeight;
       const el = widgetRef.current;
       const r = el ? el.getBoundingClientRect() : { width: 560, height: 420 };
-      setPos(p => ({
+      setPos((p) => ({
         x: clamp(p.x, 8, Math.max(8, vw - r.width - 8)),
         y: clamp(p.y, 8, Math.max(8, vh - r.height - 8)),
       }));
@@ -105,7 +112,9 @@ export default function ShareWidget({
   };
   const onDragMove = (clientX, clientY) => {
     if (!drag.current.active) return;
-    const vw = window.innerWidth, vh = window.innerHeight, m = 8;
+    const vw = window.innerWidth,
+      vh = window.innerHeight,
+      m = 8;
     const w = drag.current.w || 560;
     const h = drag.current.h || 420;
     setPos({
@@ -113,12 +122,18 @@ export default function ShareWidget({
       y: clamp(clientY - drag.current.dy, m, Math.max(m, vh - h - m)),
     });
   };
-  const onDragEnd = () => { drag.current.active = false; document.body.classList.remove("sw-noselect"); };
+  const onDragEnd = () => {
+    drag.current.active = false;
+    document.body.classList.remove("sw-noselect");
+  };
 
   useEffect(() => {
     const up = () => onDragEnd();
     const mv = (e) => onDragMove(e.clientX, e.clientY);
-    const tmv = (e) => { const t = e.touches?.[0]; if (t) onDragMove(t.clientX, t.clientY); };
+    const tmv = (e) => {
+      const t = e.touches?.[0];
+      if (t) onDragMove(t.clientX, t.clientY);
+    };
     window.addEventListener("mouseup", up);
     window.addEventListener("mousemove", mv);
     window.addEventListener("touchend", up);
@@ -131,7 +146,21 @@ export default function ShareWidget({
     };
   }, []);
 
-  // AI draft (extended / detailed)
+  // Sync defaults when widget (re)opens
+  useEffect(() => {
+    if (!open) return;
+    setTo(toDefault || "");
+  }, [toDefault, open]);
+  useEffect(() => {
+    if (!open) return;
+    setSubject(subjectDefault || "");
+  }, [subjectDefault, open]);
+  useEffect(() => {
+    if (!open) return;
+    setBody(bodyDefault || "");
+  }, [bodyDefault, open]);
+
+  // Optional: auto-draft when opened and subject/body empty
   useEffect(() => {
     if (!open) return;
     if (subjectDefault || bodyDefault) return;
@@ -141,7 +170,7 @@ export default function ShareWidget({
         setGenBusy(true);
         const payload = {
           session_id: sessionId,
-          detail_level: "extended", // backend uses this for summary + rationale
+          detail_level: "extended",
           patient: { id: patient?.id || "", name: patient?.name || "" },
           note_markdown: noteMarkdown || "",
         };
@@ -153,16 +182,30 @@ export default function ShareWidget({
         if (!r.ok) throw new Error("Draft failed");
         const j = await r.json();
         if (!ignore) {
-          setSubject(j?.subject || `Clinical note for ${patient?.name || "patient"}`);
-          setBody(j?.body || "");
+          setSubject(
+            j?.subject ||
+              `Clinical note for ${patient?.name || "patient"}${
+                patient?.id ? ` (${patient.id})` : ""
+              }`
+          );
+          setBody(
+            j?.body ||
+              `Dear Clinic Secretary,\n\nPlease find attached the clinical note for ${
+                patient?.name || "the patient"
+              }${patient?.id ? ` (File #${patient.id})` : ""}.\n\nRegards,\n`
+          );
         }
-      } catch (e) {
-        if (!ignore) setError("Could not auto-draft message. You can edit it manually.");
+      } catch {
+        if (!ignore) {
+          setError("Could not auto-draft message. You can edit it manually.");
+        }
       } finally {
         if (!ignore) setGenBusy(false);
       }
     })();
-    return () => { ignore = true; };
+    return () => {
+      ignore = true;
+    };
   }, [open, backendBase, sessionId, patient?.id, patient?.name, noteMarkdown, subjectDefault, bodyDefault]);
 
   const regenerate = async () => {
@@ -191,58 +234,6 @@ export default function ShareWidget({
     }
   };
 
-  // ---- Voice-agent-driven field updates (share:* events) ----
-  useEffect(() => {
-    if (!open) return;
-
-    const applyAppend = (prev, val) => {
-      if (!prev) return val;
-      const trimmedPrev = prev.endsWith(" ") ? prev : prev + " ";
-      return trimmedPrev + val;
-    };
-
-    const onShareOpen = (e) => {
-      const d = e.detail || {};
-      if (d.to) setTo(d.to);
-      if (d.subject) setSubject(d.subject);
-      if (d.body) setBody(d.body);
-    };
-
-    const onShareFill = (e) => {
-      const d = e.detail || {};
-      const field = (d.field || "").toLowerCase();
-      const value = (d.value || "").trim();
-      const mode = (d.mode || "replace").toLowerCase();
-      if (!field || !value) return;
-
-      const isAppend = mode === "append";
-
-      if (field === "to") {
-        setTo(prev => isAppend ? applyAppend(prev, value) : value);
-      } else if (field === "subject") {
-        setSubject(prev => isAppend ? applyAppend(prev, value) : value);
-      } else if (field === "body") {
-        setBody(prev => isAppend ? applyAppend(prev, value) : value);
-      }
-    };
-
-    const onShareSend = () => {
-      // fire send as if user clicked the button
-      send();
-    };
-
-    window.addEventListener("share:open", onShareOpen);
-    window.addEventListener("share:fill", onShareFill);
-    window.addEventListener("share:send", onShareSend);
-
-    return () => {
-      window.removeEventListener("share:open", onShareOpen);
-      window.removeEventListener("share:fill", onShareFill);
-      window.removeEventListener("share:send", onShareSend);
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open, send]);
-
   const blobToBase64 = (blob) =>
     new Promise((resolve, reject) => {
       const reader = new FileReader();
@@ -251,8 +242,10 @@ export default function ShareWidget({
       reader.readAsDataURL(blob);
     });
 
-  const send = async () => {
-    setError(""); setSentOk(false);
+  // HOISTED send handler (no TDZ)
+  async function handleSend() {
+    setError("");
+    setSentOk(false);
     if (!to || !subject || !body) {
       setError("Please fill To, Subject, and Message.");
       return;
@@ -269,7 +262,9 @@ export default function ShareWidget({
       }
       const payload = {
         session_id: sessionId,
-        to, subject, body,
+        to,
+        subject,
+        body,
         patient: { id: patient?.id || "", name: patient?.name || "" },
         attachment,
       };
@@ -286,7 +281,16 @@ export default function ShareWidget({
     } finally {
       setSendBusy(false);
     }
-  };
+  }
+
+  // Optional auto-send trigger from parent (LabVoiceAgent -> ClinicalNotes -> ShareWidget)
+  useEffect(() => {
+    if (!open) return;
+    if (!autoSendSignal) return;
+    if (!to || !subject || !body) return;
+    handleSend();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [autoSendSignal]);
 
   if (!open) return null;
 
@@ -299,7 +303,7 @@ export default function ShareWidget({
         role="dialog"
         aria-label="Share clinical note"
       >
-        {/* Title bar = drag handle */}
+        {/* Title bar is the drag handle, but ignore clicks on right-side buttons */}
         <div
           className="sw-titlebar"
           onMouseDown={(e) => {
@@ -316,7 +320,6 @@ export default function ShareWidget({
             Share Note {patient?.name ? `• ${patient.name}` : ""}
           </div>
           <div className="sw-actions">
-            {/* No local mic / Web Speech here: dictation is via LabVoiceAgent realtime. */}
             <button className="sw-icon-btn" onClick={onClose} aria-label="Close">
               <FaTimes />
             </button>
@@ -329,7 +332,9 @@ export default function ShareWidget({
 
           {/* Attachment */}
           <div className="sw-attach">
-            <div className="sw-attach-icon"><FaFilePdf /></div>
+            <div className="sw-attach-icon">
+              <FaFilePdf />
+            </div>
             <div className="sw-attach-meta">
               <div className="sw-attach-name">{fileName}</div>
               <div className="sw-attach-sub">
@@ -347,7 +352,9 @@ export default function ShareWidget({
               value={to}
               onChange={(e) => setTo(e.target.value)}
             />
-            <div className="sw-hint">Type an email or let the Lab Voice Agent fill it by voice.</div>
+            <div className="sw-hint">
+              Type an email or let the LabVoiceAgent fill this.
+            </div>
           </div>
 
           {/* Subject + AI */}
@@ -368,11 +375,21 @@ export default function ShareWidget({
               disabled={genBusy}
               title="Draft with AI"
             >
-              {genBusy ? <><span className="sw-spinner" />Drafting…</> : <><FaMagic style={{ marginRight: 6 }} />AI Draft</>}
+              {genBusy ? (
+                <>
+                  <span className="sw-spinner" />
+                  Drafting…
+                </>
+              ) : (
+                <>
+                  <FaMagic style={{ marginRight: 6 }} />
+                  AI Draft
+                </>
+              )}
             </button>
           </div>
 
-          {/* Body (shorter to keep widget compact) */}
+          {/* Body */}
           <div className="sw-field">
             <label>Message</label>
             <textarea
@@ -385,9 +402,25 @@ export default function ShareWidget({
           </div>
 
           <div className="sw-footer">
-            <button className="sw-btn ghost" onClick={onClose}>Cancel</button>
-            <button className={`sw-btn primary ${sendBusy ? "is-busy" : ""}`} onClick={send} disabled={sendBusy}>
-              {sendBusy ? <><span className="sw-spinner" />Sending…</> : <><FaPaperPlane style={{ marginRight: 6 }} />Send</>}
+            <button className="sw-btn ghost" onClick={onClose}>
+              Cancel
+            </button>
+            <button
+              className={`sw-btn primary ${sendBusy ? "is-busy" : ""}`}
+              onClick={handleSend}
+              disabled={sendBusy}
+            >
+              {sendBusy ? (
+                <>
+                  <span className="sw-spinner" />
+                  Sending…
+                </>
+              ) : (
+                <>
+                  <FaPaperPlane style={{ marginRight: 6 }} />
+                  Send
+                </>
+              )}
             </button>
           </div>
         </div>

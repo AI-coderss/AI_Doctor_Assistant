@@ -1,10 +1,10 @@
 /* eslint-disable no-use-before-define */
 // src/components/ShareWidget.jsx
-/* eslint-disable react-hooks/exhaustive-deps */
-/* eslint-disable react-hooks/exhaustive-deps */
+// src/components/ShareWidget.jsx
 /* eslint-disable react-hooks/exhaustive-deps */
 // src/components/ShareWidget.jsx
 /* eslint-disable react-hooks/exhaustive-deps */
+/* eslint-disable no-use-before-define */
 // src/components/ShareWidget.jsx
 /* eslint-disable react-hooks/exhaustive-deps */
 import React, { useEffect, useRef, useState } from "react";
@@ -13,7 +13,7 @@ import { FaTimes, FaPaperPlane, FaMagic, FaFilePdf } from "react-icons/fa";
 import "../styles/share-widget.css";
 
 /**
- * Draggable Share Widget (portal, glass, compact height)
+ * Share Widget (fixed left column, glass, compact height)
  *
  * Props:
  *  - open: boolean
@@ -45,10 +45,7 @@ export default function ShareWidget({
 }) {
   const viewportRef = useRef(null);
   const widgetRef = useRef(null);
-
-  // position (absolute inside .sw-viewport)
-  const [pos, setPos] = useState({ x: 0, y: 0 });
-  const drag = useRef({ active: false, dx: 0, dy: 0, w: 560, h: 420 });
+  const bodyTextAreaRef = useRef(null); // auto-resize target
 
   const [to, setTo] = useState(toDefault || "");
   const [subject, setSubject] = useState(subjectDefault || "");
@@ -58,107 +55,30 @@ export default function ShareWidget({
   const [error, setError] = useState("");
   const [sentOk, setSentOk] = useState(false);
 
-  const clamp = (v, min, max) => Math.min(Math.max(v, min), max);
-
-  // initial placement when opened
-  useEffect(() => {
-    if (!open) return;
-    const place = () => {
-      const vw = window.innerWidth,
-        vh = window.innerHeight;
-      const el = widgetRef.current;
-      const r = el ? el.getBoundingClientRect() : { width: 560, height: 420 };
-      const x = Math.max(18, vw - r.width - 18);
-      const y = Math.max(18, vh - r.height - 18);
-      setPos({ x, y });
-    };
-    const id = requestAnimationFrame(place);
-    return () => cancelAnimationFrame(id);
-  }, [open]);
-
-  // keep in-bounds on resize
-  useEffect(() => {
-    if (!open) return;
-    const onResize = () => {
-      const vw = window.innerWidth,
-        vh = window.innerHeight;
-      const el = widgetRef.current;
-      const r = el ? el.getBoundingClientRect() : { width: 560, height: 420 };
-      setPos((p) => ({
-        x: clamp(p.x, 8, Math.max(8, vw - r.width - 8)),
-        y: clamp(p.y, 8, Math.max(8, vh - r.height - 8)),
-      }));
-    };
-    window.addEventListener("resize", onResize);
-    window.addEventListener("orientationchange", onResize);
-    return () => {
-      window.removeEventListener("resize", onResize);
-      window.removeEventListener("orientationchange", onResize);
-    };
-  }, [open]);
-
-  // dragging
-  const onDragStart = (clientX, clientY) => {
-    drag.current.active = true;
-    const el = widgetRef.current;
-    if (el) {
-      const r = el.getBoundingClientRect();
-      drag.current.w = r.width;
-      drag.current.h = r.height;
-    }
-    drag.current.dx = clientX - pos.x;
-    drag.current.dy = clientY - pos.y;
-    document.body.classList.add("sw-noselect");
-  };
-  const onDragMove = (clientX, clientY) => {
-    if (!drag.current.active) return;
-    const vw = window.innerWidth,
-      vh = window.innerHeight,
-      m = 8;
-    const w = drag.current.w || 560;
-    const h = drag.current.h || 420;
-    setPos({
-      x: clamp(clientX - drag.current.dx, m, Math.max(m, vw - w - m)),
-      y: clamp(clientY - drag.current.dy, m, Math.max(m, vh - h - m)),
-    });
-  };
-  const onDragEnd = () => {
-    drag.current.active = false;
-    document.body.classList.remove("sw-noselect");
-  };
-
-  useEffect(() => {
-    const up = () => onDragEnd();
-    const mv = (e) => onDragMove(e.clientX, e.clientY);
-    const tmv = (e) => {
-      const t = e.touches?.[0];
-      if (t) onDragMove(t.clientX, t.clientY);
-    };
-    window.addEventListener("mouseup", up);
-    window.addEventListener("mousemove", mv);
-    window.addEventListener("touchend", up);
-    window.addEventListener("touchmove", tmv, { passive: false });
-    return () => {
-      window.removeEventListener("mouseup", up);
-      window.removeEventListener("mousemove", mv);
-      window.removeEventListener("touchend", up);
-      window.removeEventListener("touchmove", tmv);
-    };
-  }, []);
-
   // Sync defaults when widget (re)opens
   useEffect(() => {
     if (!open) return;
     setTo(toDefault || "");
   }, [toDefault, open]);
+
   useEffect(() => {
     if (!open) return;
     setSubject(subjectDefault || "");
   }, [subjectDefault, open]);
+
   useEffect(() => {
     if (!open) return;
     setBody(bodyDefault || "");
   }, [bodyDefault, open]);
+
+  // Auto-resize textarea whenever body changes
+  useEffect(() => {
+    if (!open) return;
+    const el = bodyTextAreaRef.current;
+    if (!el) return;
+    el.style.height = "auto";
+    el.style.height = `${el.scrollHeight}px`;
+  }, [body, open]);
 
   // Optional: auto-draft when opened and subject/body empty
   useEffect(() => {
@@ -206,7 +126,16 @@ export default function ShareWidget({
     return () => {
       ignore = true;
     };
-  }, [open, backendBase, sessionId, patient?.id, patient?.name, noteMarkdown, subjectDefault, bodyDefault]);
+  }, [
+    open,
+    backendBase,
+    sessionId,
+    patient?.id,
+    patient?.name,
+    noteMarkdown,
+    subjectDefault,
+    bodyDefault,
+  ]);
 
   const regenerate = async () => {
     setError("");
@@ -242,7 +171,7 @@ export default function ShareWidget({
       reader.readAsDataURL(blob);
     });
 
-  // HOISTED send handler (no TDZ)
+  // HOISTED send handler
   async function handleSend() {
     setError("");
     setSentOk(false);
@@ -299,23 +228,11 @@ export default function ShareWidget({
       <div
         ref={widgetRef}
         className="sw-widget"
-        style={{ left: `${pos.x}px`, top: `${pos.y}px` }}
         role="dialog"
         aria-label="Share clinical note"
       >
-        {/* Title bar is the drag handle, but ignore clicks on right-side buttons */}
-        <div
-          className="sw-titlebar"
-          onMouseDown={(e) => {
-            if (e.target.closest(".sw-actions")) return;
-            onDragStart(e.clientX, e.clientY);
-          }}
-          onTouchStart={(e) => {
-            if (e.target.closest(".sw-actions")) return;
-            const t = e.touches?.[0];
-            if (t) onDragStart(t.clientX, t.clientY);
-          }}
-        >
+        {/* Title bar (no drag now) */}
+        <div className="sw-titlebar">
           <div className="sw-title">
             Share Note {patient?.name ? `• ${patient.name}` : ""}
           </div>
@@ -389,15 +306,23 @@ export default function ShareWidget({
             </button>
           </div>
 
-          {/* Body */}
+          {/* Body (auto-resizing textarea) */}
           <div className="sw-field">
             <label>Message</label>
             <textarea
+              ref={bodyTextAreaRef}
               className="sw-textarea"
-              rows={6}
+              rows={4}
               placeholder="Dear Clinic Secretary, ..."
               value={body}
-              onChange={(e) => setBody(e.target.value)}
+              onChange={(e) => {
+                setBody(e.target.value);
+                const el = bodyTextAreaRef.current;
+                if (el) {
+                  el.style.height = "auto";
+                  el.style.height = `${el.scrollHeight}px`;
+                }
+              }}
             />
           </div>
 

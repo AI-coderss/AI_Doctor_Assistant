@@ -8,20 +8,29 @@
    ----------------------------- */
 
 /* Full viewport container to constrain drag within window */
+/* -----------------------------
+   Share Widget (glass, left-fixed)
+   ----------------------------- */
+
+/* Full viewport container - just a host for the left column widget */
 .sw-viewport{
   position: fixed;
   inset: 0;
-  pointer-events: none; /* only panel receives events */
+  pointer-events: none; /* only the panel receives events */
   z-index: 9999;
 }
 
 /* Panel */
 .sw-widget{
-  position: absolute;
-  bottom: 18px;
-  right: 18px;
+  position: fixed;
+  /* LEFT COLUMN placement */
+  top: 72px;          /* adjust if you want higher/lower */
+  left: 18px;
+  right: auto;
+  bottom: auto;
+
   width: min(560px, 96vw);
-  /* NEW: never fill the screen */
+  /* keep same vertical behavior as before */
   max-height: 72vh;
   display: flex;
   flex-direction: column;
@@ -48,14 +57,14 @@
   }
 }
 
-/* Title bar (acts as drag handle) */
+/* Title bar (no drag now) */
 .sw-titlebar{
   display: flex;
   align-items: center;
   justify-content: space-between;
   padding: 10px 12px;
   border-bottom: 1px solid rgba(0,0,0,.06);
-  cursor: grab;
+  cursor: default;         /* was grab */
   user-select: none;
   border-top-left-radius: 16px;
   border-top-right-radius: 16px;
@@ -66,7 +75,7 @@
 .sw-title{ font-weight: 800; letter-spacing: .1px; }
 .sw-actions{ display: flex; gap: 6px; }
 
-/* Icon buttons (mic, close) */
+/* Icon buttons (close) */
 .sw-icon-btn{
   display: inline-flex;
   align-items: center;
@@ -77,7 +86,12 @@
   background: rgba(255,255,255,.6);
   color: inherit;
   cursor: pointer;
-  transition: transform .18s ease, background-color .18s ease, border-color .18s ease, box-shadow .18s ease, filter .18s ease;
+  transition:
+    transform .18s ease,
+    background-color .18s ease,
+    border-color .18s ease,
+    box-shadow .18s ease,
+    filter .18s ease;
 }
 .sw-icon-btn:hover{
   transform: translateY(-2px) scale(1.06);
@@ -92,18 +106,6 @@
     background: rgba(17,24,39,.6);
   }
   .sw-icon-btn:hover{ background: rgba(17,24,39,.82); }
-}
-
-/* Mic pulse when dictating */
-@keyframes swPulse {
-  0% { box-shadow: 0 0 0 0 rgba(6,182,212,.35); }
-  70% { box-shadow: 0 0 0 10px rgba(6,182,212,0); }
-  100% { box-shadow: 0 0 0 0 rgba(6,182,212,0); }
-}
-.sw-icon-btn.mic-live{
-  border-color: rgba(6,182,212,.8);
-  background: rgba(6,182,212,.18);
-  animation: swPulse 1.4s ease-out infinite;
 }
 
 /* Body — scrolls if content grows */
@@ -175,7 +177,11 @@
   background: rgba(255,255,255,.8);
   color: inherit;
   box-sizing: border-box;
-  transition: border-color .18s ease, box-shadow .18s ease, background .18s ease, transform .18s ease;
+  transition:
+    border-color .18s ease,
+    box-shadow .18s ease,
+    background .18s ease,
+    transform .18s ease;
 }
 .sw-input:focus, .sw-textarea:focus{
   outline: none;
@@ -195,6 +201,13 @@
   }
 }
 
+/* Auto-resize friendly text area */
+.sw-textarea{
+  min-height: 96px;      /* starting height (rows=4-ish) */
+  resize: none;          /* JS controls height */
+  overflow: hidden;      /* no inner scroll; outer body will scroll instead */
+}
+
 /* Row with AI button on the right */
 .sw-row{
   display: flex;
@@ -212,7 +225,12 @@
   border: 1px solid rgba(0,0,0,.12);
   background: rgba(255,255,255,.7);
   cursor: pointer;
-  transition: transform .18s ease, background-color .18s ease, box-shadow .18s ease, border-color .18s ease, filter .18s ease;
+  transition:
+    transform .18s ease,
+    background-color .18s ease,
+    box-shadow .18s ease,
+    border-color .18s ease,
+    filter .18s ease;
   white-space: nowrap;
 }
 .sw-mini:hover{
@@ -249,7 +267,12 @@
   background: rgba(255,255,255,.75);
   color: inherit;
   cursor: pointer;
-  transition: transform .18s ease, background-color .18s ease, box-shadow .18s ease, border-color .18s ease, filter .18s ease;
+  transition:
+    transform .18s ease,
+    background-color .18s ease,
+    box-shadow .18s ease,
+    border-color .18s ease,
+    filter .18s ease;
 }
 .sw-btn:hover{
   transform: translateY(-2px) scale(1.02);
@@ -292,5 +315,5 @@
 @keyframes swspin { to { transform: rotate(360deg); } }
 .sw-btn.is-busy, .sw-mini.is-busy{ cursor: progress; }
 
-/* Prevent text selection during drag */
+/* (legacy) Prevent text selection during drag – no longer used but harmless */
 .sw-noselect { user-select: none !important; }

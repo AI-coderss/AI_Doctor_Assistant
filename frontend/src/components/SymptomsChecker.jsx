@@ -2,38 +2,38 @@
 /* eslint-disable no-unused-vars */
 /* eslint-disable react-hooks/exhaustive-deps */
 /* eslint-disable no-unused-vars */
-import React, { useEffect, useState, useRef } from "react";
+/* eslint-disable react-hooks/exhaustive-deps */
+/* eslint-disable no-unused-vars */
+import React, { useEffect, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import "../styles/symptoms-checker.css";
 
 export default function SymptomsChecker({ sessionId, transcript, backendBase }) {
   const [loading, setLoading] = useState(false);
   const [diagnoses, setDiagnoses] = useState([]);
-  const [selected, setSelected] = useState(null);
+  const [selectedId, setSelectedId] = useState(null);
   const [error, setError] = useState("");
   const [answers, setAnswers] = useState({});
   const [refining, setRefining] = useState(false);
 
-  const pieRef = useRef();
-
-  // Reset when session changes (new case)
+  // Reset on new session (new case)
   useEffect(() => {
     setDiagnoses([]);
-    setSelected(null);
+    setSelectedId(null);
     setAnswers({});
     setError("");
     setLoading(false);
     setRefining(false);
   }, [sessionId]);
 
-  // Auto-start as soon as we have a transcript
+  // Auto-start once we have a transcript
   useEffect(() => {
     if (!transcript || !transcript.trim()) return;
     if (diagnoses.length > 0 || loading) return;
-    fetchData();
+    fetchInitial();
   }, [transcript, diagnoses.length, loading]);
 
-  const fetchData = async () => {
+  const fetchInitial = async () => {
     setLoading(true);
     setError("");
     try {
@@ -43,9 +43,10 @@ export default function SymptomsChecker({ sessionId, transcript, backendBase }) 
         body: JSON.stringify({ session_id: sessionId, transcript }),
       });
       const data = await res.json();
-      if (!data.ok) throw new Error(data.error || "Fetch failed");
-      setDiagnoses(data.diagnoses || []);
-      setSelected(data.diagnoses?.[0]?.id || null);
+      if (!data.ok) throw new Error(data.error || "Failed to analyze symptoms.");
+      const list = Array.isArray(data.diagnoses) ? data.diagnoses : [];
+      setDiagnoses(list);
+      setSelectedId(list[0]?.id || null);
     } catch (e) {
       setError(e.message || "Failed to analyze symptoms.");
     } finally {
@@ -71,9 +72,10 @@ export default function SymptomsChecker({ sessionId, transcript, backendBase }) 
         }),
       });
       const data = await res.json();
-      if (!data.ok) throw new Error(data.error || "Refine failed");
-      setDiagnoses(data.diagnoses || []);
-      setSelected(data.diagnoses?.[0]?.id || null);
+      if (!data.ok) throw new Error(data.error || "Failed to refine diagnosis.");
+      const list = Array.isArray(data.diagnoses) ? data.diagnoses : [];
+      setDiagnoses(list);
+      setSelectedId(list[0]?.id || null);
     } catch (e) {
       setError(e.message || "Failed to refine diagnosis.");
     } finally {
@@ -81,146 +83,303 @@ export default function SymptomsChecker({ sessionId, transcript, backendBase }) 
     }
   };
 
-  if (error) {
-    return <div className="sc-error">{error}</div>;
-  }
+  const handleAnswer = (qId, answer) => {
+    setAnswers((prev) => ({ ...prev, [qId]: answer }));
+  };
 
-  const selectedDiag = diagnoses.find((d) => d.id === selected) || null;
+  const renderTree = (diag) => {
+    const symptoms = Array.isArray(diag.symptoms) ? diag.symptoms : [];
+    if (!symptoms.length) return null;
+
+    const count = symptoms.length;
+    const width = 420;
+    const height = Math.max(260, 60 + count * 26);
+    const centerX = width - 40;
+    const centerY = height / 2;
+    const top = 40;
+    const bottom = height - 40;
+    const step = count > 1 ? (bottom - top) / (count - 1) : 0;
+
+    return (
+      <div className="sc-tree-shell">
+        <svg
+          className="sc-tree-svg"
+          viewBox={`0 0 ${width} ${height}`}
+          preserveAspectRatio="xMidYMid meet"
+        >
+          {/* Branches */}
+          {symptoms.map((s, idx) => {
+            const y = top + idx * step;
+            const strength = typeof s.weight === "number" ? s.weight : 0.4;
+            const clamped = Math.max(0.1, Math.min(1, strength));
+            const strokeWidth = 2 + clamped * 8;
+
+            const startX = 150;
+            const ctrlX1 = (startX + centerX) / 2;
+            const ctrlX2 = ctrlX1 + 30;
+
+            return (
+              <path
+                key={`path-${idx}-${s.name}`}
+                d={`M ${startX} ${y} C ${ctrlX1} ${y}, ${ctrlX2} ${centerY}, ${centerX} ${centerY}`}
+                stroke="url(#sc-branch-gradient)"
+                strokeWidth={strokeWidth}
+                fill="none"
+                strokeLinecap="round"
+                opacity={0.35 + clamped * 0.65}
+              />
+            );
+          })}
+
+          {/* Gradient for branches */}
+          <defs>
+            <linearGradient
+              id="sc-branch-gradient"
+              x1="0%"
+              y1="0%"
+              x2="100%"
+              y2="0%"
+            >
+              <stop offset="0%" stopColor="#64748b" />
+              <stop offset="50%" stopColor="#4f46e5" />
+              <stop offset="100%" stopColor="#0ea5e9" />
+            </linearGradient>
+          </defs>
+
+          {/* Symptom labels on the left */}
+          {symptoms.map((s, idx) => {
+            const y = top + idx * step;
+            return (
+              <text
+                key={`label-${idx}-${s.name}`}
+                x={16}
+                y={y + 4}
+                className="sc-tree-symptom-label"
+              >
+                {s.name}
+              </text>
+            );
+          })}
+
+          {/* Central diagnosis node on the right */}
+          <g className="sc-tree-dx-group">
+            <circle
+              cx={centerX}
+              cy={centerY}
+              r={18}
+              className="sc-tree-dx-circle"
+            />
+            <foreignObject
+              x={centerX + 14}
+              y={centerY - 26}
+              width={width - centerX - 20}
+              height={52}
+            >
+              <div className="sc-tree-dx-label">{diag.name}</div>
+            </foreignObject>
+          </g>
+        </svg>
+      </div>
+    );
+  };
+
+  const renderPeopleRow = (likelihoodScore = 0) => {
+    const p = Math.max(0, Math.min(1, likelihoodScore || 0));
+    const filled = Math.round(p * 10);
+
+    return (
+      <div className="sc-people-row">
+        <div className="sc-people-label">
+          Likelihood
+          <span className="sc-people-percent">
+            {Math.round(p * 100)}%
+          </span>
+        </div>
+        <div className="sc-people-icons">
+          {Array.from({ length: 10 }).map((_, i) => (
+            <div
+              key={i}
+              className={
+                i < filled ? "sc-person sc-person--active" : "sc-person"
+              }
+            />
+          ))}
+        </div>
+      </div>
+    );
+  };
+
+  const renderFollowUps = (diag) => {
+    const questions = Array.isArray(diag.questions) ? diag.questions : [];
+    if (!questions.length) return null;
+
+    const nextQuestion = questions.find((q) => !answers[q.id]);
+
+    return (
+      <div className="sc-questions">
+        <h4>Follow-up questions</h4>
+        {nextQuestion ? (
+          <div className="sc-q">
+            <span>{nextQuestion.text}</span>
+            <div className="sc-buttons">
+              {["yes", "no", "unsure"].map((a) => (
+                <button
+                  key={a}
+                  className={answers[nextQuestion.id] === a ? "active" : ""}
+                  onClick={() => handleAnswer(nextQuestion.id, a)}
+                >
+                  {a}
+                </button>
+              ))}
+            </div>
+          </div>
+        ) : (
+          <p className="sc-q-all">
+            All follow-up questions for this condition are answered.
+          </p>
+        )}
+
+        <button
+          className="sc-refine"
+          disabled={refining}
+          onClick={refine}
+        >
+          {refining ? "Refining…" : "Update diagnosis"}
+        </button>
+      </div>
+    );
+  };
+
+  const selected = diagnoses.find((d) => d.id === selectedId) || null;
 
   return (
     <div className="sc-root">
-      <h2 className="sc-title">Symptoms Checker</h2>
-      <p className="sc-subtitle">
-        Based on this consultation, here are the possible conditions and how the symptoms relate.
-      </p>
-
-      {/* Pills for each diagnosis */}
-      <div className="sc-diagnosis-list">
-        {diagnoses.map((d) => (
-          <motion.button
-            key={d.id}
-            layout
-            className={`sc-pill ${selected === d.id ? "active" : ""}`}
-            onClick={() => setSelected(d.id)}
-          >
-            {d.name}{" "}
-            <span className="sc-percent">
-              {Math.round((d.likelihood_score || 0) * 100)}%
-            </span>
-          </motion.button>
-        ))}
+      <div className="sc-header">
+        <h2 className="sc-title">Symptoms Checker</h2>
+        <p className="sc-subtitle">
+          AI-assisted mapping between this consultation and likely conditions.
+        </p>
       </div>
 
-      {/* If still loading and nothing yet, show loader */}
+      {/* Loading overlay for initial analysis */}
       {loading && diagnoses.length === 0 && (
-        <div className="sc-loader">Analyzing symptoms…</div>
+        <div className="sc-loader">
+          <div className="sc-spinner" />
+          <div className="sc-loader-text">
+            <span>Analyzing symptoms</span>
+            <span className="sc-loader-dots">
+              <span>.</span>
+              <span>.</span>
+              <span>.</span>
+            </span>
+          </div>
+        </div>
       )}
 
-      <AnimatePresence>
-        {selectedDiag && !loading && (
-          <motion.div
-            key={selectedDiag.id}
-            className="sc-card"
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0, y: -20 }}
-            transition={{ duration: 0.4 }}
-          >
-            <h3 className="sc-card-title">{selectedDiag.name}</h3>
-            {selectedDiag.likelihood_text && (
-              <p className="sc-likelihood">{selectedDiag.likelihood_text}</p>
-            )}
-            {selectedDiag.short_description && (
-              <p className="sc-desc">{selectedDiag.short_description}</p>
-            )}
+      {error && (
+        <div className="sc-error">
+          {error}
+        </div>
+      )}
 
-            <details className="sc-readmore">
-              <summary>Read more</summary>
-              {selectedDiag.long_description && (
-                <p>{selectedDiag.long_description}</p>
-              )}
-              {selectedDiag.source && (
-                <p className="sc-source">
-                  Source:{" "}
-                  <a
-                    href={selectedDiag.source.url}
-                    target="_blank"
-                    rel="noreferrer"
+      {/* Stacked diagnosis cards (accordion) */}
+      <div className="sc-diag-stack">
+        {diagnoses.map((diag) => {
+          const isOpen = selectedId === diag.id;
+          const likelihood = diag.likelihood_score || 0;
+
+          return (
+            <motion.div
+              key={diag.id}
+              className={`sc-diag-item ${isOpen ? "open" : ""}`}
+              layout
+            >
+              <button
+                className="sc-diag-header"
+                onClick={() =>
+                  setSelectedId((prev) => (prev === diag.id ? null : diag.id))
+                }
+              >
+                <div className="sc-diag-header-main">
+                  <span className="sc-diag-name">{diag.name}</span>
+                  <span className="sc-diag-chip">
+                    {Math.round(likelihood * 100)}%
+                  </span>
+                </div>
+                <div className="sc-diag-header-sub">
+                  {diag.likelihood_text || "Tap to see details and symptoms"}
+                </div>
+                <span
+                  className={`sc-chevron ${isOpen ? "open" : ""}`}
+                  aria-hidden="true"
+                />
+              </button>
+
+              <AnimatePresence initial={false}>
+                {isOpen && (
+                  <motion.div
+                    className="sc-card"
+                    initial={{ opacity: 0, y: 8, height: 0 }}
+                    animate={{ opacity: 1, y: 0, height: "auto" }}
+                    exit={{ opacity: 0, y: -4, height: 0 }}
+                    transition={{ duration: 0.35, ease: "easeInOut" }}
                   >
-                    {selectedDiag.source.title}
-                  </a>
-                </p>
-              )}
-            </details>
+                    {/* People-likelihood row */}
+                    {renderPeopleRow(likelihood)}
 
-            {/* Tree visualization – “branches” for each symptom, weighted by strength */}
-            <div className="sc-tree">
-              {(selectedDiag.symptoms || []).map((s, i) => (
-                <motion.div
-                  key={s.name || i}
-                  className="sc-branch"
-                  initial={{ scaleX: 0 }}
-                  animate={{ scaleX: 1 }}
-                  transition={{ delay: i * 0.05, duration: 0.3 }}
-                  style={{
-                    "--weight": Math.max(2, (s.weight || 0) * 10) + "px",
-                    "--opacity": s.weight || 0.4,
-                  }}
-                >
-                  <span className="sc-symptom">{s.name}</span>
-                </motion.div>
-              ))}
-            </div>
+                    {/* Description & read more */}
+                    {diag.short_description && (
+                      <p className="sc-desc">{diag.short_description}</p>
+                    )}
 
-            {/* Follow-up questions */}
-            {selectedDiag.questions?.length > 0 && (
-              <div className="sc-questions">
-                <h4>Follow-up questions</h4>
-                {selectedDiag.questions.map((q) => (
-                  <div key={q.id} className="sc-q">
-                    <span>{q.text}</span>
-                    <div className="sc-buttons">
-                      {["yes", "no", "unsure"].map((a) => (
-                        <button
-                          key={a}
-                          className={answers[q.id] === a ? "active" : ""}
-                          onClick={() =>
-                            setAnswers((p) => ({ ...p, [q.id]: a }))
-                          }
-                        >
-                          {a}
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-                ))}
-                <button
-                  className="sc-refine"
-                  disabled={refining}
-                  onClick={refine}
-                >
-                  {refining ? "Refining..." : "Update diagnosis"}
-                </button>
-              </div>
-            )}
-          </motion.div>
-        )}
-      </AnimatePresence>
+                    <details className="sc-readmore">
+                      <summary>Read more</summary>
+                      {diag.long_description && (
+                        <p>{diag.long_description}</p>
+                      )}
+                      {diag.source && (
+                        <p className="sc-source">
+                          Source{" "}
+                          <a
+                            href={diag.source.url}
+                            target="_blank"
+                            rel="noreferrer"
+                          >
+                            {diag.source.title}
+                          </a>
+                        </p>
+                      )}
+                    </details>
 
-      {/* Bottom Pie-like bar: each slice clickable to show its tree */}
+                    {/* Fan-style tree visualization */}
+                    {renderTree(diag)}
+
+                    {/* Follow-up questions (one by one) */}
+                    {renderFollowUps(diag)}
+                  </motion.div>
+                )}
+              </AnimatePresence>
+            </motion.div>
+          );
+        })}
+      </div>
+
+      {/* Segmented likelihood bar at bottom */}
       {diagnoses.length > 0 && (
-        <div className="sc-piechart" ref={pieRef}>
+        <div className="sc-piechart">
           {diagnoses.map((d) => (
             <div
               key={d.id}
-              className={`sc-slice ${selected === d.id ? "active" : ""}`}
+              className={`sc-slice ${
+                selectedId === d.id ? "active" : ""
+              }`}
               style={{
                 flex: Math.max(d.likelihood_score || 0.05, 0.05),
                 backgroundColor: `hsl(${Math.round(
-                  (d.likelihood_score || 0) * 120
-                )},70%,50%)`,
+                  (d.likelihood_score || 0) * 150
+                )}, 70%, 50%)`,
               }}
-              onClick={() => setSelected(d.id)}
+              onClick={() => setSelectedId(d.id)}
             >
               <span>{d.name}</span>
             </div>

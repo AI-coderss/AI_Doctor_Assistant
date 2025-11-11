@@ -32,6 +32,7 @@ import DRGValidator from "./DRGValidator";
 import ClinicalNotes from "./ClinicalNotes.jsx";
 import "../styles/clinical-notes.css";
 import HelperAgent from "./HelperAgent.jsx";
+import SymptomsChecker from "./SymptomsChecker.jsx";
 
 // 🧪 Lab Voice Agent (VAD, suggestions + approve)
 import LabVoiceAgent from "./LabVoiceAgent.jsx";
@@ -512,14 +513,16 @@ function SecondOpinionTabbedBubble({
       ? buildAgentContext()
       : (useDosageStore.getState()?.transcript || "");
 
-  const tabs = {
-    opinion: { label: "Second Opinion" },
-    notes: { label: "Clinical Notes" },
-  };
+  const TABS = [
+  { id: "opinion", label: "Second Opinion" },
+  { id: "notes", label: "Clinical Notes" },
+  { id: "symptoms", label: "Symptoms Checker" },
+];
+
 
   return (
     <>
-      <BubbleTabs tabs={tabs} active={activeTab} onChange={setActiveTab} />
+      <BubbleTabs tabs={TABS} active={activeTab} onChange={setActiveTab} />
 
       {activeTab === "opinion" ? (
         <SecondOpinionPanel
@@ -528,11 +531,20 @@ function SecondOpinionTabbedBubble({
           onAddLab={handleAddLabToTable}
         />
       ) : (
-        <ClinicalNotes
-          sessionId={sessionId}
-          transcript={transcript}
-          autostart={true}
-        />
+        <>
+          <ClinicalNotes
+            sessionId={sessionId}
+            transcript={transcript}
+            autostart={true}
+          />
+          {activeTab === "symptoms" && (
+            <SymptomsChecker
+              sessionId={sessionId}
+              transcript={transcript}
+              backendBase={BACKEND_BASE}
+            />
+          )}
+        </>
       )}
     </>
   );

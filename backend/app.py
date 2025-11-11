@@ -379,7 +379,25 @@ CORS(
         ],
         "methods": ["GET", "POST", "OPTIONS"],
         "allow_headers": ["Content-Type", "Authorization", "X-Session-Id"]
-    }
+    },
+    r"/api/symptoms/refine": {
+        "origins": [
+            "https://ai-doctor-assistant-app-dev.onrender.com",
+            "http://localhost:3000",
+            "http://127.0.0.1:3000",
+        ],
+        "methods": ["GET", "POST", "OPTIONS"],
+        "allow_headers": ["Content-Type", "Authorization", "X-Session-Id"]
+    },
+    r"/api/symptoms/triage": {
+        "origins": [
+            "https://ai-doctor-assistant-app-dev.onrender.com",
+            "http://localhost:3000",
+            "http://127.0.0.1:3000",
+        ],
+        "methods": ["GET", "POST", "OPTIONS"],
+        "allow_headers": ["Content-Type", "Authorization", "X-Session-Id"]
+    },
     }
 )
 
@@ -3785,7 +3803,7 @@ def lab_agent_rtc_connect():
             }
         },
     ]
-    
+
     import requests, os
     OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
 
@@ -5050,7 +5068,150 @@ def share_send():
         "dry_run": True,
         "echo": payload
     }), 200
+# ===========================
+# Symptoms Triage API
+@app.post("/api/symptoms/triage")
+def symptoms_triage():
+    """
+    Initial AI-driven symptom triage using GPT-4o with RAG.
+    Input:
+      {
+        "session_id": "string",
+        "transcript": "string"
+      }
+    Returns:
+      {
+        "ok": true,
+        "session_id": "...",
+        "diagnoses": [...]
+      }
+    """
+    data = request.get_json(silent=True) or {}
+    session_id = data.get("session_id") or str(uuid4())
+    transcript = (data.get("transcript") or "").strip()
+    if not transcript:
+        return jsonify({"ok": False, "error": "Transcript missing"}), 400
 
+    try:
+        result = _symptoms_rag_analyze(session_id, transcript, followup_answers=None)
+        return jsonify({"ok": True, "session_id": session_id, **result}), 200
+    except Exception as e:
+        app.logger.exception("Symptoms triage failed")
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+
+@app.post("/api/symptoms/refine")
+def symptoms_refine():
+    """
+    Refine diagnosis probabilities based on follow-up answers.
+    Input:
+      {
+        "session_id": "...",
+        "transcript": "...",
+        "answers": [{"question_id":"q1","answer":"yes"}, ...]
+      }
+    """
+    data = request.get_json(silent=True) or {}
+    session_id = data.get("session_id") or str(uuid4())
+    transcript = (data.get("transcript") or "").strip()
+    answers = data.get("answers") or []
+
+    try:
+        result = _symptoms_rag_analyze(session_id, transcript, followup_answers=answers)
+        return jsonify({"ok": True, "session_id": session_id, **result}), 200
+    except Exception as e:
+        app.logger.exception("Symptoms refine failed")
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+
+# ============================================================
+# Core logic: RAG-based reasoning for differential diagnosis
+# ============================================================
+def _symptoms_rag_analyze(session_id: str, transcript: str, followup_answers=None):
+    """
+    Uses GPT-4o with retrieval context to produce structured diagnoses.
+    """
+    followup_txt = ""
+    if followup_answers:
+        followup_txt = "\nFollow-up answers:\n" + "\n".join(
+            [f"- {a['question_id']}: {a['answer']}" for a in followup_answers]
+        )
+
+    # Build the structured instruction prompt
+    prompt = f"""
+You are a medical diagnostic reasoning assistant.
+Your task is to analyze the patient's transcript and produce a JSON object
+that includes likely differential diagnoses, relevant symptoms, rationales,
+and clarifying questions.
+
+Return STRICT JSON ONLY with the following structure:
+{{
+  "diagnoses": [
+    {{
+      "id": "string_identifier",
+      "name": "Disease or condition name",
+      "likelihood_score": float between 0 and 1,
+      "likelihood_text": "short sentence about likelihood",
+      "short_description": "concise description of the disease",
+      "long_description": "detailed overview of the disease",
+      "source": {{
+        "title": "Guideline or source title",
+        "url": "link"
+      }},
+      "symptoms": [
+        {{"name": "symptom", "weight": float between 0 and 1}},
+        ...
+      ],
+      "questions": [
+        {{
+          "id": "q1",
+          "text": "Clinically relevant clarifying question",
+          "type": "boolean"
+        }}
+      ]
+    }},
+    ...
+  ]
+}}
+
+Rules:
+- Always include at least 2 diagnoses.
+- Use concise medical language suitable for clinicians.
+- Ground all reasoning on retrieved context and the transcript.
+- Never include Markdown or extra commentary.
+- Ensure valid JSON syntax only.
+
+Patient transcript:
+{transcript}
+
+{followup_txt}
+"""
+
+    # Use your existing RAG chain (same as second opinion)
+    rag_response = conversation_rag_chain.invoke({
+        "chat_history": chat_sessions.get(session_id, []),
+        "input": prompt,
+    })
+
+    raw_answer = (rag_response.get("answer") or "").strip()
+    parsed = _extract_json_dict(raw_answer)
+
+    if not parsed:
+        raise ValueError("Model did not return valid JSON.")
+
+    # Maintain session history
+    chat_sessions.setdefault(session_id, [])
+    chat_sessions[session_id].append({"role": "user", "content": "[Symptoms analysis request]"})
+    chat_sessions[session_id].append({"role": "assistant", "content": raw_answer})
+
+    # Post-processing / normalization
+    diags = parsed.get("diagnoses", [])
+    for d in diags:
+        d["likelihood_score"] = float(max(0, min(1, d.get("likelihood_score", 0.5))))
+        for s in d.get("symptoms", []):
+            s["weight"] = float(max(0, min(1, s.get("weight", 0.5))))
+
+    return {"diagnoses": diags}
 
 if __name__ == "__main__":
     app.run(host="127.0.0.1", port=5050, debug=True)

@@ -268,8 +268,8 @@
 
 .sc-tree-container {
   width: 100%;
-  min-height: 170px;
-  max-height: 260px;
+  min-height: 250px;
+  max-height: 360px;
   padding: 10px 12px;
   border-radius: 12px;
   background: radial-gradient(

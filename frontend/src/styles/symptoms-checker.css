@@ -248,9 +248,10 @@
   text-decoration: underline;
 }
 
-/* D3 tree container */
+/* ---------- D3 tree container & styling (rectangles) ---------- */
+
 .sc-tree-shell {
-  margin-top: 8px;
+  margin-top: 10px;
   margin-bottom: 4px;
 }
 
@@ -266,49 +267,67 @@
 
 .sc-tree-container {
   width: 100%;
+  min-height: 160px;
+  padding: 10px 10px;
+  border-radius: 12px;
+  background: radial-gradient(
+      circle at left,
+      rgba(79, 70, 229, 0.1),
+      transparent 55%
+    ),
+    rgba(248, 250, 252, 0.96);
+  border: 1px solid rgba(148, 163, 184, 0.45);
   overflow-x: auto;
+  overflow-y: hidden;
 }
 
 /* D3 SVG & elements */
 .sc-tree-svg {
-  max-width: 100%;
+  min-width: 480px; /* allows root at far left with room for branches */
   height: auto;
   font: 11px system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI",
     sans-serif;
   user-select: none;
 }
 
-.sc-tree-links path.sc-tree-link {
+.sc-tree-links .sc-tree-link {
   fill: none;
-  stroke: url(#sc-branch-gradient);
-  stroke-opacity: 0.55;
+  stroke: #cbd5f5;
+  stroke-width: 2px;
+  stroke-opacity: 0.9;
 }
 
 .sc-tree-nodes .sc-tree-node {
   cursor: pointer;
 }
 
-.sc-tree-circle {
-  fill: #e5e7eb;
-  stroke: #cbd5f5;
-  stroke-width: 1.2;
+.sc-tree-rect {
+  stroke-width: 1.5px;
+  stroke: rgba(148, 163, 184, 0.9);
+  fill: #4b5563;
+  box-shadow: 0 4px 10px rgba(15, 23, 42, 0.08);
 }
 
-.sc-tree-circle--root {
-  fill: #4f46e5;
+.sc-tree-rect-root {
   stroke: #312e81;
 }
 
-.sc-tree-label {
+.sc-tree-label-rect {
+  font-size: 11px;
+  fill: #f9fafb;
   paint-order: stroke;
-  stroke: #ffffff;
-  stroke-width: 3;
+  stroke: rgba(15, 23, 42, 0.45);
+  stroke-width: 2px;
   stroke-linejoin: round;
-  fill: #4b5563;
 }
 
-.sc-tree-node--root .sc-tree-label {
-  fill: #111827;
+.sc-tree-label-rect tspan {
+  dominant-baseline: hanging;
+}
+
+.sc-tree-label-sub {
+  font-size: 10px;
+  fill: #e5e7eb;
 }
 
 /* Follow-up questions */
@@ -489,8 +508,13 @@
     padding: 9px 10px 12px;
   }
 
+  .sc-tree-container {
+    padding: 8px 6px;
+    border-radius: 10px;
+  }
+
   .sc-tree-svg {
-    max-width: 100%;
+    min-width: 380px;
   }
 
   .sc-piechart {
@@ -539,22 +563,30 @@
     background: rgba(15, 23, 42, 0.8);
   }
 
-  .sc-tree-label {
-    fill: #e5e7eb;
+  .sc-tree-container {
+    background: radial-gradient(
+        circle at left,
+        rgba(59, 130, 246, 0.28),
+        transparent 55%
+      ),
+      rgba(17, 24, 39, 0.96);
+    border-color: rgba(55, 65, 81, 0.9);
   }
 
-  .sc-tree-node--root .sc-tree-label {
-    fill: #f9fafb;
+  .sc-tree-links .sc-tree-link {
+    stroke: rgba(148, 163, 184, 0.8);
   }
 
-  .sc-tree-circle {
-    fill: rgba(30, 64, 175, 0.3);
+  .sc-tree-rect {
     stroke: rgba(129, 140, 248, 0.9);
   }
 
-  .sc-tree-circle--root {
-    fill: #06b6d4;
-    stroke: #0ea5e9;
+  .sc-tree-label-rect {
+    stroke: rgba(15, 23, 42, 0.9);
+  }
+
+  .sc-tree-label-sub {
+    fill: #d1d5db;
   }
 
   .sc-piechart {
@@ -579,4 +611,3 @@
     border-color: rgba(55, 65, 81, 0.9);
   }
 }
-

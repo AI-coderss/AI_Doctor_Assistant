@@ -482,16 +482,17 @@ function LabOrdersTable({ rows = [], onSend, sending }) {
   );
 }
 /* ---------- Bubble Tabs (for Clinical Notes) ---------- */
+/* ---------- Bubble Tabs (for Second Opinion / Notes / Symptoms) ---------- */
 function BubbleTabs({ tabs, active, onChange }) {
   return (
     <div className="cn-toolbar" style={{ marginTop: 6, marginBottom: 10 }}>
-      {Object.keys(tabs).map(key => (
+      {tabs.map((tab) => (
         <button
-          key={key}
-          className={`cn-chip ${active === key ? 'active' : ''}`}
-          onClick={() => onChange(key)}
+          key={tab.id}
+          className={`cn-chip ${active === tab.id ? "active" : ""}`}
+          onClick={() => onChange(tab.id)}
         >
-          {tabs[key].label}
+          {tab.label}
         </button>
       ))}
     </div>
@@ -513,38 +514,51 @@ function SecondOpinionTabbedBubble({
       ? buildAgentContext()
       : (useDosageStore.getState()?.transcript || "");
 
-  const tabs = {
-    opinion: { label: "Second Opinion" },
-    notes: { label: "Clinical Notes" },
-    symptoms: { label: "Symptoms Checker" },
-  };
+  const TABS = [
+    { id: "opinion", label: "Second Opinion" },
+    { id: "notes", label: "Clinical Notes" },
+    { id: "symptoms", label: "Symptoms Checker" },
+  ];
+
+  const showOpinion = activeTab === "opinion";
+  const showNotes = activeTab === "notes";
+  const showSymptoms = activeTab === "symptoms";
 
   return (
     <>
-      <BubbleTabs tabs={tabs} active={activeTab} onChange={setActiveTab} />
-      {activeTab === "opinion" ? (
+      <BubbleTabs tabs={TABS} active={activeTab} onChange={setActiveTab} />
+
+      {/* Opinion tab – only visible when active */}
+      {showOpinion && (
         <SecondOpinionPanel
           data={opinion}
           narrative={narrative}
           onAddLab={handleAddLabToTable}
         />
-      ) : (
+      )}
+
+      {/* Clinical Notes – always mounted, but only visible on its tab */}
+      <div style={{ display: showNotes ? "block" : "none" }}>
         <ClinicalNotes
           sessionId={sessionId}
           transcript={transcript}
           autostart={true}
+          backendBase={BACKEND_BASE}
         />
-      )}
-      {activeTab === "symptoms" && (
-        <SymptomsChecker 
-        sessionId={sessionId} 
-        transcript={transcript}
-        backendBase={BACKEND_BASE}
-         />
-      )}
+      </div>
+
+      {/* Symptoms Checker – always mounted, but only visible on its tab */}
+      <div style={{ display: showSymptoms ? "block" : "none" }}>
+        <SymptomsChecker
+          sessionId={sessionId}
+          transcript={transcript}
+          backendBase={BACKEND_BASE}
+        />
+      </div>
     </>
   );
 }
+
 
 const Chat = () => {
   const [chats, setChats] = useState([

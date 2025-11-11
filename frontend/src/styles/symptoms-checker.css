@@ -1,18 +1,27 @@
+/* src/styles/symptoms-checker.css */
+
 .sc-root {
   padding: 16px;
   animation: scFadeUp 0.6s ease both;
+  border-radius: 16px;
+  background: var(--sc-bg, transparent);
 }
 
+/* Title & subtitle */
 .sc-title {
   font-size: 1.6rem;
   font-weight: 700;
+  letter-spacing: 0.01em;
+  margin-bottom: 4px;
 }
 
 .sc-subtitle {
   opacity: 0.8;
   margin-bottom: 16px;
+  font-size: 0.95rem;
 }
 
+/* Diagnosis “chips” row */
 .sc-diagnosis-list {
   display: flex;
   flex-wrap: wrap;
@@ -23,75 +32,192 @@
 .sc-pill {
   padding: 8px 14px;
   border-radius: 999px;
-  border: 1px solid var(--border, rgba(0, 0, 0, 0.1));
+  border: 1px solid var(--border, rgba(0, 0, 0, 0.08));
   background: var(--pill-bg, rgba(255, 255, 255, 0.7));
   cursor: pointer;
-  transition: 0.2s;
+  transition: background 0.18s ease, transform 0.18s ease, box-shadow 0.18s ease,
+    border-color 0.18s ease;
+  font-size: 0.9rem;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  backdrop-filter: blur(6px);
+}
+
+.sc-pill:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 4px 10px rgba(0, 0, 0, 0.06);
 }
 
 .sc-pill.active {
   background: var(--accent, #534ce8);
   color: #fff;
   border-color: var(--accent, #534ce8);
+  box-shadow: 0 6px 18px rgba(83, 76, 232, 0.4);
 }
 
+.sc-percent {
+  font-weight: 600;
+  font-size: 0.8rem;
+  opacity: 0.95;
+}
+
+/* Main card for selected diagnosis */
 .sc-card {
-  background: var(--card-bg, rgba(255, 255, 255, 0.85));
+  background: var(--card-bg, rgba(255, 255, 255, 0.9));
   border-radius: 14px;
-  padding: 16px;
+  padding: 16px 18px 18px;
   box-shadow: 0 4px 20px rgba(0, 0, 0, 0.08);
   margin-bottom: 18px;
-  backdrop-filter: blur(8px);
+  backdrop-filter: blur(10px);
+  border: 1px solid rgba(0, 0, 0, 0.03);
+}
+
+.sc-card-title {
+  font-size: 1.3rem;
+  font-weight: 700;
+  margin-bottom: 4px;
 }
 
 .sc-likelihood {
   font-size: 0.9rem;
   opacity: 0.8;
+  margin-bottom: 6px;
 }
 
 .sc-desc {
   margin-top: 8px;
   margin-bottom: 8px;
+  font-size: 0.95rem;
 }
 
+/* Read more / source */
+.sc-readmore {
+  margin-top: 8px;
+  margin-bottom: 10px;
+  border-radius: 10px;
+  background: rgba(0, 0, 0, 0.02);
+  padding: 8px 10px;
+}
+
+.sc-readmore > summary {
+  cursor: pointer;
+  font-weight: 600;
+  font-size: 0.9rem;
+  outline: none;
+}
+
+.sc-readmore[open] > summary {
+  margin-bottom: 6px;
+}
+
+.sc-source {
+  margin-top: 6px;
+  font-size: 0.85rem;
+  opacity: 0.85;
+}
+
+.sc-source a {
+  color: var(--accent, #534ce8);
+  text-decoration: underline;
+}
+
+/* Tree stack: “branches” for each symptom */
 .sc-tree {
   margin-top: 14px;
   display: flex;
   flex-direction: column;
-  gap: 6px;
-}
-
-.sc-branch {
-  height: var(--weight);
-  background: linear-gradient(90deg, var(--accent, #534ce8), transparent);
-  border-radius: 6px;
-  transform-origin: left;
-  opacity: var(--opacity);
+  gap: 10px;
+  padding-top: 4px;
+  padding-bottom: 6px;
   position: relative;
 }
 
-.sc-symptom {
+.sc-tree::before {
+  /* subtle left spine, optional */
+  content: "";
   position: absolute;
-  left: 8px;
-  top: -18px;
-  font-size: 0.85rem;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 2px;
+  border-radius: 999px;
+  background: linear-gradient(
+    180deg,
+    rgba(83, 76, 232, 0.25),
+    rgba(14, 165, 233, 0.25)
+  );
+  opacity: 0.6;
 }
 
+/* Each branch = weight + label */
+.sc-branch {
+  height: var(--weight);
+  background: linear-gradient(90deg, var(--accent, #534ce8), transparent);
+  border-radius: 999px;
+  transform-origin: left;
+  opacity: var(--opacity);
+  position: relative;
+  margin-left: 10px;
+  transition: opacity 0.2s ease, box-shadow 0.2s ease;
+}
+
+.sc-branch:hover {
+  opacity: 1;
+  box-shadow: 0 0 12px rgba(83, 76, 232, 0.35);
+}
+
+/* Symptom label “floating” over the branch */
+.sc-symptom {
+  position: absolute;
+  left: 10px;
+  top: 50%;
+  transform: translateY(-50%);
+  font-size: 0.85rem;
+  font-weight: 500;
+  color: #ffffff;
+  text-shadow: 0 1px 3px rgba(0, 0, 0, 0.35);
+  white-space: nowrap;
+  pointer-events: none;
+}
+
+/* Follow up questions */
 .sc-questions {
   margin-top: 16px;
+  border-top: 1px dashed rgba(148, 163, 184, 0.6);
+  padding-top: 10px;
+}
+
+.sc-questions h4 {
+  font-size: 0.95rem;
+  margin-bottom: 8px;
 }
 
 .sc-q {
   margin-bottom: 10px;
+  font-size: 0.9rem;
+}
+
+.sc-buttons {
+  margin-top: 4px;
 }
 
 .sc-buttons button {
   margin-right: 6px;
+  margin-top: 2px;
   border: 1px solid rgba(0, 0, 0, 0.15);
   padding: 4px 10px;
-  border-radius: 6px;
+  border-radius: 999px;
   cursor: pointer;
   background: transparent;
+  font-size: 0.8rem;
+  text-transform: capitalize;
+  transition: background 0.15s ease, color 0.15s ease, border-color 0.15s ease,
+    transform 0.15s ease;
+}
+
+.sc-buttons button:hover {
+  transform: translateY(-1px);
 }
 
 .sc-buttons button.active {
@@ -100,43 +226,95 @@
   border-color: var(--accent, #534ce8);
 }
 
+/* Refine CTA */
 .sc-refine {
+  margin-top: 8px;
   padding: 8px 14px;
   border: none;
   border-radius: 10px;
   background: var(--accent, #534ce8);
   color: #fff;
   cursor: pointer;
+  font-size: 0.9rem;
+  font-weight: 600;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  box-shadow: 0 6px 18px rgba(83, 76, 232, 0.4);
+  transition: background 0.16s ease, transform 0.16s ease,
+    box-shadow 0.16s ease;
 }
 
+.sc-refine:hover {
+  transform: translateY(-1px);
+  background: #4338ca;
+  box-shadow: 0 10px 25px rgba(79, 70, 229, 0.6);
+}
+
+.sc-refine:disabled {
+  opacity: 0.7;
+  cursor: default;
+  box-shadow: none;
+  transform: none;
+}
+
+/* Bottom “pie” bar – segmented probability bar */
 .sc-piechart {
   display: flex;
-  height: 38px;
+  height: 40px;
   border-radius: 999px;
   overflow: hidden;
+  margin-top: 6px;
+  border: 1px solid rgba(148, 163, 184, 0.4);
+  background: linear-gradient(
+    90deg,
+    rgba(15, 23, 42, 0.04),
+    rgba(15, 23, 42, 0.08)
+  );
 }
 
 .sc-slice {
   display: flex;
   align-items: center;
   justify-content: center;
-  color: #fff;
+  color: #ffffff;
   font-size: 0.8rem;
   cursor: pointer;
-  transition: 0.2s;
+  transition: transform 0.16s ease, box-shadow 0.16s ease, opacity 0.16s ease;
+  position: relative;
+  padding: 0 6px;
+  min-width: 52px;
+}
+
+.sc-slice span {
+  text-align: center;
+  padding: 0 4px;
+  text-shadow: 0 1px 3px rgba(0, 0, 0, 0.4);
+}
+
+.sc-slice:hover {
+  opacity: 0.9;
 }
 
 .sc-slice.active {
-  transform: scale(1.05);
-  box-shadow: 0 0 10px rgba(0, 0, 0, 0.2);
+  transform: scale(1.04);
+  box-shadow: 0 0 10px rgba(15, 23, 42, 0.5);
+  z-index: 1;
 }
 
+/* Loader & error */
 .sc-loader,
 .sc-error {
   padding: 20px;
   text-align: center;
+  font-size: 0.95rem;
 }
 
+.sc-error {
+  color: #b91c1c;
+}
+
+/* Animations */
 @keyframes scFadeUp {
   from {
     opacity: 0;
@@ -148,21 +326,78 @@
   }
 }
 
+/* Responsiveness */
+@media (max-width: 640px) {
+  .sc-root {
+    padding: 12px;
+  }
+
+  .sc-title {
+    font-size: 1.35rem;
+  }
+
+  .sc-card {
+    padding: 12px 12px 14px;
+  }
+
+  .sc-symptom {
+    font-size: 0.8rem;
+  }
+
+  .sc-piechart {
+    height: 34px;
+  }
+
+  .sc-slice {
+    font-size: 0.75rem;
+    min-width: 44px;
+  }
+}
+
+/* Dark mode */
 @media (prefers-color-scheme: dark) {
   .sc-root {
     color: #f9fafb;
+    --sc-bg: transparent;
   }
+
   .sc-card {
-    background: rgba(17, 24, 39, 0.85);
+    background: rgba(17, 24, 39, 0.92);
     color: #f9fafb;
+    border-color: rgba(148, 163, 184, 0.25);
+    box-shadow: 0 14px 40px rgba(0, 0, 0, 0.7);
   }
+
   .sc-pill {
-    background: rgba(17, 24, 39, 0.65);
-    border-color: rgba(255, 255, 255, 0.15);
-    color: #f9fafb;
+    background: rgba(15, 23, 42, 0.9);
+    border-color: rgba(148, 163, 184, 0.4);
+    color: #e5e7eb;
   }
+
   .sc-pill.active {
     background: #06b6d4;
     border-color: #06b6d4;
+    box-shadow: 0 8px 24px rgba(6, 182, 212, 0.6);
+  }
+
+  .sc-readmore {
+    background: rgba(15, 23, 42, 0.75);
+  }
+
+  .sc-tree::before {
+    background: linear-gradient(
+      180deg,
+      rgba(6, 182, 212, 0.55),
+      rgba(56, 189, 248, 0.4)
+    );
+  }
+
+  .sc-piechart {
+    border-color: rgba(30, 64, 175, 0.8);
+    background: linear-gradient(
+      90deg,
+      rgba(15, 23, 42, 0.8),
+      rgba(15, 23, 42, 0.95)
+    );
   }
 }

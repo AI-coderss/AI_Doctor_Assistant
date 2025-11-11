@@ -5070,6 +5070,7 @@ def share_send():
     }), 200
 # ===========================
 # Symptoms Triage API
+# Symptoms Triage API
 @app.post("/api/symptoms/triage")
 def symptoms_triage():
     """
@@ -5083,7 +5084,27 @@ def symptoms_triage():
       {
         "ok": true,
         "session_id": "...",
-        "diagnoses": [...]
+        "diagnoses": [
+          {
+            "id": "string_identifier",
+            "name": "Disease or condition name",
+            "likelihood_score": 0.0–1.0,
+            "likelihood_text": "short sentence",
+            "short_description": "string",
+            "long_description": "string",
+            "source": { "title": "string", "url": "string" },
+            "symptoms": [
+              { "name": "symptom", "weight": 0.0–1.0 }
+            ],
+            "questions": [
+              {
+                "id": "q1",
+                "text": "Clinically relevant clarifying question",
+                "type": "boolean"
+              }
+            ]
+          }
+        ]
       }
     """
     data = request.get_json(silent=True) or {}
@@ -5093,7 +5114,11 @@ def symptoms_triage():
         return jsonify({"ok": False, "error": "Transcript missing"}), 400
 
     try:
-        result = _symptoms_rag_analyze(session_id, transcript, followup_answers=None)
+        result = _symptoms_rag_analyze(
+            session_id=session_id,
+            transcript=transcript,
+            followup_answers=None
+        )
         return jsonify({"ok": True, "session_id": session_id, **result}), 200
     except Exception as e:
         app.logger.exception("Symptoms triage failed")
@@ -5104,11 +5129,30 @@ def symptoms_triage():
 def symptoms_refine():
     """
     Refine diagnosis probabilities based on follow-up answers.
-    Input:
+
+    Frontend behavior:
+    - The UI reveals questions ONE BY ONE per diagnosis.
+    - Once all questions for at least one diagnosis are answered,
+      the user clicks "Update diagnosis".
+    - The frontend sends ALL collected answers (from all diagnoses)
+      to this endpoint in a single call.
+
+    Input JSON:
       {
         "session_id": "...",
         "transcript": "...",
-        "answers": [{"question_id":"q1","answer":"yes"}, ...]
+        "answers": [
+          { "question_id": "q1", "answer": "yes" },
+          { "question_id": "q2", "answer": "no" },
+          ...
+        ]
+      }
+
+    Output JSON:
+      {
+        "ok": true,
+        "session_id": "...",
+        "diagnoses": [ ... ]   # same shape as /api/symptoms/triage
       }
     """
     data = request.get_json(silent=True) or {}
@@ -5117,7 +5161,11 @@ def symptoms_refine():
     answers = data.get("answers") or []
 
     try:
-        result = _symptoms_rag_analyze(session_id, transcript, followup_answers=answers)
+        result = _symptoms_rag_analyze(
+            session_id=session_id,
+            transcript=transcript,
+            followup_answers=answers
+        )
         return jsonify({"ok": True, "session_id": session_id, **result}), 200
     except Exception as e:
         app.logger.exception("Symptoms refine failed")
@@ -5130,37 +5178,53 @@ def symptoms_refine():
 def _symptoms_rag_analyze(session_id: str, transcript: str, followup_answers=None):
     """
     Uses GPT-4o with retrieval context to produce structured diagnoses.
+
+    - On first call (triage), followup_answers is None.
+    - On refine calls, followup_answers contains a flat list of
+      { "question_id": "...", "answer": "..." }.
+    - The model should:
+        * Re-compute diagnosis probabilities using transcript + answers.
+        * Return an ORDERED list of follow-up questions per diagnosis.
+        * These questions are shown sequentially in the UI (one appears
+          after the previous one is answered).
     """
     followup_txt = ""
     if followup_answers:
-        followup_txt = "\nFollow-up answers:\n" + "\n".join(
-            [f"- {a['question_id']}: {a['answer']}" for a in followup_answers]
+        followup_txt = "\nFollow-up answers so far:\n" + "\n".join(
+            [f"- {a.get('question_id', '')}: {a.get('answer', '')}" for a in followup_answers]
         )
 
-    # Build the structured instruction prompt
     prompt = f"""
 You are a medical diagnostic reasoning assistant.
-Your task is to analyze the patient's transcript and produce a JSON object
-that includes likely differential diagnoses, relevant symptoms, rationales,
-and clarifying questions.
 
-Return STRICT JSON ONLY with the following structure:
+Your task:
+1. Analyze the patient's transcript.
+2. Use any provided follow-up answers.
+3. Produce a JSON object with:
+   - likely differential diagnoses,
+   - how the observed symptoms support each diagnosis,
+   - and an ordered list of clarifying questions per diagnosis.
+
+Return STRICT JSON ONLY with this structure:
+
 {{
   "diagnoses": [
     {{
       "id": "string_identifier",
       "name": "Disease or condition name",
-      "likelihood_score": float between 0 and 1,
+      "likelihood_score": 0.0–1.0,
       "likelihood_text": "short sentence about likelihood",
       "short_description": "concise description of the disease",
       "long_description": "detailed overview of the disease",
       "source": {{
         "title": "Guideline or source title",
-        "url": "link"
+        "url": "https://..."
       }},
       "symptoms": [
-        {{"name": "symptom", "weight": float between 0 and 1}},
-        ...
+        {{
+          "name": "symptom name",
+          "weight": 0.0–1.0
+        }}
       ],
       "questions": [
         {{
@@ -5169,17 +5233,21 @@ Return STRICT JSON ONLY with the following structure:
           "type": "boolean"
         }}
       ]
-    }},
-    ...
+    }}
   ]
 }}
 
-Rules:
-- Always include at least 2 diagnoses.
-- Use concise medical language suitable for clinicians.
-- Ground all reasoning on retrieved context and the transcript.
-- Never include Markdown or extra commentary.
-- Ensure valid JSON syntax only.
+Strict rules:
+- Always include at least 2 diagnoses when possible.
+- Use concise, clinician-facing medical language.
+- Order the "questions" array in the exact sequence the clinician
+  should ask them. The UI only shows one question at a time.
+- For now, use type "boolean" and assume the user can answer "yes" / "no" / "unsure".
+- Ground your reasoning on retrieved context AND the transcript.
+- If follow-up answers are provided, use them to:
+    * Re-weight diagnosis likelihoods.
+    * Optionally adjust or shorten the remaining questions.
+- Never include Markdown, commentary, or any text outside the JSON.
 
 Patient transcript:
 {transcript}
@@ -5187,7 +5255,7 @@ Patient transcript:
 {followup_txt}
 """
 
-    # Use your existing RAG chain (same as second opinion)
+    # Use existing RAG chain
     rag_response = conversation_rag_chain.invoke({
         "chat_history": chat_sessions.get(session_id, []),
         "input": prompt,
@@ -5197,21 +5265,57 @@ Patient transcript:
     parsed = _extract_json_dict(raw_answer)
 
     if not parsed:
-        raise ValueError("Model did not return valid JSON.")
+        raise ValueError("Model did not return valid JSON for symptoms analysis.")
 
     # Maintain session history
     chat_sessions.setdefault(session_id, [])
-    chat_sessions[session_id].append({"role": "user", "content": "[Symptoms analysis request]"})
-    chat_sessions[session_id].append({"role": "assistant", "content": raw_answer})
+    chat_sessions[session_id].append({
+        "role": "user",
+        "content": "[Symptoms analysis request]"
+    })
+    chat_sessions[session_id].append({
+        "role": "assistant",
+        "content": raw_answer
+    })
 
-    # Post-processing / normalization
-    diags = parsed.get("diagnoses", [])
+    diags = parsed.get("diagnoses", []) or []
+
+    # Normalization / safety
     for d in diags:
-        d["likelihood_score"] = float(max(0, min(1, d.get("likelihood_score", 0.5))))
+        try:
+            d["likelihood_score"] = float(
+                max(0.0, min(1.0, float(d.get("likelihood_score", 0.5))))
+            )
+        except Exception:
+            d["likelihood_score"] = 0.5
+
         for s in d.get("symptoms", []):
-            s["weight"] = float(max(0, min(1, s.get("weight", 0.5))))
+            try:
+                s["weight"] = float(
+                    max(0.0, min(1.0, float(s.get("weight", 0.5))))
+                )
+            except Exception:
+                s["weight"] = 0.5
+
+        # Ensure questions is a list of objects with id, text, type
+        cleaned_questions = []
+        for q in d.get("questions", []) or []:
+            qid = str(q.get("id") or "").strip()
+            qtext = str(q.get("text") or "").strip()
+            if not qid or not qtext:
+                continue
+            qtype = str(q.get("type") or "boolean").lower()
+            if qtype not in ("boolean",):
+                qtype = "boolean"
+            cleaned_questions.append({
+                "id": qid,
+                "text": qtext,
+                "type": qtype,
+            })
+        d["questions"] = cleaned_questions
 
     return {"diagnoses": diags}
+
 
 if __name__ == "__main__":
     app.run(host="127.0.0.1", port=5050, debug=True)

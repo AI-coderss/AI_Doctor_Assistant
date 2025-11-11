@@ -10,14 +10,17 @@
 /* eslint-disable no-unused-vars */
 /* eslint-disable react-hooks/exhaustive-deps */
 /* eslint-disable no-unused-vars */
+/* eslint-disable react-hooks/exhaustive-deps */
+/* eslint-disable no-unused-vars */
 import React, { useEffect, useState, useRef } from "react";
 import * as d3 from "d3";
+import { motion, AnimatePresence } from "framer-motion";
 import "../styles/symptoms-checker.css";
 
 export default function SymptomsChecker({ sessionId, transcript, backendBase }) {
   const [loading, setLoading] = useState(false);
   const [diagnoses, setDiagnoses] = useState([]);
-  const [openId, setOpenId] = useState(null); // accordion / active diagnosis
+  const [openId, setOpenId] = useState(null); // active accordion diagnosis
   const [error, setError] = useState("");
   const [answers, setAnswers] = useState({}); // { [diagId]: { [questionId]: "yes"|"no"|"unsure" } }
   const [refining, setRefining] = useState(false);
@@ -32,7 +35,7 @@ export default function SymptomsChecker({ sessionId, transcript, backendBase }) 
     setRefining(false);
   }, [sessionId]);
 
-  // Auto-start triage as soon as transcript is ready
+  // Auto-start triage when transcript ready
   useEffect(() => {
     if (!transcript || !transcript.trim()) return;
     if (diagnoses.length > 0 || loading) return;
@@ -89,7 +92,6 @@ export default function SymptomsChecker({ sessionId, transcript, backendBase }) 
       const diags = data.diagnoses || [];
       setDiagnoses(diags);
       setOpenId(diags[0]?.id || null);
-      // clear answers after a new pass
       setAnswers({});
     } catch (e) {
       setError(e.message || "Failed to refine diagnosis.");
@@ -140,6 +142,7 @@ export default function SymptomsChecker({ sessionId, transcript, backendBase }) 
           const diagAnswers = answers[diag.id] || {};
           const questions = diag.questions || [];
 
+          // Find first unanswered index for this diagnosis
           const firstUnansweredIndex = questions.findIndex(
             (q) => !diagAnswers[q.id]
           );
@@ -190,10 +193,10 @@ export default function SymptomsChecker({ sessionId, transcript, backendBase }) 
                     <p className="sc-desc">{diag.short_description}</p>
                   )}
 
-                  {/* “6 out of 10 people…” style row */}
+                  {/* 10-people visual */}
                   <PeopleRow likelihoodPct={likelihoodPct} />
 
-                  {/* Read more */}
+                  {/* Read more / source */}
                   {(diag.long_description || diag.source) && (
                     <details className="sc-readmore">
                       <summary>Read more</summary>
@@ -215,38 +218,51 @@ export default function SymptomsChecker({ sessionId, transcript, backendBase }) 
                     </details>
                   )}
 
-                  {/* D3 tree – rectangles, collapsible, root on left */}
+                  {/* D3 diagnosis–symptoms rectangles tree */}
                   <SymptomTreeRectangles diagnosis={diag} />
 
-                  {/* Follow-up questions – revealed one by one */}
+                  {/* Follow-up questions – sequential + animated */}
                   {questions.length > 0 && (
                     <div className="sc-questions">
                       <h4>Follow-up questions</h4>
-                      {visibleQuestions.map((q) => (
-                        <div key={q.id} className="sc-q">
-                          <span>{q.text}</span>
-                          <div className="sc-buttons">
-                            {["yes", "no", "unsure"].map((a) => (
-                              <button
-                                key={a}
-                                className={
-                                  diagAnswers[q.id] === a ? "active" : ""
-                                }
-                                onClick={() =>
-                                  handleAnswerChange(diag.id, q.id, a)
-                                }
-                              >
-                                {a}
-                              </button>
-                            ))}
-                          </div>
-                        </div>
-                      ))}
+
+                      <AnimatePresence initial={false}>
+                        {visibleQuestions.map((q, idx) => (
+                          <motion.div
+                            key={q.id}
+                            className="sc-q"
+                            initial={{ opacity: 0, y: 6 }}
+                            animate={{ opacity: 1, y: 0 }}
+                            exit={{ opacity: 0, y: -6 }}
+                            transition={{
+                              duration: 0.2,
+                              delay: idx * 0.03,
+                            }}
+                          >
+                            <span>{q.text}</span>
+                            <div className="sc-buttons">
+                              {["yes", "no", "unsure"].map((a) => (
+                                <button
+                                  key={a}
+                                  className={
+                                    diagAnswers[q.id] === a ? "active" : ""
+                                  }
+                                  onClick={() =>
+                                    handleAnswerChange(diag.id, q.id, a)
+                                  }
+                                >
+                                  {a}
+                                </button>
+                              ))}
+                            </div>
+                          </motion.div>
+                        ))}
+                      </AnimatePresence>
 
                       {!allAnswered && (
                         <div className="sc-q-all">
-                          Answer the questions above to unlock the update
-                          button.
+                          Answer each question above to unlock updating the
+                          differential.
                         </div>
                       )}
 
@@ -255,7 +271,9 @@ export default function SymptomsChecker({ sessionId, transcript, backendBase }) 
                         disabled={!allAnswered || refining}
                         onClick={refine}
                       >
-                        {refining ? "Updating diagnosis…" : "Update diagnosis"}
+                        {refining
+                          ? "Updating diagnosis…"
+                          : "Update diagnosis"}
                       </button>
                     </div>
                   )}
@@ -266,7 +284,7 @@ export default function SymptomsChecker({ sessionId, transcript, backendBase }) 
         })}
       </div>
 
-      {/* Bottom segmented probability bar */}
+      {/* Bottom segmented likelihood bar */}
       {diagnoses.length > 0 && (
         <div className="sc-piechart">
           {diagnoses.map((d) => (
@@ -292,7 +310,7 @@ export default function SymptomsChecker({ sessionId, transcript, backendBase }) 
   );
 }
 
-/* ---------- Small helper for smooth open/close ---------- */
+/* ---------- Smooth collapsible height ---------- */
 
 function AnimateHeight({ open, children }) {
   const ref = useRef(null);
@@ -301,7 +319,9 @@ function AnimateHeight({ open, children }) {
   useEffect(() => {
     const el = ref.current;
     if (!el) return;
+
     if (open) {
+      // measure, then animate to auto
       const prev = el.getBoundingClientRect().height;
       el.style.height = prev + "px";
       requestAnimationFrame(() => {
@@ -332,7 +352,7 @@ function AnimateHeight({ open, children }) {
   );
 }
 
-/* ---------- People row (likelihood icons) ---------- */
+/* ---------- People row (likelihood) ---------- */
 
 function PeopleRow({ likelihoodPct }) {
   const total = 10;
@@ -396,20 +416,18 @@ function SymptomTreeRectangles({ diagnosis }) {
 
     container.innerHTML = "";
 
-    const margin = { top: 10, right: 60, bottom: 10, left: 80 };
-    const fullWidth = 720;
-    const rectWidth = 150;
-    const rectHeight = 52;
+    const margin = { top: 10, right: 60, bottom: 10, left: 90 };
+    const rectWidth = 160;
+    const rectHeight = 56;
 
     const root = d3.hierarchy(data, (d) => d.children);
     const treeLayout = d3
       .tree()
-      .nodeSize([rectHeight + 18, rectWidth + 44]); // vertical, horizontal gaps
+      .nodeSize([rectHeight + 22, rectWidth + 50]); // vertical / horizontal spacing
 
     root.x0 = 0;
     root.y0 = 0;
 
-    // keep root open, collapse deeper levels initially
     root.descendants().forEach((d, i) => {
       d.id = i;
       d._children = d.children;
@@ -421,7 +439,8 @@ function SymptomTreeRectangles({ diagnosis }) {
       .append("svg")
       .attr("class", "sc-tree-svg")
       .attr("width", "100%")
-      .attr("viewBox", [0, 0, fullWidth, rectHeight + margin.top + margin.bottom]);
+      // height will be corrected dynamically in update()
+      .attr("viewBox", [0, 0, 700, rectHeight + margin.top + margin.bottom]);
 
     const g = svg
       .append("g")
@@ -429,27 +448,24 @@ function SymptomTreeRectangles({ diagnosis }) {
 
     const gLink = g.append("g").attr("class", "sc-tree-links");
     const gNode = g.append("g").attr("class", "sc-tree-nodes");
+    const duration = 260;
 
-    const duration = 300;
-
-    const diagonal = (s, d) => {
-      return `M ${s.y} ${s.x}
-              C ${(s.y + d.y) / 2} ${s.x},
-                ${(s.y + d.y) / 2} ${d.x},
-                ${d.y} ${d.x}`;
-    };
+    const diagonal = (s, d) =>
+      `M ${s.y} ${s.x}
+       C ${(s.y + d.y) / 2} ${s.x},
+         ${(s.y + d.y) / 2} ${d.x},
+         ${d.y} ${d.x}`;
 
     const update = (source) => {
       treeLayout(root);
       const nodes = root.descendants();
       const links = root.descendants().slice(1);
 
-      // normalize depth so root stays at far left
+      // root at far left
       nodes.forEach((d) => {
-        d.y = d.depth * (rectWidth + 44);
+        d.y = d.depth * (rectWidth + 60);
       });
 
-      // compute dynamic height
       let minX = Infinity;
       let maxX = -Infinity;
       nodes.forEach((d) => {
@@ -457,8 +473,13 @@ function SymptomTreeRectangles({ diagnosis }) {
         if (d.x > maxX) maxX = d.x;
       });
       const height =
-        maxX - minX + rectHeight + margin.top + margin.bottom + 30;
-      svg.attr("viewBox", [0, minX - margin.top, fullWidth, height]);
+        maxX - minX + rectHeight + margin.top + margin.bottom + 40;
+      const width = Math.max(
+        520,
+        (root.height + 1) * (rectWidth + 60) + margin.left + margin.right
+      );
+
+      svg.attr("viewBox", [0, minX - margin.top, width, height]);
 
       // NODES
       const node = gNode
@@ -503,18 +524,18 @@ function SymptomTreeRectangles({ diagnosis }) {
         .append("text")
         .attr("class", "sc-tree-label-rect")
         .attr("x", -rectWidth / 2 + 10)
-        .attr("y", -4);
+        .attr("y", -6);
 
       label.append("tspan").text((d) => d.data.name);
 
       label
         .append("tspan")
         .attr("x", -rectWidth / 2 + 10)
-        .attr("dy", "1.4em")
+        .attr("dy", "1.5em")
         .attr("class", "sc-tree-label-sub")
         .text((d) => d.data.subname || "");
 
-      const nodeUpdate = nodeEnter
+      nodeEnter
         .merge(node)
         .transition()
         .duration(duration)
@@ -522,7 +543,7 @@ function SymptomTreeRectangles({ diagnosis }) {
         .attr("fill-opacity", 1)
         .attr("stroke-opacity", 1);
 
-      const nodeExit = node
+      node
         .exit()
         .transition()
         .duration(duration)
@@ -534,23 +555,19 @@ function SymptomTreeRectangles({ diagnosis }) {
         .attr("stroke-opacity", 0)
         .remove();
 
-      nodeExit.select("rect").attr("width", 1e-6);
-
       // LINKS
       const link = gLink
         .selectAll("path.sc-tree-link")
         .data(links, (d) => d.id);
 
-      const linkEnter = link
+      link
         .enter()
         .insert("path", "g")
         .attr("class", "sc-tree-link")
         .attr("d", () => {
           const o = { x: source.x0 || 0, y: source.y0 || 0 };
           return diagonal(o, o);
-        });
-
-      linkEnter
+        })
         .merge(link)
         .transition()
         .duration(duration)
@@ -566,7 +583,6 @@ function SymptomTreeRectangles({ diagnosis }) {
         })
         .remove();
 
-      // stash old positions
       root.each((d) => {
         d.x0 = d.x;
         d.y0 = d.y;

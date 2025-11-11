@@ -394,19 +394,17 @@ function SymptomTreeRectangles({ diagnosis }) {
     const container = containerRef.current;
     if (!container) return;
 
-    // clear previous svg
     container.innerHTML = "";
 
-    // ── layout knobs (these are the main things to tweak if you want tighter / looser trees)
-    const margin = { top: 10, right: 24, bottom: 10, left: 8 };
-    const rectWidth = 130;   // box width
-    const rectHeight = 44;   // box height
+    const margin = { top: 10, right: 60, bottom: 10, left: 80 };
+    const fullWidth = 720;
+    const rectWidth = 150;
+    const rectHeight = 52;
 
     const root = d3.hierarchy(data, (d) => d.children);
     const treeLayout = d3
       .tree()
-      // vertical spacing (x) & horizontal spacing (y)
-      .nodeSize([rectHeight + 10, rectWidth + 40]);
+      .nodeSize([rectHeight + 18, rectWidth + 44]); // vertical, horizontal gaps
 
     root.x0 = 0;
     root.y0 = 0;
@@ -423,15 +421,16 @@ function SymptomTreeRectangles({ diagnosis }) {
       .append("svg")
       .attr("class", "sc-tree-svg")
       .attr("width", "100%")
-      // height will be driven by viewBox; we just need some default
-      .attr("height", rectHeight + margin.top + margin.bottom);
+      .attr("viewBox", [0, 0, fullWidth, rectHeight + margin.top + margin.bottom]);
 
-    const g = svg.append("g").attr("transform", `translate(0,${margin.top})`);
+    const g = svg
+      .append("g")
+      .attr("transform", `translate(${margin.left},${margin.top})`);
 
     const gLink = g.append("g").attr("class", "sc-tree-links");
     const gNode = g.append("g").attr("class", "sc-tree-nodes");
 
-    const duration = 280;
+    const duration = 300;
 
     const diagonal = (s, d) => {
       return `M ${s.y} ${s.x}
@@ -445,38 +444,23 @@ function SymptomTreeRectangles({ diagnosis }) {
       const nodes = root.descendants();
       const links = root.descendants().slice(1);
 
-      // root on the far left
+      // normalize depth so root stays at far left
       nodes.forEach((d) => {
-        d.y = d.depth * (rectWidth + 40);
+        d.y = d.depth * (rectWidth + 44);
       });
 
-      // compute dynamic bounds for a snug viewBox
-      let minX = Infinity,
-        maxX = -Infinity,
-        minY = Infinity,
-        maxY = -Infinity;
-
+      // compute dynamic height
+      let minX = Infinity;
+      let maxX = -Infinity;
       nodes.forEach((d) => {
         if (d.x < minX) minX = d.x;
         if (d.x > maxX) maxX = d.x;
-        if (d.y < minY) minY = d.y;
-        if (d.y > maxY) maxY = d.y;
       });
-
-      const width =
-        (maxY - minY || rectWidth) + rectWidth + margin.left + margin.right;
       const height =
-        (maxX - minX || rectHeight) + rectHeight + margin.top + margin.bottom;
+        maxX - minX + rectHeight + margin.top + margin.bottom + 30;
+      svg.attr("viewBox", [0, minX - margin.top, fullWidth, height]);
 
-      // This is what makes the tree "sit" nicely inside the container
-      svg.attr("viewBox", [
-        minY - margin.left,
-        minX - margin.top,
-        width,
-        height,
-      ]);
-
-      // ── NODES
+      // NODES
       const node = gNode
         .selectAll("g.sc-tree-node")
         .data(nodes, (d) => d.id);
@@ -518,19 +502,19 @@ function SymptomTreeRectangles({ diagnosis }) {
       const label = nodeEnter
         .append("text")
         .attr("class", "sc-tree-label-rect")
-        .attr("x", -rectWidth / 2 + 8)
-        .attr("y", -7);
+        .attr("x", -rectWidth / 2 + 10)
+        .attr("y", -4);
 
       label.append("tspan").text((d) => d.data.name);
 
       label
         .append("tspan")
-        .attr("x", -rectWidth / 2 + 8)
-        .attr("dy", "1.45em")
+        .attr("x", -rectWidth / 2 + 10)
+        .attr("dy", "1.4em")
         .attr("class", "sc-tree-label-sub")
         .text((d) => d.data.subname || "");
 
-      nodeEnter
+      const nodeUpdate = nodeEnter
         .merge(node)
         .transition()
         .duration(duration)
@@ -538,7 +522,7 @@ function SymptomTreeRectangles({ diagnosis }) {
         .attr("fill-opacity", 1)
         .attr("stroke-opacity", 1);
 
-      node
+      const nodeExit = node
         .exit()
         .transition()
         .duration(duration)
@@ -550,19 +534,23 @@ function SymptomTreeRectangles({ diagnosis }) {
         .attr("stroke-opacity", 0)
         .remove();
 
-      // ── LINKS
+      nodeExit.select("rect").attr("width", 1e-6);
+
+      // LINKS
       const link = gLink
         .selectAll("path.sc-tree-link")
         .data(links, (d) => d.id);
 
-      link
+      const linkEnter = link
         .enter()
         .insert("path", "g")
         .attr("class", "sc-tree-link")
         .attr("d", () => {
           const o = { x: source.x0 || 0, y: source.y0 || 0 };
           return diagonal(o, o);
-        })
+        });
+
+      linkEnter
         .merge(link)
         .transition()
         .duration(duration)
@@ -578,6 +566,7 @@ function SymptomTreeRectangles({ diagnosis }) {
         })
         .remove();
 
+      // stash old positions
       root.each((d) => {
         d.x0 = d.x;
         d.y0 = d.y;

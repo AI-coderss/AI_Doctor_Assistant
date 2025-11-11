@@ -4,8 +4,11 @@
 /* eslint-disable no-unused-vars */
 /* eslint-disable react-hooks/exhaustive-deps */
 /* eslint-disable no-unused-vars */
-import React, { useEffect, useState } from "react";
+/* eslint-disable react-hooks/exhaustive-deps */
+/* eslint-disable no-unused-vars */
+import React, { useEffect, useState, useRef } from "react";
 import { motion, AnimatePresence } from "framer-motion";
+import * as d3 from "d3";
 import "../styles/symptoms-checker.css";
 
 export default function SymptomsChecker({ sessionId, transcript, backendBase }) {
@@ -16,7 +19,7 @@ export default function SymptomsChecker({ sessionId, transcript, backendBase }) 
   const [answers, setAnswers] = useState({});
   const [refining, setRefining] = useState(false);
 
-  // Reset on new session (new case)
+  // Reset when session changes
   useEffect(() => {
     setDiagnoses([]);
     setSelectedId(null);
@@ -26,7 +29,7 @@ export default function SymptomsChecker({ sessionId, transcript, backendBase }) 
     setRefining(false);
   }, [sessionId]);
 
-  // Auto-start once we have a transcript
+  // Auto-start when transcript is ready
   useEffect(() => {
     if (!transcript || !transcript.trim()) return;
     if (diagnoses.length > 0 || loading) return;
@@ -85,102 +88,6 @@ export default function SymptomsChecker({ sessionId, transcript, backendBase }) 
 
   const handleAnswer = (qId, answer) => {
     setAnswers((prev) => ({ ...prev, [qId]: answer }));
-  };
-
-  const renderTree = (diag) => {
-    const symptoms = Array.isArray(diag.symptoms) ? diag.symptoms : [];
-    if (!symptoms.length) return null;
-
-    const count = symptoms.length;
-    const width = 420;
-    const height = Math.max(260, 60 + count * 26);
-    const centerX = width - 40;
-    const centerY = height / 2;
-    const top = 40;
-    const bottom = height - 40;
-    const step = count > 1 ? (bottom - top) / (count - 1) : 0;
-
-    return (
-      <div className="sc-tree-shell">
-        <svg
-          className="sc-tree-svg"
-          viewBox={`0 0 ${width} ${height}`}
-          preserveAspectRatio="xMidYMid meet"
-        >
-          {/* Branches */}
-          {symptoms.map((s, idx) => {
-            const y = top + idx * step;
-            const strength = typeof s.weight === "number" ? s.weight : 0.4;
-            const clamped = Math.max(0.1, Math.min(1, strength));
-            const strokeWidth = 2 + clamped * 8;
-
-            const startX = 150;
-            const ctrlX1 = (startX + centerX) / 2;
-            const ctrlX2 = ctrlX1 + 30;
-
-            return (
-              <path
-                key={`path-${idx}-${s.name}`}
-                d={`M ${startX} ${y} C ${ctrlX1} ${y}, ${ctrlX2} ${centerY}, ${centerX} ${centerY}`}
-                stroke="url(#sc-branch-gradient)"
-                strokeWidth={strokeWidth}
-                fill="none"
-                strokeLinecap="round"
-                opacity={0.35 + clamped * 0.65}
-              />
-            );
-          })}
-
-          {/* Gradient for branches */}
-          <defs>
-            <linearGradient
-              id="sc-branch-gradient"
-              x1="0%"
-              y1="0%"
-              x2="100%"
-              y2="0%"
-            >
-              <stop offset="0%" stopColor="#64748b" />
-              <stop offset="50%" stopColor="#4f46e5" />
-              <stop offset="100%" stopColor="#0ea5e9" />
-            </linearGradient>
-          </defs>
-
-          {/* Symptom labels on the left */}
-          {symptoms.map((s, idx) => {
-            const y = top + idx * step;
-            return (
-              <text
-                key={`label-${idx}-${s.name}`}
-                x={16}
-                y={y + 4}
-                className="sc-tree-symptom-label"
-              >
-                {s.name}
-              </text>
-            );
-          })}
-
-          {/* Central diagnosis node on the right */}
-          <g className="sc-tree-dx-group">
-            <circle
-              cx={centerX}
-              cy={centerY}
-              r={18}
-              className="sc-tree-dx-circle"
-            />
-            <foreignObject
-              x={centerX + 14}
-              y={centerY - 26}
-              width={width - centerX - 20}
-              height={52}
-            >
-              <div className="sc-tree-dx-label">{diag.name}</div>
-            </foreignObject>
-          </g>
-        </svg>
-      </div>
-    );
   };
 
   const renderPeopleRow = (likelihoodScore = 0) => {
@@ -261,7 +168,7 @@ export default function SymptomsChecker({ sessionId, transcript, backendBase }) 
         </p>
       </div>
 
-      {/* Loading overlay for initial analysis */}
+      {/* Loader during first analysis */}
       {loading && diagnoses.length === 0 && (
         <div className="sc-loader">
           <div className="sc-spinner" />
@@ -276,13 +183,9 @@ export default function SymptomsChecker({ sessionId, transcript, backendBase }) 
         </div>
       )}
 
-      {error && (
-        <div className="sc-error">
-          {error}
-        </div>
-      )}
+      {error && <div className="sc-error">{error}</div>}
 
-      {/* Stacked diagnosis cards (accordion) */}
+      {/* Diagnosis accordion stack */}
       <div className="sc-diag-stack">
         {diagnoses.map((diag) => {
           const isOpen = selectedId === diag.id;
@@ -324,10 +227,8 @@ export default function SymptomsChecker({ sessionId, transcript, backendBase }) 
                     exit={{ opacity: 0, y: -4, height: 0 }}
                     transition={{ duration: 0.35, ease: "easeInOut" }}
                   >
-                    {/* People-likelihood row */}
                     {renderPeopleRow(likelihood)}
 
-                    {/* Description & read more */}
                     {diag.short_description && (
                       <p className="sc-desc">{diag.short_description}</p>
                     )}
@@ -351,10 +252,10 @@ export default function SymptomsChecker({ sessionId, transcript, backendBase }) 
                       )}
                     </details>
 
-                    {/* Fan-style tree visualization */}
-                    {renderTree(diag)}
+                    {/* D3 collapsible tree */}
+                    <SymptomTreeD3 diagnosis={diag} />
 
-                    {/* Follow-up questions (one by one) */}
+                    {/* Follow-up questions */}
                     {renderFollowUps(diag)}
                   </motion.div>
                 )}
@@ -386,6 +287,228 @@ export default function SymptomsChecker({ sessionId, transcript, backendBase }) 
           ))}
         </div>
       )}
+    </div>
+  );
+}
+
+/* ---------- D3 TREE COMPONENT ---------- */
+
+function SymptomTreeD3({ diagnosis }) {
+  const containerRef = useRef(null);
+
+  useEffect(() => {
+    if (!diagnosis) return;
+
+    const symptoms = Array.isArray(diagnosis.symptoms)
+      ? diagnosis.symptoms
+      : [];
+
+    // Build hierarchical data: root = diagnosis, children = symptoms
+    const data = {
+      name: diagnosis.name,
+      children: symptoms.map((s) => ({
+        name: s.name,
+        weight: typeof s.weight === "number" ? s.weight : 0.4,
+      })),
+    };
+
+    const container = containerRef.current;
+    if (!container) return;
+    container.innerHTML = "";
+
+    const width = 480;
+    const marginTop = 16;
+    const marginRight = 24;
+    const marginBottom = 16;
+    const marginLeft = 24;
+
+    const dx = 26;
+    const root = d3.hierarchy(data);
+    const dy = 120; // horizontal distance between columns
+
+    const treeLayout = d3.tree().nodeSize([dx, dy]);
+    const diagonal = d3
+      .linkHorizontal()
+      // Mirror horizontally so the root is on the right, symptoms on the left
+      .x((d) => width - marginRight - d.y)
+      .y((d) => d.x);
+
+    // Prepare collapsible state
+    root.x0 = 0;
+    root.y0 = 0;
+    root.descendants().forEach((d, i) => {
+      d.id = i;
+      d._children = d.children;
+      // Start open for root; children collapsed by default is optional
+      if (d.depth && d.depth > 1) d.children = null;
+    });
+
+    const svg = d3
+      .select(container)
+      .append("svg")
+      .attr("class", "sc-tree-svg")
+      .attr("width", "100%")
+      .attr("viewBox", [0, 0, width, dx + marginTop + marginBottom]);
+
+    const gLink = svg
+      .append("g")
+      .attr("class", "sc-tree-links")
+      .attr(
+        "transform",
+        `translate(0,${marginTop})`
+      );
+
+    const gNode = svg
+      .append("g")
+      .attr("class", "sc-tree-nodes")
+      .attr(
+        "transform",
+        `translate(0,${marginTop})`
+      );
+
+    function update(source) {
+      // Compute new layout
+      treeLayout(root);
+
+      let left = root;
+      let right = root;
+      root.eachBefore((d) => {
+        if (d.x < left.x) left = d;
+        if (d.x > right.x) right = d;
+      });
+
+      const height = right.x - left.x + marginTop + marginBottom;
+
+      svg
+        .attr("viewBox", [0, left.x - marginTop, width, height])
+        .attr("height", height);
+
+      const nodes = root.descendants().reverse();
+      const links = root.links();
+
+      // Nodes
+      const node = gNode.selectAll("g").data(nodes, (d) => d.id);
+
+      const nodeEnter = node
+        .enter()
+        .append("g")
+        .attr(
+          "transform",
+          () => `translate(${width - marginRight - source.y0},${source.x0})`
+        )
+        .attr("fill-opacity", 0)
+        .attr("stroke-opacity", 0)
+        .attr("class", (d) =>
+          d.depth === 0
+            ? "sc-tree-node sc-tree-node--root"
+            : "sc-tree-node sc-tree-node--leaf"
+        )
+        .on("click", (event, d) => {
+          // Only collapse/expand if the node has children/_children
+          if (!d.children && !d._children) return;
+          d.children = d.children ? null : d._children;
+          update(d);
+        });
+
+      nodeEnter
+        .append("circle")
+        .attr("r", (d) => (d.depth === 0 ? 10 : 6))
+        .attr("class", (d) =>
+          d.depth === 0 ? "sc-tree-circle sc-tree-circle--root" : "sc-tree-circle"
+        );
+
+      nodeEnter
+        .append("text")
+        .attr("dy", "0.32em")
+        .attr("x", (d) => (d.depth === 0 ? -14 : -10))
+        .attr("text-anchor", "end")
+        .text((d) => d.data.name)
+        .attr("class", "sc-tree-label");
+
+      const nodeUpdate = node
+        .merge(nodeEnter)
+        .transition()
+        .duration(250)
+        .attr(
+          "transform",
+          (d) =>
+            `translate(${width - marginRight - d.y},${d.x})`
+        )
+        .attr("fill-opacity", 1)
+        .attr("stroke-opacity", 1);
+
+      const nodeExit = node
+        .exit()
+        .transition()
+        .duration(250)
+        .attr(
+          "transform",
+          () =>
+            `translate(${width - marginRight - source.y},${source.x})`
+        )
+        .attr("fill-opacity", 0)
+        .attr("stroke-opacity", 0)
+        .remove();
+
+      // Links
+      const link = gLink.selectAll("path").data(links, (d) => d.target.id);
+
+      const linkEnter = link
+        .enter()
+        .append("path")
+        .attr("class", "sc-tree-link")
+        .attr("d", () => {
+          const o = { x: source.x0, y: source.y0 };
+          return diagonal({ source: o, target: o });
+        })
+        .attr("stroke-width", (d) => {
+          const w = d.target.data.weight || 0.4;
+          return 1.2 + w * 4;
+        });
+
+      link
+        .merge(linkEnter)
+        .transition()
+        .duration(250)
+        .attr("d", diagonal);
+
+      link
+        .exit()
+        .transition()
+        .duration(250)
+        .attr("d", () => {
+          const o = { x: source.x, y: source.y };
+          return diagonal({ source: o, target: o });
+        })
+        .remove();
+
+      // Stash old positions
+      root.eachBefore((d) => {
+        d.x0 = d.x;
+        d.y0 = d.y;
+      });
+    }
+
+    // Initial positions
+    root.x0 = 0;
+    root.y0 = 0;
+    update(root);
+
+    // Cleanup on unmount / diagnosis change
+    return () => {
+      svg.remove();
+    };
+  }, [diagnosis]);
+
+  if (!diagnosis) return null;
+
+  return (
+    <div className="sc-tree-shell">
+      <div className="sc-tree-caption">
+        Symptoms converging on{" "}
+        <span className="sc-tree-caption-name">{diagnosis.name}</span>
+      </div>
+      <div ref={containerRef} className="sc-tree-container" />
     </div>
   );
 }

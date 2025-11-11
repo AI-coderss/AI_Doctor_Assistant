@@ -1,5 +1,3 @@
-/* src/styles/symptoms-checker.css */
-
 /* Root container */
 .sc-root {
   padding: 16px;
@@ -88,7 +86,7 @@
 
 .sc-diag-item {
   border-radius: 14px;
-  background: rgba(255, 255, 255, 0.8);
+  background: rgba(255, 255, 255, 0.84);
   border: 1px solid rgba(148, 163, 184, 0.35);
   box-shadow: 0 6px 18px rgba(15, 23, 42, 0.04);
   overflow: hidden;
@@ -156,7 +154,7 @@
 
 /* Card body inside accordion */
 .sc-card {
-  background: var(--card-bg, rgba(255, 255, 255, 0.95));
+  background: var(--card-bg, rgba(255, 255, 255, 0.96));
   border-radius: 0 0 14px 14px;
   padding: 10px 14px 14px;
   border-top: 1px solid rgba(148, 163, 184, 0.35);
@@ -250,36 +248,67 @@
   text-decoration: underline;
 }
 
-/* Tree visualization shell */
+/* D3 tree container */
 .sc-tree-shell {
   margin-top: 8px;
   margin-bottom: 4px;
 }
 
-.sc-tree-svg {
-  width: 100%;
-  max-width: 520px;
-  display: block;
-}
-
-.sc-tree-symptom-label {
-  fill: #6b7280;
-  font-size: 11px;
-}
-
-.sc-tree-dx-circle {
-  fill: #4f46e5;
-  opacity: 0.9;
-}
-
-.sc-tree-dx-label {
+.sc-tree-caption {
   font-size: 0.82rem;
+  opacity: 0.8;
+  margin-bottom: 4px;
+}
+
+.sc-tree-caption-name {
   font-weight: 600;
-  color: #111827;
-  padding-left: 4px;
-  display: flex;
-  align-items: center;
-  height: 100%;
+}
+
+.sc-tree-container {
+  width: 100%;
+  overflow-x: auto;
+}
+
+/* D3 SVG & elements */
+.sc-tree-svg {
+  max-width: 100%;
+  height: auto;
+  font: 11px system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI",
+    sans-serif;
+  user-select: none;
+}
+
+.sc-tree-links path.sc-tree-link {
+  fill: none;
+  stroke: url(#sc-branch-gradient);
+  stroke-opacity: 0.55;
+}
+
+.sc-tree-nodes .sc-tree-node {
+  cursor: pointer;
+}
+
+.sc-tree-circle {
+  fill: #e5e7eb;
+  stroke: #cbd5f5;
+  stroke-width: 1.2;
+}
+
+.sc-tree-circle--root {
+  fill: #4f46e5;
+  stroke: #312e81;
+}
+
+.sc-tree-label {
+  paint-order: stroke;
+  stroke: #ffffff;
+  stroke-width: 3;
+  stroke-linejoin: round;
+  fill: #4b5563;
+}
+
+.sc-tree-node--root .sc-tree-label {
+  fill: #111827;
 }
 
 /* Follow-up questions */
@@ -498,26 +527,34 @@
     color: #93c5fd;
   }
 
-  .sc-chevron,
   .sc-diag-header-sub {
-    border-color: rgba(148, 163, 184, 0.9);
     color: #9ca3af;
+  }
+
+  .sc-chevron {
+    border-color: rgba(148, 163, 184, 0.9);
   }
 
   .sc-readmore {
     background: rgba(15, 23, 42, 0.8);
   }
 
-  .sc-tree-symptom-label {
-    fill: #9ca3af;
+  .sc-tree-label {
+    fill: #e5e7eb;
   }
 
-  .sc-tree-dx-circle {
+  .sc-tree-node--root .sc-tree-label {
+    fill: #f9fafb;
+  }
+
+  .sc-tree-circle {
+    fill: rgba(30, 64, 175, 0.3);
+    stroke: rgba(129, 140, 248, 0.9);
+  }
+
+  .sc-tree-circle--root {
     fill: #06b6d4;
-  }
-
-  .sc-tree-dx-label {
-    color: #f9fafb;
+    stroke: #0ea5e9;
   }
 
   .sc-piechart {

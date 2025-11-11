@@ -6,6 +6,8 @@
 /* eslint-disable no-unused-vars */
 /* eslint-disable react-hooks/exhaustive-deps */
 /* eslint-disable no-unused-vars */
+/* eslint-disable react-hooks/exhaustive-deps */
+/* eslint-disable no-unused-vars */
 import React, { useEffect, useState, useRef } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import * as d3 from "d3";
@@ -252,7 +254,7 @@ export default function SymptomsChecker({ sessionId, transcript, backendBase }) 
                       )}
                     </details>
 
-                    {/* D3 collapsible tree */}
+                    {/* D3 collapsible tree – diagnosis as root, symptoms as branches */}
                     <SymptomTreeD3 diagnosis={diag} />
 
                     {/* Follow-up questions */}
@@ -291,7 +293,7 @@ export default function SymptomsChecker({ sessionId, transcript, backendBase }) 
   );
 }
 
-/* ---------- D3 TREE COMPONENT ---------- */
+/* ---------- D3 TREE COMPONENT (collapsible, expandable branches) ---------- */
 
 function SymptomTreeD3({ diagnosis }) {
   const containerRef = useRef(null);
@@ -299,17 +301,22 @@ function SymptomTreeD3({ diagnosis }) {
   useEffect(() => {
     if (!diagnosis) return;
 
-    const symptoms = Array.isArray(diagnosis.symptoms)
+    const rawSymptoms = Array.isArray(diagnosis.symptoms)
       ? diagnosis.symptoms
       : [];
 
-    // Build hierarchical data: root = diagnosis, children = symptoms
+    // Allow future nested symptom structures: children under each symptom
+    const mapSymptomNode = (s) => ({
+      name: s.name,
+      weight: typeof s.weight === "number" ? s.weight : 0.4,
+      children: Array.isArray(s.children)
+        ? s.children.map(mapSymptomNode)
+        : undefined,
+    });
+
     const data = {
       name: diagnosis.name,
-      children: symptoms.map((s) => ({
-        name: s.name,
-        weight: typeof s.weight === "number" ? s.weight : 0.4,
-      })),
+      children: rawSymptoms.map(mapSymptomNode),
     };
 
     const container = containerRef.current;
@@ -326,21 +333,37 @@ function SymptomTreeD3({ diagnosis }) {
     const root = d3.hierarchy(data);
     const dy = 120; // horizontal distance between columns
 
-    const treeLayout = d3.tree().nodeSize([dx, dy]);
-    const diagonal = d3
-      .linkHorizontal()
-      // Mirror horizontally so the root is on the right, symptoms on the left
-      .x((d) => width - marginRight - d.y)
-      .y((d) => d.x);
+    const treemap = d3.tree().nodeSize([dx, dy]);
 
-    // Prepare collapsible state
+    // We want root on the RIGHT and symptoms on the LEFT,
+    // with smooth curved links converging on the diagnosis.
+    const diagonal = (s, d) => {
+      const source = {
+        x: s.x,
+        y: width - marginRight - s.y,
+      };
+      const dest = {
+        x: d.x,
+        y: width - marginRight - d.y,
+      };
+      return `M ${source.y} ${source.x}
+              C ${(source.y + dest.y) / 2} ${source.x},
+                ${(source.y + dest.y) / 2} ${dest.x},
+                ${dest.y} ${dest.x}`;
+    };
+
+    // Initial values for animation
     root.x0 = 0;
     root.y0 = 0;
+
+    // Make every node collapsible: root expanded, deeper levels collapsed initially
     root.descendants().forEach((d, i) => {
       d.id = i;
       d._children = d.children;
-      // Start open for root; children collapsed by default is optional
-      if (d.depth && d.depth > 1) d.children = null;
+      if (d.depth > 1) {
+        // collapse deeper nodes by default
+        d.children = null;
+      }
     });
 
     const svg = d3
@@ -350,25 +373,41 @@ function SymptomTreeD3({ diagnosis }) {
       .attr("width", "100%")
       .attr("viewBox", [0, 0, width, dx + marginTop + marginBottom]);
 
+    // Gradient for branch color
+    const defs = svg.append("defs");
+    const grad = defs
+      .append("linearGradient")
+      .attr("id", "sc-branch-gradient")
+      .attr("x1", "0%")
+      .attr("x2", "100%")
+      .attr("y1", "0%")
+      .attr("y2", "0%");
+    grad.append("stop").attr("offset", "0%").attr("stop-color", "#9ca3af");
+    grad.append("stop").attr("offset", "100%").attr("stop-color", "#4f46e5");
+
     const gLink = svg
       .append("g")
       .attr("class", "sc-tree-links")
-      .attr(
-        "transform",
-        `translate(0,${marginTop})`
-      );
+      .attr("transform", `translate(0,${marginTop})`);
 
     const gNode = svg
       .append("g")
       .attr("class", "sc-tree-nodes")
-      .attr(
-        "transform",
-        `translate(0,${marginTop})`
-      );
+      .attr("transform", `translate(0,${marginTop})`);
 
-    function update(source) {
+    let i = 0;
+    const duration = 300;
+
+    const update = (source) => {
       // Compute new layout
-      treeLayout(root);
+      const treeData = treemap(root);
+      const nodes = treeData.descendants();
+      const links = treeData.descendants().slice(1);
+
+      // Normalize for fixed-depth columns
+      nodes.forEach((d) => {
+        d.y = d.depth * dy;
+      });
 
       let left = root;
       let right = root;
@@ -383,30 +422,37 @@ function SymptomTreeD3({ diagnosis }) {
         .attr("viewBox", [0, left.x - marginTop, width, height])
         .attr("height", height);
 
-      const nodes = root.descendants().reverse();
-      const links = root.links();
+      // NODES
+      const node = gNode.selectAll("g.sc-tree-node").data(
+        nodes,
+        (d) => d.id || (d.id = ++i)
+      );
 
-      // Nodes
-      const node = gNode.selectAll("g").data(nodes, (d) => d.id);
-
+      // Enter
       const nodeEnter = node
         .enter()
         .append("g")
-        .attr(
-          "transform",
-          () => `translate(${width - marginRight - source.y0},${source.x0})`
-        )
-        .attr("fill-opacity", 0)
-        .attr("stroke-opacity", 0)
         .attr("class", (d) =>
           d.depth === 0
             ? "sc-tree-node sc-tree-node--root"
             : "sc-tree-node sc-tree-node--leaf"
         )
+        .attr(
+          "transform",
+          () =>
+            `translate(${width - marginRight - source.y0},${source.x0})`
+        )
+        .attr("fill-opacity", 0)
+        .attr("stroke-opacity", 0)
         .on("click", (event, d) => {
-          // Only collapse/expand if the node has children/_children
-          if (!d.children && !d._children) return;
-          d.children = d.children ? null : d._children;
+          // Toggle children like in your sample code
+          if (d.children) {
+            d._children = d.children;
+            d.children = null;
+          } else if (d._children) {
+            d.children = d._children;
+            d._children = null;
+          }
           update(d);
         });
 
@@ -419,16 +465,16 @@ function SymptomTreeD3({ diagnosis }) {
 
       nodeEnter
         .append("text")
+        .attr("class", "sc-tree-label")
         .attr("dy", "0.32em")
         .attr("x", (d) => (d.depth === 0 ? -14 : -10))
         .attr("text-anchor", "end")
-        .text((d) => d.data.name)
-        .attr("class", "sc-tree-label");
+        .text((d) => d.data.name);
 
-      const nodeUpdate = node
-        .merge(nodeEnter)
+      const nodeUpdate = nodeEnter
+        .merge(node)
         .transition()
-        .duration(250)
+        .duration(duration)
         .attr(
           "transform",
           (d) =>
@@ -440,7 +486,7 @@ function SymptomTreeD3({ diagnosis }) {
       const nodeExit = node
         .exit()
         .transition()
-        .duration(250)
+        .duration(duration)
         .attr(
           "transform",
           () =>
@@ -450,48 +496,49 @@ function SymptomTreeD3({ diagnosis }) {
         .attr("stroke-opacity", 0)
         .remove();
 
-      // Links
-      const link = gLink.selectAll("path").data(links, (d) => d.target.id);
+      nodeExit.select("circle").attr("r", 1e-6);
+      nodeExit.select("text").style("fill-opacity", 1e-6);
+
+      // LINKS
+      const link = gLink.selectAll("path.link").data(links, (d) => d.id);
 
       const linkEnter = link
         .enter()
-        .append("path")
-        .attr("class", "sc-tree-link")
+        .insert("path", "g")
+        .attr("class", "link sc-tree-link")
         .attr("d", () => {
           const o = { x: source.x0, y: source.y0 };
-          return diagonal({ source: o, target: o });
+          return diagonal(o, o);
         })
         .attr("stroke-width", (d) => {
-          const w = d.target.data.weight || 0.4;
+          const w = d.data.weight || d.target?.data?.weight || 0.4;
           return 1.2 + w * 4;
         });
 
-      link
-        .merge(linkEnter)
+      linkEnter
+        .merge(link)
         .transition()
-        .duration(250)
-        .attr("d", diagonal);
+        .duration(duration)
+        .attr("d", (d) => diagonal(d, d.parent));
 
       link
         .exit()
         .transition()
-        .duration(250)
+        .duration(duration)
         .attr("d", () => {
           const o = { x: source.x, y: source.y };
-          return diagonal({ source: o, target: o });
+          return diagonal(o, o);
         })
         .remove();
 
-      // Stash old positions
-      root.eachBefore((d) => {
+      // Stash old positions for smooth animation
+      nodes.forEach((d) => {
         d.x0 = d.x;
         d.y0 = d.y;
       });
-    }
+    };
 
-    // Initial positions
-    root.x0 = 0;
-    root.y0 = 0;
+    // Initial render
     update(root);
 
     // Cleanup on unmount / diagnosis change

@@ -5238,9 +5238,10 @@ Return STRICT JSON ONLY with this structure:
 }}
 
 Strict rules:
-- Always include at least 2 diagnoses when possible.
+- Always include at least 3 diagnoses when possible.
 - Use concise, clinician-facing medical language.
 - Order the "questions" array in the exact sequence the clinician
+- ask at least 5- 7 questions for each diagnosis presented.
   should ask them. The UI only shows one question at a time.
 - For now, use type "boolean" and assume the user can answer "yes" / "no" / "unsure".
 - Ground your reasoning on retrieved context AND the transcript.

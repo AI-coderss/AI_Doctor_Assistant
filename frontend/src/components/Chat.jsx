@@ -513,38 +513,34 @@ function SecondOpinionTabbedBubble({
       ? buildAgentContext()
       : (useDosageStore.getState()?.transcript || "");
 
-  const TABS = [
-    { id: "opinion", label: "Second Opinion" },
-    { id: "notes", label: "Clinical Notes" },
-    { id: "symptoms", label: "Symptoms Checker" },
-  ];
+  const tabs = {
+    opinion: { label: "Second Opinion" },
+    notes: { label: "Clinical Notes" },
+    symptoms: { label: "Symptoms Checker" },
+  };
 
   return (
     <>
-      <BubbleTabs tabs={TABS} active={activeTab} onChange={setActiveTab} />
-
-      {activeTab === "opinion" && (
+      <BubbleTabs tabs={tabs} active={activeTab} onChange={setActiveTab} />
+      {activeTab === "opinion" ? (
         <SecondOpinionPanel
           data={opinion}
           narrative={narrative}
           onAddLab={handleAddLabToTable}
         />
-      )}
-
-      {activeTab === "notes" && (
+      ) : (
         <ClinicalNotes
           sessionId={sessionId}
           transcript={transcript}
           autostart={true}
         />
       )}
-
       {activeTab === "symptoms" && (
-        <SymptomsChecker
-          sessionId={sessionId}
-          transcript={transcript}
-          backendBase={BACKEND_BASE}
-        />
+        <SymptomsChecker 
+        sessionId={sessionId} 
+        transcript={transcript}
+        backendBase={BACKEND_BASE}
+         />
       )}
     </>
   );

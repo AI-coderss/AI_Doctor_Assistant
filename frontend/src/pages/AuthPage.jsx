@@ -83,7 +83,7 @@ export default function AuthPage() {
             <span className="hero-line">Context-aware assistance.</span>
             <span className="hero-line">Works on mobile, tablet, desktop.</span>
             <span className="hero-line">Clinical Decision-support System</span>
-            <span className="hero-line">Complex Case Analysis and accurate Diagnosis</span>
+            <span className="hero-line">Complex Case Analysis</span>
             <span className="hero-line">Privacy-first experience.</span>
           </div>
         </div>

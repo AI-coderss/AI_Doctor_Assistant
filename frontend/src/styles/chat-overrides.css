@@ -1864,3 +1864,72 @@
     max-width: none;
   }
 }
+
+/* Desktop — same as your inline style */
+.DrawerRoot {
+  position: fixed;
+  bottom: 45px;
+  left: 25px;
+  z-index: 100;
+}
+
+/* Large tablets / small laptops */
+@media (max-width: 1200px) {
+  .DrawerRoot {
+    bottom: 32px !important;
+    left: 20px !important;
+  }
+}
+
+/* Tablets — slightly below navbar, not top */
+@media (max-width: 992px) {
+  .DrawerRoot {
+    bottom: 24px !important;
+    top: auto !important;
+    left: 18px !important;
+    right: auto !important;
+  }
+
+  .DrawerRoot .tools-grid {
+    max-width: 94vw;
+    max-height: 65vh;
+    overflow: auto;
+  }
+}
+
+/* Phones — keep it near bottom, centered horizontally */
+@media (max-width: 768px) {
+  .DrawerRoot {
+    bottom: 100px !important;
+    top: auto !important;
+    left: 12px !important;
+    right: 12px !important;
+  }
+
+  .DrawerRoot .tools-grid {
+    width: auto;
+    max-width: 100vw;
+    max-height: 60vh;
+    overflow: auto;
+  }
+
+  .DrawerRoot .drawer-toggle-btn {
+    padding: 12px 14px;
+    border-radius: 14px;
+    font-size: 16px;
+  }
+}
+
+/* Very small phones */
+@media (max-width: 420px) {
+  .DrawerRoot {
+    bottom: 14px !important;
+    left: 10px !important;
+    right: 10px !important;
+  }
+
+  .DrawerRoot .drawer-toggle-btn {
+    padding: 11px 13px;
+    font-size: 15px;
+  }
+}

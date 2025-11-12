@@ -4,6 +4,7 @@
 /* eslint-disable no-loop-func */
 /* eslint-disable react-hooks/exhaustive-deps */
 import React, { useState, useEffect, useRef, useCallback } from "react";
+import { useLayoutEffect } from "react";
 import ChatInputWidget from "./ChatInputWidget.jsx";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
@@ -1911,32 +1912,33 @@ const DrawComponent = ({ children }) => {
   }, []);
 
   return (
-    <div
-      style={{ position: "fixed", bottom: "25px", left: "25px", zIndex: 100 }}
-    >
-      <AnimatePresence>
-        {isOpen && (
-          <motion.div
-            className="tools-grid"
-            initial={{ opacity: 0, y: 50, scale: 0.9 }}
-            animate={{ opacity: 1, y: 0, scale: 1 }}
-            exit={{ opacity: 0, y: 50, scale: 0.9 }}
-            transition={{ duration: 0.3, ease: "easeInOut" }}
-          >
-            {children}
-          </motion.div>
-        )}
-      </AnimatePresence>
+  <div
+    className="DrawerRoot"
+    style={{ position: "fixed", bottom: "45px", left: "25px", zIndex: 100 }}
+  >
+    <AnimatePresence>
+      {isOpen && (
+        <motion.div
+          className="tools-grid"
+          initial={{ opacity: 0, y: 50, scale: 0.9 }}
+          animate={{ opacity: 1, y: 0, scale: 1 }}
+          exit={{ opacity: 0, y: 50, scale: 0.9 }}
+          transition={{ duration: 0.3, ease: "easeInOut" }}
+        >
+          {children}
+        </motion.div>
+      )}
+    </AnimatePresence>
 
-      <button
-        onClick={() => setIsOpen((prev) => !prev)}
-        className="drawer-toggle-btn"
-        title="Toggle Tools"
-      >
-        {isOpen ? "✖" : "🛠️"}
-      </button>
-    </div>
-  );
+    <button
+      onClick={() => setIsOpen((prev) => !prev)}
+      className="drawer-toggle-btn"
+      title="Toggle Tools"
+    >
+      {isOpen ? "✖" : "🛠️"}
+    </button>
+  </div>
+);
 };
 
 /* Mermaid collapsible */

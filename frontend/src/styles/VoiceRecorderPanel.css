@@ -93,7 +93,7 @@
 }
 
 .record-case-btn-left {
-    position: relative;
+    position: relative !important;
     left: 1.25rem;
     bottom: 5.5rem;
     margin-top: 250px;
@@ -102,7 +102,7 @@
     padding: .72rem 1.15rem;
     border: 0;
     border-radius: var(--radius-sm);
-    color: #fff;
+    color: #fff !important;
     background: linear-gradient(45deg, var(--primary), rgba(79, 70, 229, 1));
     cursor: pointer;
 
@@ -253,7 +253,7 @@
     position: relative;
     padding: 0.64rem 1rem;
     font-size: .86rem;
-    color: #fff;
+    color: #fff !important;
     background: linear-gradient(45deg, var(--primary), rgba(79, 70, 229, 1));
     border: none;
     border-radius: var(--radius-sm);

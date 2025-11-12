@@ -3,13 +3,14 @@
   --brand-primary-dark: #2c40c6;
 
   --auth-ink: #0e263d;
-  --auth-bg: radial-gradient(ellipse at center, rgba(255,254,234,1) 0%, rgba(255,254,234,1) 35%, #B7E8EB 100%);
+  /* Background now uses primary gradient */
+  --auth-bg: linear-gradient(135deg, var(--brand-primary) 0%, var(--brand-primary-dark) 100%);
   --auth-card: #ffffff;
 
   --auth-border: rgba(14, 38, 61, 0.14);
   --auth-shadow: 24px 12px 26px rgba(0, 0, 5, .14), 0 8px 10px rgba(0, 0, 0, .12);
 
-  /* Wider card; height unchanged as requested */
+  /* Wider card; height unchanged from your last direction */
   --auth-shell-w: clamp(360px, 56vw, 680px);
   --auth-shell-h: clamp(420px, 56vh, 540px);
 
@@ -21,7 +22,7 @@
 @media (prefers-color-scheme: dark) {
   :root {
     --auth-ink: #f5f7ff;
-    --auth-bg: radial-gradient(ellipse at center, #0c1220 0%, #0c1220 35%, #0a1226 100%);
+    --auth-bg: whitesmoke;
     --auth-card: #121721;
     --auth-border: rgba(255,255,255,0.12);
     --auth-shadow: 0 14px 38px rgba(0,0,0,.55);
@@ -34,93 +35,64 @@
   position: relative;
   min-height: 100dvh;
   width: 100%;
-  background: var(--auth-bg);
-  color: var(--auth-ink);
+  background:#FFFFFF;
+  color:#2c40c6 ;
   display: grid;
   place-items: center;
   overflow: hidden;
 }
-
-/* Waves bg */
-.auth-ocean {
-  height: 7%;
-  width: 100%;
-  position: absolute;
-  bottom: 0;
-  left: 0;
-  background: #015871;
-  pointer-events: none;
-}
-.auth-wave {
-  background: url("https://s3-us-west-2.amazonaws.com/s.cdpn.io/85486/wave.svg") repeat-x;
-  position: absolute;
-  top: -198px;
-  width: 6400px;
-  height: 198px;
-  animation: auth-wave 5s cubic-bezier(.36,.45,.63,.53) infinite;
-  transform: translate3d(0,0,0);
-  opacity: .9;
-}
-.auth-wave.second {
-  top: -175px;
-  animation:
-    auth-wave 7s cubic-bezier(.36,.45,.63,.53) -.125s infinite,
-    auth-swell 7s ease -1.25s infinite;
-  opacity: 1;
-}
-@keyframes auth-wave { 0% { margin-left: 0 } 100% { margin-left: -1600px } }
-@keyframes auth-swell { 0%,100% { transform: translate3d(0,-25px,0) } 50% { transform: translate3d(0,5px,0) } }
 
 /* ===== Layout: hero ABOVE, form centered ===== */
 .auth-section {
   width: 100%;
   padding: clamp(12px, 3vw, 24px);
   display: grid;
-  grid-template-columns: 1fr;  /* hero above card on all viewports */
+  grid-template-columns: 1fr;
   align-items: center;
   justify-items: center;
   gap: clamp(16px, 4vw, 24px);
 }
 
+/* Hero */
 .auth-hero {
   width: min(96vw, 920px);
   text-align: center;
 }
+
 .hero-head {
   margin: 0 0 8px 0;
   font-weight: 900;
   letter-spacing: .2px;
   font-size: clamp(28px, 5vw, 56px);
   line-height: 1.06;
-  color: var(--auth-ink);
-}
-.hero-rotator {
-  position: relative;
-  height: clamp(28px, 6.5vh, 44px);
-  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
-  font-size: clamp(16px, 2.1vw, 22px);
-  color: var(--auth-ink);
-  max-width: 70ch;
-  margin-inline: auto;
+  color:#2c40c6; /* good contrast on the primary gradient */
 }
 
-/* Typewriter lines */
-.hero-rotator .line {
+/* Rotating lines driven by GSAP (no CSS cursor) */
+.hero-rotator {
+  position: relative;
+  min-height: clamp(28px, 6.5vh, 44px);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+  font-size: clamp(16px, 2.1vw, 22px);
+  color: #2c40c6; /* readable over gradient */
+  max-width: 72ch;
+  margin-inline: auto;
+}
+.hero-line {
   position: absolute;
-  top: 0; left: 0;
+  top: 0;
+  left: 50%;
+  transform: translateX(-50%);
   white-space: nowrap;
-  overflow: hidden;
-  border-right: 3px solid currentColor;
   opacity: 0;
 }
-@keyframes typing { from { width: 0 } to { width: 100% } }
-@keyframes blink  { 0%,49% { border-color: currentColor } 50%,100% { border-color: transparent } }
-@keyframes fadeCycle { 0%,8% {opacity:0; transform: translateY(6px)}
-                       10%,30% {opacity:1; transform: translateY(0)}
-                       33%,100% {opacity:0; transform: translateY(-6px)} }
-.hero-rotator .l1 { animation: fadeCycle 12s linear 0s infinite, typing 3s steps(30,end) 0s both, blink 1s step-end 3s infinite; }
-.hero-rotator .l2 { animation: fadeCycle 12s linear 4s infinite, typing 3s steps(48,end) 4s both, blink 1s step-end 7s infinite; }
-.hero-rotator .l3 { animation: fadeCycle 12s linear 8s infinite, typing 3s steps(43,end) 8s both, blink 1s step-end 11s infinite; }
+
+/* ===== Framer stage wrapper (drives long entrance) ===== */
+.shell-stage {
+  width: 100%;
+  display: grid;
+  place-items: center;
+}
 
 /* ===== Auth shell (centered) ===== */
 .auth-shell {
@@ -133,8 +105,7 @@
   border: 1px solid var(--auth-border);
   box-shadow: var(--auth-shadow);
   overflow: hidden;
-  opacity: 0.94;
-  transition: transform 0.33s ease, box-shadow 0.33s ease, opacity 0.33s ease;
+  opacity: 0.96;
   will-change: transform;
 }
 
@@ -163,9 +134,10 @@
   font-weight: 900;
   letter-spacing: .2px;
   font-size: 20px;
+  color: var(--auth-ink);
 }
 
-/* Sign-in/Sign-up halves + overlay (unchanged switching) */
+/* Sign-in/Sign-up halves + overlay (switching preserved) */
 .auth-signin { left: 0; width: 50%; z-index: 2; }
 .auth-signup { left: 0; width: 50%; z-index: 1; opacity: 0; }
 
@@ -248,7 +220,7 @@
 .auth-btn:active { transform: translateY(0); }
 .auth-btn.ghost { background: transparent; color: #fff; border-color: #fff; box-shadow: none; }
 
-/* Hide the small helper suggestion lines inside forms */
+/* Hide helper suggestion lines inside forms */
 .auth-form form > span { display: none; }
 
 .auth-forgot {
@@ -286,7 +258,7 @@
   font-weight: 700;
 }
 
-/* Testing hint (remove later) */
+/* Testing hint (optional; remove in prod) */
 .auth-hint {
   position: fixed;
   bottom: 10px;
@@ -305,25 +277,22 @@
 
 /* ===== Responsive ===== */
 @media (max-width: 900px) {
-  .auth-shell {
-    width: min(94vw, 680px);   /* slightly narrower on tablets */
-  }
+  .auth-shell { width: min(94vw, 680px); }
 }
 
 @media (max-width: 768px) {
-  /* Keep the original shape & switching on mobile; just scale and use full height */
+  /* Keep original shape & switching on mobile; scale to fit */
   .auth-shell {
     width: min(94vw, 560px);
-    min-height: 50dvh;        /* whole height on phones */
+    min-height: 45dvh;
     border-radius: 22px;
   }
   .auth-form form { padding: 0 22px; }
   .hero-head { font-size: clamp(24px, 7vw, 34px); }
   .hero-rotator { font-size: clamp(14px, 4.2vw, 18px); }
 
-  /* IMPORTANT: do NOT hide overlay on mobile (preserve switching) */
-  .auth-signin, .auth-signup { width: 50%; }   /* keep halves */
-  .auth-overlay-wrap { display: block; }       /* ensure overlay remains */
+  .auth-signin, .auth-signup { width: 50%; }
+  .auth-overlay-wrap { display: block; }
 }
 
 @media (max-width: 420px) {
@@ -331,3 +300,4 @@
   .auth-btn { padding: 9px 22px; font-size: 11px; }
   .auth-input { padding: 10px 12px; font-size: 13px; }
 }
+

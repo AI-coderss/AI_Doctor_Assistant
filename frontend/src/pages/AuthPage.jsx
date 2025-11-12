@@ -76,9 +76,9 @@ export default function AuthPage() {
             aria-live="polite"
             ref={heroRef}
           >
-            <span className="hero-line">Medical Transcription with high accuracy.</span>
+            <span className="hero-line">Medical Transcription  with AI.</span>
             <span className="hero-line">Streaming second-opinion guidance.</span>
-            <span className="hero-line">Lab Voice Agent that automates workflows.</span>
+            <span className="hero-line">Lab Voice Agent For Automations.</span>
             <span className="hero-line"> Customizable Clinical Notes.</span>
             <span className="hero-line">Context-aware assistance.</span>
             <span className="hero-line">Works on mobile, tablet, desktop.</span>

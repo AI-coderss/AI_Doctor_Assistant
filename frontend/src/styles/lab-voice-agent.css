@@ -469,3 +469,150 @@ html[data-theme="dark"] .pending-item .badge {
   max-width: 100%;
   margin: 0;
 }
+/* ==========================================================
+   MOBILE STACK: Voice Agent (top 60%) + Lab List (bottom 40%)
+   Desktop untouched
+   ========================================================== */
+
+/* Global knobs (override as needed) */
+:root {
+  /* Mobile layout controls */
+  --va-mobile-top: 56px;     /* distance from top (below navbar) */
+  --va-mobile-gap: 10px;     /* gap between panels */
+  --va-mobile-h: 60vh;       /* Voice Agent height → 60% of screen */
+
+  /* Quick switch to 70/30:
+     --va-mobile-h: 70vh;  */
+}
+
+/* Phones & small tablets */
+@media (max-width: 768px) {
+  /* ---------- Voice Agent: Top slab (60% by default) ---------- */
+  .voice-assistant {
+    position: fixed !important;
+    left: 0 !important;
+    right: 0 !important;
+
+    top: var(--va-mobile-top);
+    height: var(--va-mobile-h);
+    max-height: var(--va-mobile-h);
+    width: 100vw !important;
+    max-width: 100vw !important;
+
+    /* Solid top “sheet” feel */
+    border-left: none;
+    border-top: 1px solid var(--panel-border);
+    box-shadow: 0 -8px 22px rgba(0,0,0,.22);
+
+    /* Compact padding + safe-areas */
+    padding: 12px;
+    padding-top: 56px;
+    padding-left: max(12px, env(safe-area-inset-left));
+    padding-right: max(12px, env(safe-area-inset-right));
+    padding-bottom: max(12px, env(safe-area-inset-bottom));
+
+    /* Smaller orb to fit comfortably in 60% slab */
+    --orb-size: 150px;
+    --orb-ring-size: calc(var(--orb-size) + 26px);
+    z-index: 1000;
+  }
+  .assistant-orb { top: 22%; } /* centers the orb visually in shorter space */
+
+  /* Keep content scrollable inside the VA slab */
+  .voice-assistant .assistant-content {
+    margin-top: calc(var(--orb-ring-size) + 12px);
+    overflow: auto;
+    -webkit-overflow-scrolling: touch;
+    max-height: calc(var(--va-mobile-h) - 100px);
+  }
+
+  /* Compact top-right controls */
+  .va-controls { top: 8px; right: 8px; gap: 6px; }
+  .va-btn { padding: 7px 10px; font-size: 12px; }
+  .va-title { font-size: 16px; }
+  .va-section { padding: 10px; }
+  .va-stream { min-height: 96px; font-size: 13px; }
+
+  /* Mic FAB keeps clear of the bottom list */
+  .mic-btn {
+    --fab-size: 56px;
+    --fab-bottom: max(12px, env(safe-area-inset-bottom));
+  }
+
+  /* ---------- Lab Suggestions Dock: Bottom slab (40%) ---------- */
+  /* If your list uses .pending-dock--left already, this repositions it. */
+  .pending-dock--left {
+    position: fixed !important;
+    left: 12px !important;
+    right: 12px !important;
+    width: auto !important;
+    max-width: none !important;
+
+    /* Stack directly below voice-assistant with a small gap */
+    top: calc(var(--va-mobile-top) + var(--va-mobile-h) + var(--va-mobile-gap));
+    bottom: max(12px, env(safe-area-inset-bottom));
+    border-radius: 12px;
+    box-shadow: 0 12px 32px rgba(0,0,0,.16);
+    z-index: 999; /* just under the voice slab */
+    display: flex;
+    flex-direction: column;
+  }
+
+  /* Let the list fill the bottom slab properly */
+  .pending-dock--left .pending-list {
+    /* header/title area ≈ 48px; remainder scrolls */
+    height: calc(100% - 48px);
+    max-height: none;
+    overflow: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  /* ---------- Fallback: if your list doesn’t use .pending-dock--left ---------- */
+  /* Add class "lab-suggest-mobile" to the list wrapper and you’re set. */
+  .lab-suggest-mobile {
+    position: fixed;
+    left: 12px;
+    right: 12px;
+    top: calc(var(--va-mobile-top) + var(--va-mobile-h) + var(--va-mobile-gap));
+    bottom: max(12px, env(safe-area-inset-bottom));
+    background: var(--card-bg);
+    color: var(--card-ink);
+    border: 1px solid var(--card-border);
+    border-radius: 12px;
+    box-shadow: 0 12px 32px rgba(0,0,0,.16);
+    padding: 10px;
+    z-index: 999;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+  .lab-suggest-mobile .list-scroll {
+    flex: 1 1 auto;
+    overflow: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+}
+
+/* Very small phones */
+@media (max-width: 375px) {
+  .voice-assistant {
+    padding: 10px;
+    padding-top: 50px;
+    --orb-size: 136px;
+    --orb-ring-size: calc(var(--orb-size) + 22px);
+  }
+  .assistant-orb { top: 20%; }
+}
+
+/* Short/landscape phones */
+@media (max-height: 520px) and (orientation: landscape) {
+  :root { --va-mobile-top: 44px; }
+  .voice-assistant {
+    /* Use 55% in ultra-short landscape so both slabs fit */
+    --orb-size: 120px;
+    --orb-ring-size: calc(var(--orb-size) + 20px);
+    height: 55vh;
+    max-height: 55vh;
+  }
+  .assistant-orb { top: 18%; }
+}

@@ -616,3 +616,97 @@ html[data-theme="dark"] .pending-item .badge {
   }
   .assistant-orb { top: 18%; }
 }
+/* ==========================================================
+   Mobile refinements: More room for list + mic/visualizer spacing
+   ========================================================== */
+
+/* Quick knobs */
+:root {
+  /* Voice Agent slab height on phones (↓ from 60 to 58 for extra room) */
+  --va-mobile-h: 60vh;
+
+  /* Reserve an optional bottom rail below the lab list (set to 0px to disable) */
+  --mobile-rail-h: 30px;
+}
+
+@media (max-width: 768px) {
+  /* ---------- Voice Agent height + clearance around mic ---------- */
+  .voice-assistant {
+    /* keep earlier top/width rules; only add smarter bottom clearance */
+    /* clearance keeps content + visualizer away from mic */
+    --va-mic-clearance: calc(var(--fab-size, 56px) + 20px);
+    padding-bottom: calc(12px + var(--va-mic-clearance));
+  }
+
+  /* Ensure internal scroll respects the mic clearance */
+  .voice-assistant .assistant-content {
+    /* subtract header + orb + mic clearance more aggressively */
+    max-height: calc(var(--va-mobile-h) - 110px - var(--va-mic-clearance));
+  }
+
+  /* Visualizer section gets breathing room so it never touches the mic */
+  .va-section.va-visualizer,
+  .va-visualizer .container {
+    padding-bottom: var(--va-mic-clearance) !important;
+    margin-bottom: 250px;
+  }
+
+  /* Slightly lower the mic ring and keep it off the list slab */
+  .mic-btn {
+    --fab-size: 56px; /* keep modest size on phones */
+    --fab-bottom: calc(max(14px, env(safe-area-inset-bottom)) + var(--mobile-rail-h));
+  }
+
+  /* ---------- Lab Suggestions slab (bottom) with optional rail below ---------- */
+  .pending-dock--left {
+    /* leave prior left/right/top logic intact; only change bottom to leave room for rail */
+    bottom: calc(max(12px, env(safe-area-inset-bottom)) + var(--mobile-rail-h)) !important;
+  }
+  .pending-dock--left .pending-list {
+    /* full fill of slab (header ~48px) */
+    height: calc(100% - 48px);
+    max-height: none;
+  }
+
+  /* Fallback list wrapper (if you used .lab-suggest-mobile) */
+  .lab-suggest-mobile {
+    bottom: calc(max(12px, env(safe-area-inset-bottom)) + var(--mobile-rail-h)) !important;
+  }
+
+  /* ---------- Optional bottom rail (for any extra component under the list) ---------- */
+  /* Add <div class="mobile-rail">…</div> anywhere; it will pin itself at the very bottom. */
+  .mobile-rail {
+    position: fixed;
+    left: 0;
+    right: 0;
+    bottom: env(safe-area-inset-bottom);
+    height: var(--mobile-rail-h);
+    z-index: 998; /* under list (999), above page */
+    padding: 8px 12px;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+
+    background: var(--card-bg);
+    color: var(--card-ink);
+    border-top: 1px solid var(--card-border);
+    box-shadow: 0 -10px 28px rgba(0,0,0,.12);
+  }
+
+  /* If you don’t need a bottom rail, simply set:  :root { --mobile-rail-h: 0px; } */
+
+  /* ---------- Extra polish for really short screens ---------- */
+  @media (max-height: 620px) {
+    .voice-assistant {
+      --orb-size: 132px;
+      --orb-ring-size: calc(var(--orb-size) + 20px);
+    }
+    .assistant-orb { top: 19%; }
+    .voice-assistant .assistant-content {
+      max-height: calc(var(--va-mobile-h) - 118px - var(--va-mic-clearance));
+    }
+  }
+  .va-btn {
+    display: none;
+  }
+}

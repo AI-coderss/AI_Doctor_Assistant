@@ -11,3 +11,54 @@
   border-radius: 12px;
   background: transparent;
 }
+
+/* ---------- Mobile fixes for wave visualizer ---------- */
+:root {
+  /* Fallbacks in case these aren't defined elsewhere */
+  --fab-size: 56px;
+  --mobile-rail-h: 0px;               /* set >0 if you use a bottom rail */
+  --va-mic-clearance: calc(var(--fab-size) + 18px);
+}
+
+@media (max-width: 768px) {
+  /* Give the wrapper padding so the wave never sits behind the mic/rail */
+  .container {
+    padding-bottom: calc(
+      var(--va-mic-clearance) +
+      var(--mobile-rail-h) +
+      env(safe-area-inset-bottom, 0px) +
+      8px
+    );
+    margin-bottom: 6px;               /* tiny breathing room */
+  }
+
+  /* Make the wave height explicit on phones (no more “submerged” canvas) */
+  #waveCanvas {
+    height: clamp(140px, 60vh, 220px);  /* predictable + responsive */
+    margin-bottom: 8px;                  /* keeps it off the mic ring */
+    display: block;
+    position: relative;                  /* guard against inherited positioning */
+    /* GPU nudge for smoother paint on some mobile GPUs */
+    transform: translateZ();
+    will-change: transform;
+  }
+}
+
+/* Ultra-short screens: trim the height a bit more */
+@media (max-width: 768px) and (max-height: 620px) {
+  #waveCanvas {
+    height: clamp(120px, 22vh, 190px);
+  }
+}
+
+/* Landscape phones/tablets: reduce height to fit toolbars */
+@media (max-width: 900px) and (orientation: landscape) {
+  #waveCanvas {
+    height: clamp(100px, 40vh, 380px);
+  }
+  .container {
+    padding-bottom: calc(
+      10px + var(--mobile-rail-h) + env(safe-area-inset-bottom, 0px)
+    );
+  }
+}

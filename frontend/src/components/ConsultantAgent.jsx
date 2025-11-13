@@ -1,8 +1,12 @@
 /* eslint-disable no-useless-concat */
 /* eslint-disable react-hooks/exhaustive-deps */
 /* eslint-disable no-unused-vars */
+// ConsultantAgent.jsx (revised to mirror LabVoiceAgent connection flow)
+/* eslint-disable no-useless-concat */
+/* eslint-disable react-hooks/exhaustive-deps */
+/* eslint-disable no-unused-vars */
 import React, { useEffect, useImperativeHandle, useRef, useState, forwardRef } from "react";
-import { FaUserMd, FaTimes, FaBroom, FaPaperPlane, FaPhone } from "react-icons/fa";
+import { FaUserMd, FaTimes, FaBroom, FaPaperPlane, FaMicrophoneAlt } from "react-icons/fa";
 import "../styles/lab-voice-agent.css";
 import Orb from "./Orb.jsx";
 import AudioWave from "./AudioWave.jsx";
@@ -10,23 +14,10 @@ import useAudioForVisualizerStore from "../store/useAudioForVisualizerStore.js";
 import useAudioStore from "../store/audioStore.js";
 import { startVolumeMonitoring } from "./audioLevelAnalyzer";
 
-/**
- * ConsultantAgent — with Orb + AudioWave UI but text Q/A in chat bubbles.
- *
- * Props:
- *   active: boolean
- *   sessionId: string
- *   backendBase: string (base URL of the service that hosts /consultant-agent/*)
- *   context: string
- *   onAgentMessage: ({ who:'bot'|'system', msg, type?, ddx? }) => void
- *   onDone: ({ assessment_md, plan_md, ddx }) => void
- *   onClose?: () => void
- */
 const ConsultantAgent = forwardRef(function ConsultantAgent(
   { active, sessionId, backendBase, context, onAgentMessage, onDone, onClose = () => {} },
   ref
 ) {
-  // ---------- constants ----------
   const BACKEND = String(backendBase || "https://ai-doctor-assistant-backend-server.onrender.com").replace(/\/+$/,"");
   const CONNECT_URL = `${BACKEND}/consultant-agent/rtc-connect?session_id=${encodeURIComponent(sessionId || "")}`;
   const CONTEXT_URL = `${BACKEND}/consultant-agent/context`;
@@ -58,13 +49,19 @@ const ConsultantAgent = forwardRef(function ConsultantAgent(
       if (connectedRef.current) return;
       await primeContext();
       await connectRTC();
-      // session.update will be sent on DataChannel onopen
+      // sendSessionUpdate will fire when DC opens (dc.onopen)
+      // kick a first response
+      dcSend({ type: "response.create" });
     },
     async stop() { stopAll(); },
     setQuestionCount(n) {
       const nn = Math.max(1, Math.min(20, Number(n) || 6));
       setQuestionCount(nn);
-      dcSend({ type: "session.update", session: { metadata: { consult_q_count: nn } } });
+      // Update instructions only (NO metadata)
+      dcSend({
+        type: "session.update",
+        session: { instructions: buildInstructions(nn) }
+      });
       onAgentMessage?.({ who: "system", msg: `Consultant will ask ~${nn} questions.` });
     },
     async handleUserText(text) {
@@ -88,7 +85,8 @@ const ConsultantAgent = forwardRef(function ConsultantAgent(
       try {
         setStatus("prepping");
         await primeContext();
-        await connectRTC(); // session.update gets sent on DC open
+        await connectRTC();
+        dcSend({ type: "response.create" });
       } catch (e) {
         console.error("Consultant start failed:", e);
         onAgentMessage?.({ who: "system", msg: `Consultant agent failed to start (${e?.message || "unknown"}).` });
@@ -106,10 +104,26 @@ const ConsultantAgent = forwardRef(function ConsultantAgent(
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ session_id: sessionId, context }),
+        mode: "cors",
       });
     } catch (e) {
       console.warn("consultant context failed:", e);
     }
+  }
+
+  function buildInstructions(count = questionCount) {
+    return [
+      "You are a clinician-facing consultant-assistant that conducts a SHORT focused interview.",
+      `Ask ONE concise question at a time (max ~${count}).`,
+      "Stop early if sufficient info.",
+      "When finished, emit a single structured summary via the tool 'emit_assessment':",
+      "  - assessment_md: markdown with Assessment/Impression",
+      "  - ddx: array of {name, probability} (0..1), top 3–8 items",
+      "  - plan_md: markdown with Plan (bullet points)",
+      "ALSO call 'emit_ddx' with the same ddx list for the bubble chart UI.",
+      "Only call 'referral_create' if explicitly requested.",
+      "NEVER call share_* or upload_* without explicit instruction."
+    ].join(" ");
   }
 
   async function connectRTC() {
@@ -125,17 +139,27 @@ const ConsultantAgent = forwardRef(function ConsultantAgent(
     const dc = pc.createDataChannel("oai-events");
     dcRef.current = dc;
     wireDC(dc);
-
-    // Mirror LabVoiceAgent: send session.update only when the DC is truly open
     dc.onopen = () => {
-      try {
-        sendSessionUpdate();
-        dcSend({ type: "response.create" });
-      } catch {}
+      // Mirror LabVoiceAgent: push session.update on DC open
+      dcSend({
+        type: "session.update",
+        session: {
+          voice: "alloy",
+          turn_detection: { type: "server_vad" },
+          instructions: buildInstructions(),
+          tools: [
+            { name: "emit_assessment",          type: "function" },
+            { name: "emit_ddx",                 type: "function" },
+            { name: "consult_set_question_count", type: "function" },
+            { name: "referral_create",          type: "function" },
+            { name: "share_open_widget",        type: "function" },
+            { name: "share_update_field",       type: "function" },
+            { name: "share_send",               type: "function" },
+            { name: "upload_lab_result",        type: "function" },
+          ],
+        },
+      });
     };
-
-    // Also handle server-created channel just in case
-    pc.ondatachannel = (e) => e.channel && wireDC(e.channel);
 
     stream.getAudioTracks().forEach((t) => pc.addTrack(t, stream));
     pc.ontrack = (event) => {
@@ -171,7 +195,7 @@ const ConsultantAgent = forwardRef(function ConsultantAgent(
       }
     };
 
-    // 3) Offer (same SDP tweak as lab)
+    // 3) Offer
     let offer = await pc.createOffer({ offerToReceiveAudio: true });
     offer.sdp = offer.sdp.replace(
       /a=rtpmap:\d+ opus\/48000\/2/g,
@@ -179,119 +203,20 @@ const ConsultantAgent = forwardRef(function ConsultantAgent(
     );
     await pc.setLocalDescription(offer);
 
-    // 4) POST SDP → get answer (NO custom headers; session_id only in query)
+    // 4) POST SDP → get answer (CORS-friendly: NO X-Session-Id header, session_id in query)
     const res = await fetch(CONNECT_URL, {
       method: "POST",
+      mode: "cors",
       headers: { "Content-Type": "application/sdp" },
-      body: offer.sdp,
+      body: offer.sdp
     });
 
     if (!res.ok) {
       const text = await res.text().catch(() => "");
-      throw new Error(`/consultant-agent/rtc-connect ${res.status} ${text?.slice(0,120) || ""}`);
+      throw new Error(`/consultant-agent/rtc-connect ${res.status} ${text?.slice(0,160) || ""}`);
     }
     const answer = await res.text();
     await pc.setRemoteDescription({ type: "answer", sdp: answer });
-  }
-
-  async function sendSessionUpdate() {
-    const instructions = [
-      "You are a clinician-facing consultant-assistant that conducts a SHORT focused interview.",
-      `Ask ONE concise question at a time (max ~${questionCount} total).`,
-      "When the doctor answers, ask the next most relevant question. Stop early if enough data.",
-      "When finished, emit a single structured summary via the tool 'emit_assessment':",
-      "  - assessment_md: markdown with Assessment/Impression",
-      "  - ddx: array of {name, probability} (0..1), top 3–8 items",
-      "  - plan_md: markdown with Plan (bullet points)",
-      "ALSO call 'emit_ddx' with the same ddx list for the bubble chart UI.",
-      "Only call 'referral_create' if explicitly requested.",
-      "NEVER call share_* or upload_* without explicit instruction.",
-    ].join(" ");
-
-    const TOOLS = [
-      {
-        name: "emit_assessment",
-        description: "Emit final assessment & plan to UI.",
-        parameters: {
-          type: "object",
-          additionalProperties: false,
-          properties: {
-            assessment_md: { type: "string" },
-            plan_md: { type: "string" },
-            ddx: {
-              type: "array",
-              items: {
-                type: "object",
-                additionalProperties: false,
-                properties: {
-                  name: { type: "string" },
-                  probability: { type: "number" }
-                },
-                required: ["name", "probability"]
-              }
-            }
-          },
-          required: ["assessment_md", "ddx", "plan_md"]
-        }
-      },
-      {
-        name: "emit_ddx",
-        description: "Emit a ddx list for the DDx bubble chart UI.",
-        parameters: {
-          type: "object",
-          additionalProperties: false,
-          properties: {
-            ddx: {
-              type: "array",
-              items: {
-                type: "object",
-                additionalProperties: false,
-                properties: {
-                  name: { type: "string" },
-                  probability: { type: "number" }
-                },
-                required: ["name", "probability"]
-              }
-            }
-          },
-          required: ["ddx"]
-        }
-      },
-      {
-        name: "consult_set_question_count",
-        description: "Adjust how many total questions to ask (1-20).",
-        parameters: { type: "object", additionalProperties: false, properties: { count: { type: "number" } }, required: ["count"] }
-      },
-      {
-        name: "referral_create",
-        description: "Create a referral ticket after explicit confirmation.",
-        parameters: {
-          type: "object", additionalProperties: false,
-          properties: {
-            specialty: { type: "string" },
-            reason: { type: "string" },
-            urgency: { type: "string", enum: ["STAT","High","Routine"] },
-            mode: { type: "string", enum: ["in-person","tele","asynchronous"] }
-          },
-          required: ["specialty"]
-        }
-      },
-      { name: "share_open_widget",   description: "Open share widget (review before sending).", parameters: { type: "object", additionalProperties: false, properties: { recipient_hint: { type: "string" } } } },
-      { name: "share_update_field",  description: "Update a share widget field.", parameters: { type: "object", additionalProperties: false, properties: { field: { type: "string", enum: ["to","subject","body"] }, value: { type: "string" }, append: { type: "boolean" } }, required: ["field","value"] } },
-      { name: "share_send",          description: "Send email after explicit confirmation.", parameters: { type: "object", additionalProperties: false, properties: {} } },
-      { name: "upload_lab_result",   description: "Open lab-results uploader UI.", parameters: { type: "object", additionalProperties: false, properties: {} } },
-    ];
-
-    dcSend({
-      type: "session.update",
-      session: {
-        voice: "alloy",
-        turn_detection: { type: "server_vad" },
-        instructions,
-        tools: TOOLS,
-        metadata: { consult_q_count: questionCount }
-      },
-    });
   }
 
   function dcSend(obj) { try { dcRef.current?.send(JSON.stringify(obj)); } catch {} }
@@ -388,6 +313,8 @@ const ConsultantAgent = forwardRef(function ConsultantAgent(
       const c = Number(args?.count || 6);
       setQuestionCount(c);
       onAgentMessage?.({ who: "system", msg: `Question count set to ${c}.` });
+      // Also refresh instructions for the model immediately
+      dcSend({ type: "session.update", session: { instructions: buildInstructions(c) } });
       return;
     }
 
@@ -395,6 +322,7 @@ const ConsultantAgent = forwardRef(function ConsultantAgent(
       fetch(`${BACKEND}/consultant-agent/referral`, {
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ session_id: sessionId, item: args || {} }),
+        mode: "cors",
       }).catch(() => {});
       onAgentMessage?.({
         who: "bot",
@@ -475,7 +403,7 @@ const ConsultantAgent = forwardRef(function ConsultantAgent(
               onChange={(e) => {
                 const v = Number(e.target.value || 6);
                 setQuestionCount(v);
-                dcSend({ type: "session.update", session: { metadata: { consult_q_count: v } } });
+                dcSend({ type: "session.update", session: { instructions: buildInstructions(v) } });
                 onAgentMessage?.({ who: "system", msg: `Consultant will ask ~${v} questions.` });
               }}
               style={{ fontSize: 12, padding: "2px 6px", borderRadius: 8 }}
@@ -525,7 +453,7 @@ const ConsultantAgent = forwardRef(function ConsultantAgent(
           title={micActive ? "Mute mic" : "Unmute mic"}
           aria-label="Toggle microphone"
         >
-          <FaPhone />
+          <FaMicrophoneAlt />
         </button>
       </div>
     </>
@@ -533,4 +461,5 @@ const ConsultantAgent = forwardRef(function ConsultantAgent(
 });
 
 export default ConsultantAgent;
+
 

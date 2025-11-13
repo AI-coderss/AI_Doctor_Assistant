@@ -5377,11 +5377,37 @@ Patient transcript:
         d["questions"] = cleaned_questions
 
     return {"diagnoses": diags}
-#----Consultant agent endpoint (experimental)----
-consultant_context = {}   # session_id -> {"context": "..."}
-referrals_store    = {}   # session_id -> [ {...}, ... ]
+# =======================consultation API =======================
+# -------------------- Assistant behavior instructions --------------------
+ASSISTANT_BEHAVIOR = (
+    "You are a clinician-facing consultant-assistant that conducts a SHORT focused interview.\n"
+    "- Ask ONE concise question at a time (target ≤ 6 total by default).\n"
+    "- Stop early if sufficient info.\n"
+    "- When finished, call emit_assessment with Assessment markdown, Plan markdown, and a ddx list.\n"
+    "- Also call emit_ddx with the same ddx.\n"
+    "- Only call referral_create if explicitly requested.\n"
+    "- Never call share_* or upload_* without explicit instruction.\n"
+    "- Reply in English only."
+)
 
-# ---------- CORS (global) ----------
+# -------------------- Simple in-memory session store --------------------
+CONSULT_SESS: Dict[str, Dict[str, Any]] = {}  # { session_id: {"context": str} }
+REFERRALS: Dict[str, list] = {}               # { session_id: [ {...}, ... ] }
+
+def _sess(session_id: str) -> Dict[str, Any]:
+    st = CONSULT_SESS.get(session_id)
+    if not st:
+        st = {"context": ""}
+        CONSULT_SESS[session_id] = st
+    return st
+
+def _merged_instructions(extra: str = "") -> str:
+    extra = (extra or "").strip()
+    if not extra:
+        return ASSISTANT_BEHAVIOR
+    return ASSISTANT_BEHAVIOR + "\n\n---\n### Case context\n" + extra
+
+# -------------------- CORS (same shape used across your services) ------------
 ALLOWED_HEADERS = "Content-Type, Authorization, X-Requested-With"
 ALLOWED_METHODS = "GET, POST, OPTIONS"
 
@@ -5402,9 +5428,10 @@ def _options_ok():
         "Cache-Control": "no-cache",
     })
 
-# ---------- Tools schema ----------
+# -------------------- Tools (ALL include type='function') ---------------------
 CONSULT_TOOLS = [
     {
+        "type": "function",
         "name": "emit_assessment",
         "description": "Emit final assessment & plan to UI.",
         "parameters": {
@@ -5430,8 +5457,9 @@ CONSULT_TOOLS = [
         },
     },
     {
+        "type": "function",
         "name": "emit_ddx",
-        "description": "Emit a ddx list for the DDx bubble chart UI.",
+        "description": "Emit a ddx list for the DDx UI.",
         "parameters": {
             "type": "object",
             "additionalProperties": False,
@@ -5453,6 +5481,7 @@ CONSULT_TOOLS = [
         },
     },
     {
+        "type": "function",
         "name": "consult_set_question_count",
         "description": "Adjust how many total questions to ask (1-20).",
         "parameters": {
@@ -5463,6 +5492,7 @@ CONSULT_TOOLS = [
         },
     },
     {
+        "type": "function",
         "name": "referral_create",
         "description": "Create a referral ticket after explicit confirmation.",
         "parameters": {
@@ -5478,6 +5508,7 @@ CONSULT_TOOLS = [
         },
     },
     {
+        "type": "function",
         "name": "share_open_widget",
         "description": "Open email share widget for review (no auto-send).",
         "parameters": {
@@ -5487,6 +5518,7 @@ CONSULT_TOOLS = [
         },
     },
     {
+        "type": "function",
         "name": "share_update_field",
         "description": "Update a share widget field.",
         "parameters": {
@@ -5501,29 +5533,22 @@ CONSULT_TOOLS = [
         },
     },
     {
+        "type": "function",
         "name": "share_send",
-        "description": "Send current email (requires explicit confirmation).",
+        "description": "Send email after explicit confirmation.",
         "parameters": {"type": "object", "additionalProperties": False, "properties": {}},
     },
     {
+        "type": "function",
         "name": "upload_lab_result",
-        "description": "Prompt UI to open lab-results uploader.",
+        "description": "Open lab-results uploader UI.",
         "parameters": {"type": "object", "additionalProperties": False, "properties": {}},
     },
 ]
 
-# === (1) Seed context
-@app.route("/consultant-agent/context", methods=["POST", "OPTIONS"])
-def consultant_context_set():
-    if request.method == "OPTIONS":
-        return _options_ok()
-    data = request.get_json(silent=True) or {}
-    session_id = data.get("session_id") or str(uuid4())
-    consultant_context[session_id] = {"context": (data.get("context") or "").strip()}
-    return jsonify({"ok": True, "session_id": session_id})
-
-# helper: create ephemeral session (mirror LabVoiceAgent; no 'metadata')
+# -------------------- OpenAI Realtime session helper -------------------------
 def _create_realtime_session(instructions: str) -> str:
+    OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
     if not OPENAI_API_KEY:
         raise RuntimeError("OPENAI_API_KEY is not set on the server")
 
@@ -5531,77 +5556,64 @@ def _create_realtime_session(instructions: str) -> str:
         "model": REALTIME_MODEL,
         "voice": REALTIME_VOICE,
         "instructions": instructions,
-        "tool_choice": {"type": "auto"},
-        "tools": CONSULT_TOOLS,
-        "turn_detection": {"type": "server_vad"},
-        # NO 'metadata' here — it is not supported by /realtime/sessions
+        "tools": CONSULT_TOOLS,                 # IMPORTANT: each tool has type='function'
+        "turn_detection": {"type": "server_vad"}
     }
-
     headers = {
         "Authorization": f"Bearer {OPENAI_API_KEY}",
         "Content-Type": "application/json",
-        # (LabVoiceAgent works without OpenAI-Beta for sessions; keep identical)
     }
 
-    try:
-        r = requests.post(OPENAI_SESSION_URL, headers=headers, json=payload, timeout=(10, 30))
-        if not r.ok:
-            raise RuntimeError(f"OpenAI sessions error: {r.status_code} {r.text or ''}")
-        eph = (r.json().get("client_secret") or {}).get("value")
-        if not eph:
-            raise RuntimeError("OpenAI returned empty ephemeral token")
-        return eph
-    except requests.exceptions.RequestException as e:
-        raise RuntimeError(f"OpenAI sessions request failed: {e}")
+    r = requests.post(OPENAI_SESSION_URL, headers=headers, json=payload, timeout=30)
+    if not r.ok:
+        raise RuntimeError(f"OpenAI sessions error: {r.status_code} {r.text}")
+    eph = (r.json().get("client_secret") or {}).get("value")
+    if not eph:
+        raise RuntimeError("Missing ephemeral token from OpenAI")
+    return eph
 
-# === (2) SDP exchange
+# -------------------- Endpoints (context, rtc-connect, referral) --------------
+@app.route("/consultant-agent/context", methods=["POST", "OPTIONS"])
+def consultant_set_context():
+    if request.method == "OPTIONS":
+        return _options_ok()
+    data = request.get_json(silent=True) or {}
+    session_id = data.get("session_id") or str(uuid4())
+    ctx = (data.get("context") or "").strip()
+    _sess(session_id)["context"] = ctx
+    return jsonify({"ok": True, "session_id": session_id})
+
 @app.route("/consultant-agent/rtc-connect", methods=["POST", "OPTIONS"])
 def consultant_rtc_connect():
     if request.method == "OPTIONS":
         return _options_ok()
 
-    client_sdp = request.get_data(as_text=True)
-    if not client_sdp:
+    offer_sdp = request.get_data(as_text=True)
+    if not offer_sdp:
         return Response("No SDP provided", status=400, mimetype="text/plain")
 
-    session_id = request.args.get("session_id") or str(uuid4())
-    ctx = consultant_context.get(session_id, {})
-    extra = (ctx.get("context") or "").strip()
+    # Accept session_id from query or header (CORS-friendly to rely on query only)
+    session_id = request.args.get("session_id") or request.headers.get("X-Session-Id") or "anon"
+    st = _sess(session_id)
+    instructions = _merged_instructions(st.get("context"))
 
-    instructions = (
-        "You are a clinician-facing consultant-assistant that conducts a SHORT focused interview. "
-        "Ask ONE concise question at a time (max ~6 by default). "
-        "Stop early if sufficient info. "
-        "When finished, call emit_assessment with Assessment markdown, Plan markdown, and a ddx list "
-        "(array of {name, probability 0..1}). Also call emit_ddx with the same ddx."
-    )
-    if extra:
-        instructions += f"\n\nCase context:\n{extra}"
-
+    # 1) Create ephemeral session (sessions API)
     try:
         ephemeral = _create_realtime_session(instructions)
     except Exception as e:
-        log.error("Realtime session create failed: %s", e)
+        log.error("Failed to create realtime session: %s", e)
         return Response(f"Failed to create realtime session: {e}", status=500, mimetype="text/plain")
 
+    # 2) Do SDP exchange (RTC API)
     try:
-        sdp_headers = {
-            "Authorization": f"Bearer {ephemeral}",
-            "Content-Type": "application/sdp",
-            # LabVoiceAgent works without OpenAI-Beta here too; keep it identical.
-        }
-        r = requests.post(
-            OPENAI_RTC_URL,
-            headers=sdp_headers,
-            params={"model": REALTIME_MODEL, "voice": REALTIME_VOICE},
-            data=client_sdp,
-            timeout=(10, 60),
-        )
+        rtc_headers = {"Authorization": f"Bearer {ephemeral}", "Content-Type": "application/sdp"}
+        rtc_params  = {"model": REALTIME_MODEL, "voice": REALTIME_VOICE}
+        r = requests.post(OPENAI_RTC_URL, headers=rtc_headers, params=rtc_params, data=offer_sdp, timeout=60)
         if not r.ok:
-            log.error("Realtime SDP exchange failed: %s %s", r.status_code, r.text)
+            log.error("RTC SDP exchange failed: %s %s", r.status_code, r.text)
             return Response(f"SDP exchange error: {r.status_code} {r.text}", status=502, mimetype="text/plain")
         answer = r.content
-    except requests.exceptions.RequestException as e:
+    except Exception as e:
         log.exception("RTC upstream error")
         return Response(f"RTC upstream error: {e}", status=502, mimetype="text/plain")
 
@@ -5609,7 +5621,6 @@ def consultant_rtc_connect():
     resp.headers["Cache-Control"] = "no-cache"
     return resp
 
-# === (3) Record referrals
 @app.route("/consultant-agent/referral", methods=["POST", "OPTIONS"])
 def consultant_referral():
     if request.method == "OPTIONS":
@@ -5617,7 +5628,7 @@ def consultant_referral():
     data = request.get_json(silent=True) or {}
     session_id = data.get("session_id") or str(uuid4())
     item = data.get("item") or {}
-    arr = referrals_store.setdefault(session_id, [])
+    arr = REFERRALS.setdefault(session_id, [])
     arr.append(item)
     return jsonify({"ok": True, "count": len(arr)})
 

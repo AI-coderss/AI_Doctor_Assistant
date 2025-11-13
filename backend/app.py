@@ -196,6 +196,19 @@ CORS(
             "supports_credentials": True,
             "max_age": 86400,
        },
+       r"/consultant-agent/*": {
+        "origins": [
+            "https://ai-doctor-assistant-app-dev.onrender.com",
+            "https://ai-doctor-assistant-backend-server.onrender.com",
+            "http://localhost:3000",
+            "http://127.0.0.1:3000",
+        ],
+        "methods": ["POST", "OPTIONS"],
+        "allow_headers": ["Content-Type", "Authorization", "Accept", "X-Requested-With", "X-Session-Id"],
+        "expose_headers": ["Content-Type"],
+        "supports_credentials": True,
+        "max_age": 86400,
+    },
         r"/meds/parse": {
             "origins": [
                 "https://ai-doctor-assistant-app-dev.onrender.com",
@@ -399,20 +412,21 @@ CORS(
         "allow_headers": ["Content-Type", "Authorization", "X-Session-Id"]
     },
     # --- Consultant Agent (WebRTC + SSE) ---
-r"/consultant-agent/rtc-connect": {
-    "origins": [
-        "https://ai-doctor-assistant-app-dev.onrender.com",
-        "http://localhost:3000",
-    ],
-    "methods": ["POST", "OPTIONS"],
-    "allow_headers": ["Content-Type", "Authorization", "Accept", "X-Requested-With", "X-Session-Id"],
-    "expose_headers": ["Content-Type"],
-    "supports_credentials": True,
-    "max_age": 86400,
-},
+        r"/consultant-agent/rtc-connect": {
+            "origins": [
+                "https://ai-doctor-assistant-app-dev.onrender.com",
+                "http://localhost:3000",
+            ],
+            "methods": ["POST", "OPTIONS"],
+            "allow_headers": ["Content-Type", "Authorization", "Accept", "X-Requested-With", "X-Session-Id"],
+            "expose_headers": ["Content-Type"],
+            "supports_credentials": True,
+            "max_age": 86400,
+        },
 r"/consultant-agent/context": {
     "origins": [
         "https://ai-doctor-assistant-app-dev.onrender.com",
+        "https://ai-doctor-assistant-backend-server.onrender.com",
         "http://localhost:3000",
     ],
     "methods": ["POST", "OPTIONS"],

@@ -5364,99 +5364,201 @@ Patient transcript:
 
     return {"diagnoses": diags}
 # =========================== consultant-agent context ===========================
-@app.route("/consultant-agent/context", methods=["POST", "OPTIONS"])
-def consultant_context():
-    if request.method == "OPTIONS":
-        return make_response(("", 204))
-    data = request.get_json(silent=True) or {}
-    session_id = data.get("session_id")
-    ctx = (data.get("context") or "").strip()
-    if not session_id:
-        return jsonify({"error": "missing session_id"}), 400
-    CONSULT_SESSION[session_id]["context"] = ctx
-    return jsonify({"ok": True})
-# =========================== consultant-agent RTC connect ===========================
-@app.route("/consultant-agent/rtc-connect", methods=["POST", "OPTIONS"])
-def consultant_rtc_connect():
-    if request.method == "OPTIONS":
-        return make_response(("", 204))
-    sdp_offer = request.data.decode("utf-8", "ignore")
-    if not sdp_offer:
-        return jsonify({"error": "missing SDP offer"}), 400
+consultant_context = {}   # session_id -> {"context": "..."}
+referrals_store    = {}   # session_id -> [ {...}, ... ]
 
-    model = os.getenv("OAI_REALTIME_MODEL", "gpt-4o-realtime-preview")  # keep consistent with your stack
-    try:
-        resp = requests.post(
-            f"{OAI_BASE}/realtime?model={model}",
-            headers={
-                **COMMON_JSON_HEADERS,
-                "Content-Type": "application/sdp",
+# --- Tool schema (must match what the frontend told the model it can call) ---
+CONSULT_TOOLS = [
+    {
+        "name": "emit_assessment",
+        "description": "Emit final assessment & plan to UI.",
+        "parameters": {
+            "type": "object",
+            "additionalProperties": False,
+            "properties": {
+                "assessment_md": {"type": "string"},
+                "plan_md": {"type": "string"},
+                "ddx": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "additionalProperties": False,
+                        "properties": {
+                            "name": {"type": "string"},
+                            "probability": {"type": "number"},
+                        },
+                        "required": ["name", "probability"],
+                    },
+                },
             },
-            data=sdp_offer,
-            timeout=60,
-        )
-        return (resp.text, resp.status_code, {"Content-Type": "application/sdp"})
-    except Exception as e:
-        return jsonify({"error": f"webrtc upstream failed: {str(e)}"}), 502
-# =========================== consultant-agent suggest-stream ===========================
-@app.route("/consultant-agent/suggest-stream", methods=["POST", "OPTIONS"])
-def consultant_suggest_stream():
-    if request.method == "OPTIONS":
-        return make_response(("", 204))
-    data = request.get_json(silent=True) or {}
-    session_id = data.get("session_id")
-    if not session_id:
-        return jsonify({"error":"missing session_id"}), 400
+            "required": ["assessment_md", "ddx", "plan_md"],
+        },
+    },
+    {
+        "name": "emit_ddx",
+        "description": "Emit a ddx list for the DDx bubble chart UI.",
+        "parameters": {
+            "type": "object",
+            "additionalProperties": False,
+            "properties": {
+                "ddx": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "additionalProperties": False,
+                        "properties": {
+                            "name": {"type": "string"},
+                            "probability": {"type": "number"},
+                        },
+                        "required": ["name", "probability"],
+                    },
+                }
+            },
+            "required": ["ddx"],
+        },
+    },
+    {
+        "name": "consult_set_question_count",
+        "description": "Adjust how many total questions to ask (1-20).",
+        "parameters": {
+            "type": "object",
+            "additionalProperties": False,
+            "properties": {"count": {"type": "number"}},
+            "required": ["count"],
+        },
+    },
+    {
+        "name": "referral_create",
+        "description": "Create a referral ticket after explicit confirmation.",
+        "parameters": {
+            "type": "object",
+            "additionalProperties": False,
+            "properties": {
+                "specialty": {"type": "string"},
+                "reason": {"type": "string"},
+                "urgency": {"type": "string", "enum": ["STAT", "High", "Routine"]},
+                "mode": {"type": "string", "enum": ["in-person", "tele", "asynchronous"]},
+            },
+            "required": ["specialty"],
+        },
+    },
+    {
+        "name": "share_open_widget",
+        "description": "Open email share widget for review (no auto-send).",
+        "parameters": {
+            "type": "object",
+            "additionalProperties": False,
+            "properties": {"recipient_hint": {"type": "string"}},
+        },
+    },
+    {
+        "name": "share_update_field",
+        "description": "Update a share widget field.",
+        "parameters": {
+            "type": "object",
+            "additionalProperties": False,
+            "properties": {
+                "field": {"type": "string", "enum": ["to", "subject", "body"]},
+                "value": {"type": "string"},
+                "append": {"type": "boolean"},
+            },
+            "required": ["field", "value"],
+        },
+    },
+    {
+        "name": "share_send",
+        "description": "Send current email (requires explicit confirmation).",
+        "parameters": {"type": "object", "additionalProperties": False, "properties": {}},
+    },
+    {
+        "name": "upload_lab_result",
+        "description": "Prompt UI to open lab-results uploader.",
+        "parameters": {"type": "object", "additionalProperties": False, "properties": {}},
+    },
+]
 
-    ctx = (CONSULT_SESSION.get(session_id, {}) or {}).get("context", "")
-    prompt = (
-        "You are a consultant triage assistant. From the transcript/context, "
-        "propose likely specialty consults (max 1 every few seconds). "
-        "Return STRICT JSON in each chunk with: "
-        '{"specialty":"string","reason":"string","urgency":"STAT|High|Routine","mode":"in-person|tele|asynchronous"}'
-        "\nContext:\n" + (ctx or "")
+# === (1) Seed context for a session ===
+@app.post("/consultant-agent/context")
+def consultant_set_context():
+    data = request.get_json(silent=True) or {}
+    session_id = data.get("session_id") or str(uuid4())
+    ctx = (data.get("context") or "").strip()
+    consultant_context[session_id] = {"context": ctx}
+    return jsonify({"ok": True, "session_id": session_id})
+
+# === (2) WebRTC SDP exchange → OpenAI Realtime ===
+@app.post("/consultant-agent/rtc-connect")
+def consultant_rtc_connect():
+    client_sdp = request.get_data(as_text=True)
+    if not client_sdp:
+        return Response("No SDP provided", status=400)
+
+    session_id = request.args.get("session_id") or request.headers.get("X-Session-Id") or str(uuid4())
+    ctx = consultant_context.get(session_id, {})
+    extra = (ctx.get("context") or "").strip()
+
+    base_instructions = (
+        "You are a clinician-facing consultant-assistant that conducts a SHORT focused interview. "
+        "Ask ONE concise question at a time (max ~6 by default). "
+        "Stop early if sufficient info. "
+        "When finished, call emit_assessment with Assessment markdown, Plan markdown, and a ddx list "
+        "(array of {name, probability 0..1}). Also call emit_ddx with the same ddx."
     )
+    if extra:
+        base_instructions += f"\n\nCase context:\n{extra}"
 
-    def generate():
-        try:
-            # Reuse your LangChain RAG stream the same way as other endpoints
-            for chunk in conversation_rag_chain.stream({"chat_history": [], "input": prompt}):
-                token = chunk.get("answer", "").strip()
-                if not token:
-                    continue
-                # Try to parse a JSON-looking block from token
-                try:
-                    # very tolerant extraction like your other helpers
-                    m = re.search(r"\{[\s\S]*\}", token)
-                    if m:
-                        item = json.loads(m.group(0))
-                        payload = {"type": "suggestion", "item": item}
-                        yield "data: " + json.dumps(payload, ensure_ascii=False) + "\n\n"
-                except Exception:
-                    # ignore unparsable chunks
-                    pass
-        except Exception as e:
-            yield "data: " + json.dumps({"type":"error","message":str(e)}) + "\n\n"
+    # 1) Create a short-lived realtime session (ephemeral token)
+    headers = {
+        "Authorization": f"Bearer {OPENAI_API_KEY}",
+        "Content-Type": "application/json",
+        "OpenAI-Beta": "realtime=v1",
+    }
+    payload = {
+        "model": REALTIME_MODEL,
+        "voice": REALTIME_VOICE,
+        "instructions": base_instructions,
+        "tool_choice": {"type": "auto"},
+        "tools": CONSULT_TOOLS,
+        "turn_detection": {"type": "server_vad"},
+        "metadata": {"consult_q_count": 6},
+    }
+    sess = requests.post(OPENAI_SESSION_URL, headers=headers, json=payload, timeout=30)
+    if not sess.ok:
+        log.error("Realtime session create failed: %s", sess.text)
+        return Response("Failed to create realtime session", status=500)
 
-    resp = Response(stream_with_context(generate()), mimetype="text/event-stream")
-    resp.headers["X-Accel-Buffering"] = "no"
-    resp.headers["Cache-Control"] = "no-store"
-    return resp
+    ephemeral = (sess.json().get("client_secret") or {}).get("value")
+    if not ephemeral:
+        return Response("Missing ephemeral token", status=500)
 
-@app.route("/consultant-agent/referral", methods=["POST", "OPTIONS"])
+    # 2) Exchange SDP with OpenAI Realtime
+    sdp_headers = {
+        "Authorization": f"Bearer {ephemeral}",
+        "Content-Type": "application/sdp",
+        "OpenAI-Beta": "realtime=v1",
+    }
+    r = requests.post(
+        OPENAI_REALTIME_URL,
+        headers=sdp_headers,
+        params={"model": REALTIME_MODEL, "voice": REALTIME_VOICE},
+        data=client_sdp,
+        timeout=60,
+    )
+    if not r.ok:
+        log.error("Realtime SDP exchange failed: %s", r.text)
+        return Response("SDP exchange error", status=500)
+
+    return Response(r.content, status=200, mimetype="application/sdp")
+
+# === (3) Optional: store referral tickets created by the tool ===
+@app.post("/consultant-agent/referral")
 def consultant_referral():
-    if request.method == "OPTIONS":
-        return make_response(("", 204))
     data = request.get_json(silent=True) or {}
-    session_id = data.get("session_id")
+    session_id = data.get("session_id") or str(uuid4())
     item = data.get("item") or {}
-    if not session_id:
-        return jsonify({"error":"missing session_id"}), 400
-    CONSULT_SESSION[session_id]["referrals"].append({
-        "ts": datetime.utcnow().isoformat() + "Z",
-        **item
-    })
-    return jsonify({"ok": True, "stored": item})
+    arr = referrals_store.setdefault(session_id, [])
+    arr.append(item)
+    return jsonify({"ok": True, "count": len(arr)})
 
 
 if __name__ == "__main__":

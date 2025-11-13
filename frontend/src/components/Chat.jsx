@@ -608,6 +608,9 @@ const Chat = () => {
   const drgBubbleRef = useRef(null);
   const [showHelperAgent, setShowHelperAgent] = useState(false);
   const [showConsultantAgent, setShowConsultantAgent] = useState(false);
+  // Consultant Assessment Summary (CAS) state
+  const [cas, setCas] = useState(null); // { assessment_md, plan_md, ddx }
+  const [casDDX, setCasDDX] = useState(null); // convenience for live DDx updates
 
   const scrollToDrg = () =>
     drgBubbleRef.current?.scrollIntoView({
@@ -1382,6 +1385,48 @@ const Chat = () => {
       drgStore.setSecondOpinion(shaped); // enables the FAB
     }
   }
+  // --- Highcharts Bubble helper (for DDx) ---
+
+  function ddxToBubbleConfig(ddx = []) {
+    // ddx: [{ name, probability (0..1) }, ...]
+    const pts = (Array.isArray(ddx) ? ddx : []).map((d, i) => {
+      const p = Math.max(0, Math.min(1, Number(d.probability)));
+      return {
+        name: String(d.name || `Item ${i + 1}`),
+        x: i + 1, // ordinal for spacing
+        y: p, // probability on Y axis
+        z: Math.max(6, Math.round(p * 100)), // bubble "size"
+      };
+    });
+
+    return {
+      chart: { type: "bubble", plotBorderWidth: 0, zoomType: "xy" },
+      title: { text: "Differential Diagnosis (Probabilities)" },
+      legend: { enabled: false },
+      xAxis: {
+        title: { text: null },
+        gridLineWidth: 0,
+        labels: { enabled: false },
+      },
+      yAxis: { min: 0, max: 1, title: { text: "Probability" } },
+      tooltip: {
+        useHTML: true,
+        pointFormat: "<b>{point.name}</b><br/>P: {(point.y*100).toFixed(1)}%",
+      },
+      series: [
+        {
+          name: "DDx",
+          data: pts,
+          dataLabels: {
+            enabled: true,
+            format: "{point.name}",
+            filter: { property: "z", operator: ">", value: 12 },
+          },
+        },
+      ],
+      credits: { enabled: false },
+    };
+  }
 
   /** Specialty form streaming (if used elsewhere) */
   const handleFormStreamEvent = (evt) => {
@@ -1416,6 +1461,43 @@ const Chat = () => {
       });
     }
   };
+  // Normalize markdown helper already exists in your file.
+  // We'll reuse it for agent messages flowing into chat UI.
+  function handleConsultantAgentMessage({ who, msg, type, ddx }) {
+    const safe = (msg || "").trim();
+    if (safe) {
+      setChats((prev) => [
+        ...prev,
+        { who: "bot", msg: normalizeMarkdown(safe) },
+      ]);
+    }
+    if (Array.isArray(ddx) && ddx.length) {
+      setCasDDX(ddx);
+    }
+  }
+
+  function handleConsultantDone({ assessment_md, plan_md, ddx }) {
+    const payload = {
+      assessment_md: (assessment_md || "").trim(),
+      plan_md: (plan_md || "").trim(),
+      ddx: Array.isArray(ddx) ? ddx : [],
+    };
+
+    // 1) Append a short notice into the chat stream
+    setChats((prev) => [
+      ...prev,
+      {
+        who: "bot",
+        msg: normalizeMarkdown(
+          "**Consultant assessment is ready.** See the summary bubble below."
+        ),
+      },
+    ]);
+
+    // 2) Store full CAS and DDx for the dedicated summary bubble
+    setCas(payload);
+    setCasDDX(payload.ddx);
+  }
 
   /* ===================== Labs uploader integration ===================== */
   const uploaderRef = useRef(null);
@@ -1854,18 +1936,56 @@ const Chat = () => {
           onEndSession={handleEndSession} // ✅ wire End Session
         />
       )}
-      {/* DRG Validator FAB + overlay */}
-      {/* Helper Agent FAB — identical style to validator FAB */}
-      <ConsultantAgent
-        isVisible={showConsultantAgent}
-        onClose={() => setShowConsultantAgent(false)}
-        sessionId={sessionId}
-        backendBase={VOICE_BASE}     // same host you use for Lab Agent RTC
-        context={useDosageStore.getState()?.transcript || ""}
-      />
+      {/* ===== Consultant Assessment Summary (CAS) bubble (appears in the chat) ===== */}
+      {cas && (
+        <ConsultantAssessmentBubble
+          assessment={cas.assessment_md}
+          plan={cas.plan_md}
+          ddx={cas.ddx}
+        />
+      )}
+
+      {/* ===== Overlay: ConsultantAgent (WebRTC Realtime) ===== */}
+      {showConsultantAgent && (
+        <ConsultantAgent
+          active={showConsultantAgent}                // ✅ FIX: required by component
+          onClose={() => setShowConsultantAgent(false)}
+          sessionId={sessionId}
+          backendBase={VOICE_BASE}
+          context={buildAgentContext()}               // same as Lab Agent context helper
+          onAgentMessage={handleConsultantAgentMessage}
+          onDone={handleConsultantDone}
+        />
+      )}
 
     </div>
   );
+  function ConsultantAssessmentBubble({ assessment, plan, ddx }) {
+    return (
+      <div className="chat-bubble bot cas-bubble" style={{ marginTop: 16 }}>
+        <div style={{ marginBottom: 12 }}>
+          <ReactMarkdown remarkPlugins={[remarkGfm]}>
+            {`### Assessment
+        ${assessment || "_(not provided)_"}
+
+        ### Plan
+        ${plan || "_(not provided)_"}`}
+          </ReactMarkdown>
+        </div>
+
+        {Array.isArray(ddx) && ddx.length > 0 && (
+          <div
+            style={{
+              borderTop: "1px solid var(--card-border)",
+              paddingTop: 12,
+            }}
+          >
+            <ChatBubbleChart config={ddxToBubbleConfig(ddx)} />
+          </div>
+        )}
+      </div>
+    );
+  }
 };
 
 export default Chat;

@@ -27,7 +27,7 @@ const ConsultantAgent = forwardRef(function ConsultantAgent(
   ref
 ) {
   // ---------- constants ----------
-  const BACKEND = String("https://ai-doctor-assistant-backend-server.onrender.com").replace(/\/+$/,"");
+  const BACKEND = String(backendBase || "https://ai-doctor-assistant-backend-server.onrender.com").replace(/\/+$/,"");
   const CONNECT_URL = `${BACKEND}/consultant-agent/rtc-connect?session_id=${encodeURIComponent(sessionId || "")}`;
   const CONTEXT_URL = `${BACKEND}/consultant-agent/context`;
 
@@ -58,8 +58,7 @@ const ConsultantAgent = forwardRef(function ConsultantAgent(
       if (connectedRef.current) return;
       await primeContext();
       await connectRTC();
-      await sendSessionUpdate();
-      dcSend({ type: "response.create" });
+      // session.update will be sent on DataChannel onopen
     },
     async stop() { stopAll(); },
     setQuestionCount(n) {
@@ -89,9 +88,7 @@ const ConsultantAgent = forwardRef(function ConsultantAgent(
       try {
         setStatus("prepping");
         await primeContext();
-        await connectRTC();
-        await sendSessionUpdate();
-        dcSend({ type: "response.create" });
+        await connectRTC(); // session.update gets sent on DC open
       } catch (e) {
         console.error("Consultant start failed:", e);
         onAgentMessage?.({ who: "system", msg: `Consultant agent failed to start (${e?.message || "unknown"}).` });
@@ -109,23 +106,9 @@ const ConsultantAgent = forwardRef(function ConsultantAgent(
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ session_id: sessionId, context }),
-        mode: "cors",
       });
     } catch (e) {
       console.warn("consultant context failed:", e);
-    }
-  }
-
-  // --- tiny manual probe to surface CORS issues clearly
-  async function preflightProbe(url) {
-    try {
-      const res = await fetch(url, { method: "OPTIONS", mode: "cors" });
-      // Some servers reply 204/200; some 405 but with CORS. We tolerate 200–405 if CORS header exists.
-      const okish = (res.status >= 200 && res.status < 300) || res.status === 204 || res.status === 405;
-      const acao = res.headers.get("access-control-allow-origin");
-      if (!okish || !acao) throw new Error(`Preflight missing ACAO (status ${res.status})`);
-    } catch (err) {
-      throw new Error(`CORS preflight failed at ${url}: ${err.message}`);
     }
   }
 
@@ -138,9 +121,21 @@ const ConsultantAgent = forwardRef(function ConsultantAgent(
     // 2) RTCPeerConnection + DataChannel
     const pc = new RTCPeerConnection({ iceServers: [{ urls: "stun:stun.l.google.com:19302" }] });
     pcRef.current = pc;
+
     const dc = pc.createDataChannel("oai-events");
     dcRef.current = dc;
     wireDC(dc);
+
+    // Mirror LabVoiceAgent: send session.update only when the DC is truly open
+    dc.onopen = () => {
+      try {
+        sendSessionUpdate();
+        dcSend({ type: "response.create" });
+      } catch {}
+    };
+
+    // Also handle server-created channel just in case
+    pc.ondatachannel = (e) => e.channel && wireDC(e.channel);
 
     stream.getAudioTracks().forEach((t) => pc.addTrack(t, stream));
     pc.ontrack = (event) => {
@@ -176,7 +171,7 @@ const ConsultantAgent = forwardRef(function ConsultantAgent(
       }
     };
 
-    // 3) Offer
+    // 3) Offer (same SDP tweak as lab)
     let offer = await pc.createOffer({ offerToReceiveAudio: true });
     offer.sdp = offer.sdp.replace(
       /a=rtpmap:\d+ opus\/48000\/2/g,
@@ -184,18 +179,11 @@ const ConsultantAgent = forwardRef(function ConsultantAgent(
     );
     await pc.setLocalDescription(offer);
 
-    // 4) CORS preflight probe (clear error if missing)
-    await preflightProbe(CONNECT_URL);
-
-    // 5) POST SDP → get answer
+    // 4) POST SDP → get answer (NO custom headers; session_id only in query)
     const res = await fetch(CONNECT_URL, {
       method: "POST",
-      mode: "cors",
-      headers: {
-        "Content-Type": "application/sdp",
-        "X-Session-Id": sessionId || "",
-      },
-      body: offer.sdp
+      headers: { "Content-Type": "application/sdp" },
+      body: offer.sdp,
     });
 
     if (!res.ok) {
@@ -407,7 +395,6 @@ const ConsultantAgent = forwardRef(function ConsultantAgent(
       fetch(`${BACKEND}/consultant-agent/referral`, {
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ session_id: sessionId, item: args || {} }),
-        mode: "cors",
       }).catch(() => {});
       onAgentMessage?.({
         who: "bot",
@@ -546,3 +533,4 @@ const ConsultantAgent = forwardRef(function ConsultantAgent(
 });
 
 export default ConsultantAgent;
+

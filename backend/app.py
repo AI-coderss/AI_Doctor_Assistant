@@ -5377,11 +5377,34 @@ Patient transcript:
         d["questions"] = cleaned_questions
 
     return {"diagnoses": diags}
-# =========================== consultant-agent context ===========================
+# ----------------- In-memory stores -----------------
 consultant_context = {}   # session_id -> {"context": "..."}
 referrals_store    = {}   # session_id -> [ {...}, ... ]
 
-# --- Tool schema (must match what the frontend told the model it can call) ---
+# ----------------- CORS helper -----------------
+ALLOWED_HEADERS = "Content-Type, Authorization, X-Session-Id"
+ALLOWED_METHODS = "GET, POST, OPTIONS"
+
+@app.after_request
+def add_cors_headers(resp):
+    origin = request.headers.get("Origin")
+    # If you want to restrict, replace "*" with your web origin.
+    resp.headers["Access-Control-Allow-Origin"] = origin or "*"
+    resp.headers["Vary"] = "Origin"
+    resp.headers["Access-Control-Allow-Methods"] = ALLOWED_METHODS
+    resp.headers["Access-Control-Allow-Headers"] = ALLOWED_HEADERS
+    # No credentials needed for this flow; omit ACA-Credentials
+    return resp
+
+def _options_ok():
+    return ("", 204, {
+        "Access-Control-Allow-Origin": request.headers.get("Origin") or "*",
+        "Access-Control-Allow-Methods": ALLOWED_METHODS,
+        "Access-Control-Allow-Headers": ALLOWED_HEADERS,
+        "Cache-Control": "no-cache",
+    })
+
+# --- Tool schema (must match the frontend) ---
 CONSULT_TOOLS = [
     {
         "name": "emit_assessment",
@@ -5492,8 +5515,11 @@ CONSULT_TOOLS = [
 ]
 
 # === (1) Seed context for a session ===
-@app.post("/consultant-agent/context")
+@app.route("/consultant-agent/context", methods=["POST", "OPTIONS"])
 def consultant_set_context():
+    if request.method == "OPTIONS":
+        return _options_ok()
+
     data = request.get_json(silent=True) or {}
     session_id = data.get("session_id") or str(uuid4())
     ctx = (data.get("context") or "").strip()
@@ -5501,12 +5527,16 @@ def consultant_set_context():
     return jsonify({"ok": True, "session_id": session_id})
 
 # === (2) WebRTC SDP exchange → OpenAI Realtime ===
-@app.post("/consultant-agent/rtc-connect")
+@app.route("/consultant-agent/rtc-connect", methods=["POST", "OPTIONS"])
 def consultant_rtc_connect():
+    if request.method == "OPTIONS":
+        return _options_ok()
+
     client_sdp = request.get_data(as_text=True)
     if not client_sdp:
-        return Response("No SDP provided", status=400)
+        return Response("No SDP provided", status=400, mimetype="text/plain")
 
+    # Accept session_id from query or header; frontend now sends via query only
     session_id = request.args.get("session_id") or request.headers.get("X-Session-Id") or str(uuid4())
     ctx = consultant_context.get(session_id, {})
     extra = (ctx.get("context") or "").strip()
@@ -5536,14 +5566,17 @@ def consultant_rtc_connect():
         "turn_detection": {"type": "server_vad"},
         "metadata": {"consult_q_count": 6},
     }
-    sess = requests.post(OPENAI_SESSION_URL, headers=headers, json=payload, timeout=30)
-    if not sess.ok:
-        log.error("Realtime session create failed: %s", sess.text)
-        return Response("Failed to create realtime session", status=500)
-
-    ephemeral = (sess.json().get("client_secret") or {}).get("value")
-    if not ephemeral:
-        return Response("Missing ephemeral token", status=500)
+    try:
+        sess = requests.post(OPENAI_SESSION_URL, headers=headers, json=payload, timeout=30)
+        if not sess.ok:
+            log.error("Realtime session create failed: %s", sess.text)
+            return Response("Failed to create realtime session", status=500, mimetype="text/plain")
+        ephemeral = (sess.json().get("client_secret") or {}).get("value")
+        if not ephemeral:
+            return Response("Missing ephemeral token", status=502, mimetype="text/plain")
+    except Exception as e:
+        log.exception("Realtime session error")
+        return Response(f"Realtime session error: {e}", status=502, mimetype="text/plain")
 
     # 2) Exchange SDP with OpenAI Realtime
     sdp_headers = {
@@ -5551,22 +5584,32 @@ def consultant_rtc_connect():
         "Content-Type": "application/sdp",
         "OpenAI-Beta": "realtime=v1",
     }
-    r = requests.post(
-        OPENAI_REALTIME_URL,
-        headers=sdp_headers,
-        params={"model": REALTIME_MODEL, "voice": REALTIME_VOICE},
-        data=client_sdp,
-        timeout=60,
-    )
-    if not r.ok:
-        log.error("Realtime SDP exchange failed: %s", r.text)
-        return Response("SDP exchange error", status=500)
+    try:
+        r = requests.post(
+            OPENAI_REALTIME_URL,
+            headers=sdp_headers,
+            params={"model": REALTIME_MODEL, "voice": REALTIME_VOICE},
+            data=client_sdp,
+            timeout=60,
+        )
+        if not r.ok:
+            log.error("Realtime SDP exchange failed: %s", r.text)
+            return Response("SDP exchange error", status=502, mimetype="text/plain")
+        answer = r.content
+    except Exception as e:
+        log.exception("RTC upstream error")
+        return Response(f"RTC upstream error: {e}", status=502, mimetype="text/plain")
 
-    return Response(r.content, status=200, mimetype="application/sdp")
+    resp = Response(answer, status=200, mimetype="application/sdp")
+    resp.headers["Cache-Control"] = "no-cache"
+    return resp
 
 # === (3) Optional: store referral tickets created by the tool ===
-@app.post("/consultant-agent/referral")
+@app.route("/consultant-agent/referral", methods=["POST", "OPTIONS"])
 def consultant_referral():
+    if request.method == "OPTIONS":
+        return _options_ok()
+
     data = request.get_json(silent=True) or {}
     session_id = data.get("session_id") or str(uuid4())
     item = data.get("item") or {}

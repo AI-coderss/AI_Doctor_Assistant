@@ -16,6 +16,13 @@
 
   --input-bg: #eee;
   --input-radius: 50px;
+
+  /* NEW: animation timing system */
+  --xform-ease: cubic-bezier(.22, .61, .36, 1); /* smoother ease-out */
+  --xform-dur: 1.05s;                           /* forms slide/opacity */
+  --overlay-dur: 1.15s;                         /* big overlay rail */
+  --panel-dur: 1.0s;                            /* overlay panel labels */
+  --panel-delay: .08s;                          /* slight stagger */
 }
 
 /* Dark mode */
@@ -114,10 +121,15 @@
   position: absolute;
   top: 0;
   height: 100%;
-  transition: all .6s ease-in-out;
   display: flex;
   align-items: center;
   justify-content: center;
+
+  /* SLOWER, SMOOTHER: explicitly animate transform + opacity */
+  transition:
+    transform var(--xform-dur) var(--xform-ease),
+    opacity   var(--xform-dur) var(--xform-ease);
+  will-change: transform, opacity;
 }
 .auth-form form {
   background: transparent;
@@ -141,6 +153,11 @@
 .auth-signin { left: 0; width: 50%; z-index: 2; }
 .auth-signup { left: 0; width: 50%; z-index: 1; opacity: 0; }
 
+/* During opposite state, block clicks on the hidden side */
+.auth-shell.is-signup .auth-signin { pointer-events: none; }
+.auth-shell:not(.is-signup) .auth-signup { pointer-events: none; }
+
+/* Overlay rail + panels (SLOWER) */
 .auth-overlay-wrap {
   position: absolute;
   top: 0;
@@ -148,8 +165,9 @@
   width: 50%;
   height: 100%;
   overflow: hidden;
-  transition: transform .6s ease-in-out;
+  transition: transform var(--overlay-dur) var(--xform-ease);
   z-index: 100;
+  will-change: transform;
 }
 .auth-overlay {
   position: relative;
@@ -159,7 +177,8 @@
   color: #fff;
   background: linear-gradient(90deg, var(--brand-primary), var(--brand-primary-dark)) no-repeat 0 0/cover;
   transform: translateY(0);
-  transition: transform .6s ease-in-out;
+  transition: transform var(--overlay-dur) var(--xform-ease);
+  will-change: transform;
 }
 .auth-overlay-panel {
   position: absolute;
@@ -172,12 +191,22 @@
   justify-content: center;
   align-items: center;
   text-align: center;
+
+  /* panel labels glide a touch slower, with a tiny delay */
+  transition: transform var(--panel-dur) var(--xform-ease);
+  will-change: transform;
 }
 .auth-overlay-panel.left  { left: 0; transform: translateY(-20%); }
 .auth-overlay-panel.right { right: 0; transform: translateY(0); }
 
-/* Flip to Sign Up */
-.auth-shell.is-signup .auth-signin { transform: translateY(100%); }
+/* Add a subtle stagger when switching */
+.auth-shell.is-signup .auth-overlay-panel.left,
+.auth-shell:not(.is-signup) .auth-overlay-panel.right {
+  transition-delay: var(--panel-delay);
+}
+
+/* Flip to Sign Up (slower thanks to vars above) */
+.auth-shell.is-signup .auth-signin { transform: translateY(100%); opacity: 0.0; }
 .auth-shell.is-signup .auth-overlay-wrap { transform: translateX(-100%); }
 .auth-shell.is-signup .auth-signup { transform: translateX(100%); opacity: 1; z-index: 5; }
 .auth-shell.is-signup .auth-overlay { transform: translateX(50%); }
@@ -273,6 +302,17 @@
 }
 @media (prefers-color-scheme: dark) {
   .auth-hint { background: rgba(0,0,0,.5); color:#fff; border-color: rgba(255,255,255,.12); }
+}
+
+/* ===== Respect reduced motion ===== */
+@media (prefers-reduced-motion: reduce) {
+  .auth-form,
+  .auth-overlay-wrap,
+  .auth-overlay,
+  .auth-overlay-panel {
+    transition-duration: 0.01ms !important;
+    transition-delay: 0ms !important;
+  }
 }
 
 /* ===== Responsive ===== */

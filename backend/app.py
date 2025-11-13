@@ -398,6 +398,52 @@ CORS(
         "methods": ["GET", "POST", "OPTIONS"],
         "allow_headers": ["Content-Type", "Authorization", "X-Session-Id"]
     },
+    # --- Consultant Agent (WebRTC + SSE) ---
+r"/consultant-agent/rtc-connect": {
+    "origins": [
+        "https://ai-doctor-assistant-app-dev.onrender.com",
+        "http://localhost:3000",
+    ],
+    "methods": ["POST", "OPTIONS"],
+    "allow_headers": ["Content-Type", "Authorization", "Accept", "X-Requested-With", "X-Session-Id"],
+    "expose_headers": ["Content-Type"],
+    "supports_credentials": True,
+    "max_age": 86400,
+},
+r"/consultant-agent/context": {
+    "origins": [
+        "https://ai-doctor-assistant-app-dev.onrender.com",
+        "http://localhost:3000",
+    ],
+    "methods": ["POST", "OPTIONS"],
+    "allow_headers": ["Content-Type", "Authorization", "Accept", "X-Requested-With", "X-Session-Id"],
+    "expose_headers": ["Content-Type"],
+    "supports_credentials": True,
+    "max_age": 86400,
+},
+r"/consultant-agent/suggest-stream": {
+    "origins": [
+        "https://ai-doctor-assistant-app-dev.onrender.com",
+        "http://localhost:3000",
+    ],
+    "methods": ["POST", "OPTIONS"],
+    "allow_headers": ["Content-Type", "Authorization", "Accept", "X-Requested-With", "X-Session-Id"],
+    "expose_headers": ["Content-Type"],
+    "supports_credentials": True,
+    "max_age": 86400,
+},
+r"/consultant-agent/referral": {
+    "origins": [
+        "https://ai-doctor-assistant-app-dev.onrender.com",
+        "http://localhost:3000",
+    ],
+    "methods": ["POST", "OPTIONS"],
+    "allow_headers": ["Content-Type", "Authorization", "Accept", "X-Requested-With", "X-Session-Id"],
+    "expose_headers": ["Content-Type"],
+    "supports_credentials": True,
+    "max_age": 86400,
+},
+
     }
 )
 
@@ -407,6 +453,7 @@ app.config["MAX_CONTENT_LENGTH"] = int(os.environ.get("OCR_MAX_BYTES", 20 * 1024
 
 chat_sessions = {}
 collection_name = os.getenv("QDRANT_COLLECTION_NAME")
+CONSULT_SESSION = defaultdict(lambda: {"context": "", "referrals": []})
 
 logging.basicConfig(level=logging.INFO)
 log = logging.getLogger("rtc-transcribe")
@@ -5316,6 +5363,100 @@ Patient transcript:
         d["questions"] = cleaned_questions
 
     return {"diagnoses": diags}
+# =========================== consultant-agent context ===========================
+@app.route("/consultant-agent/context", methods=["POST", "OPTIONS"])
+def consultant_context():
+    if request.method == "OPTIONS":
+        return make_response(("", 204))
+    data = request.get_json(silent=True) or {}
+    session_id = data.get("session_id")
+    ctx = (data.get("context") or "").strip()
+    if not session_id:
+        return jsonify({"error": "missing session_id"}), 400
+    CONSULT_SESSION[session_id]["context"] = ctx
+    return jsonify({"ok": True})
+# =========================== consultant-agent RTC connect ===========================
+@app.route("/consultant-agent/rtc-connect", methods=["POST", "OPTIONS"])
+def consultant_rtc_connect():
+    if request.method == "OPTIONS":
+        return make_response(("", 204))
+    sdp_offer = request.data.decode("utf-8", "ignore")
+    if not sdp_offer:
+        return jsonify({"error": "missing SDP offer"}), 400
+
+    model = os.getenv("OAI_REALTIME_MODEL", "gpt-4o-realtime-preview")  # keep consistent with your stack
+    try:
+        resp = requests.post(
+            f"{OAI_BASE}/realtime?model={model}",
+            headers={
+                **COMMON_JSON_HEADERS,
+                "Content-Type": "application/sdp",
+            },
+            data=sdp_offer,
+            timeout=60,
+        )
+        return (resp.text, resp.status_code, {"Content-Type": "application/sdp"})
+    except Exception as e:
+        return jsonify({"error": f"webrtc upstream failed: {str(e)}"}), 502
+# =========================== consultant-agent suggest-stream ===========================
+@app.route("/consultant-agent/suggest-stream", methods=["POST", "OPTIONS"])
+def consultant_suggest_stream():
+    if request.method == "OPTIONS":
+        return make_response(("", 204))
+    data = request.get_json(silent=True) or {}
+    session_id = data.get("session_id")
+    if not session_id:
+        return jsonify({"error":"missing session_id"}), 400
+
+    ctx = (CONSULT_SESSION.get(session_id, {}) or {}).get("context", "")
+    prompt = (
+        "You are a consultant triage assistant. From the transcript/context, "
+        "propose likely specialty consults (max 1 every few seconds). "
+        "Return STRICT JSON in each chunk with: "
+        '{"specialty":"string","reason":"string","urgency":"STAT|High|Routine","mode":"in-person|tele|asynchronous"}'
+        "\nContext:\n" + (ctx or "")
+    )
+
+    def generate():
+        try:
+            # Reuse your LangChain RAG stream the same way as other endpoints
+            for chunk in conversation_rag_chain.stream({"chat_history": [], "input": prompt}):
+                token = chunk.get("answer", "").strip()
+                if not token:
+                    continue
+                # Try to parse a JSON-looking block from token
+                try:
+                    # very tolerant extraction like your other helpers
+                    m = re.search(r"\{[\s\S]*\}", token)
+                    if m:
+                        item = json.loads(m.group(0))
+                        payload = {"type": "suggestion", "item": item}
+                        yield "data: " + json.dumps(payload, ensure_ascii=False) + "\n\n"
+                except Exception:
+                    # ignore unparsable chunks
+                    pass
+        except Exception as e:
+            yield "data: " + json.dumps({"type":"error","message":str(e)}) + "\n\n"
+
+    resp = Response(stream_with_context(generate()), mimetype="text/event-stream")
+    resp.headers["X-Accel-Buffering"] = "no"
+    resp.headers["Cache-Control"] = "no-store"
+    return resp
+
+@app.route("/consultant-agent/referral", methods=["POST", "OPTIONS"])
+def consultant_referral():
+    if request.method == "OPTIONS":
+        return make_response(("", 204))
+    data = request.get_json(silent=True) or {}
+    session_id = data.get("session_id")
+    item = data.get("item") or {}
+    if not session_id:
+        return jsonify({"error":"missing session_id"}), 400
+    CONSULT_SESSION[session_id]["referrals"].append({
+        "ts": datetime.utcnow().isoformat() + "Z",
+        **item
+    })
+    return jsonify({"ok": True, "stored": item})
 
 
 if __name__ == "__main__":

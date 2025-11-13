@@ -10,7 +10,13 @@ import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import Mermaid from "./Mermaid.jsx";
 import BaseOrb from "./BaseOrb.jsx";
-import { FaMicrophoneAlt, FaFlask, FaPlus, FaPaperPlane } from "react-icons/fa";
+import {
+  FaMicrophoneAlt,
+  FaFlask,
+  FaPlus,
+  FaPaperPlane,
+  FaUserMd,
+} from "react-icons/fa";
 import { motion, AnimatePresence } from "framer-motion";
 import useAudioForVisualizerStore from "../store/useAudioForVisualizerStore.js";
 import "../styles/chat.css";
@@ -27,6 +33,7 @@ import useDosageStore from "../store/dosageStore";
 import CalculateDosageButton from "./CalculateDosageButton";
 import MedicalImageAnalyzer from "./MedicalImageAnalyzer";
 import ChatBubbleChart from "./ChatBubbleChart.jsx";
+import ConsultantAgent from "./ConsultantAgent.jsx";
 import { Howl } from "howler";
 import useDRGValidatorStore from "../store/useDRGValidatorStore";
 import DRGValidator from "./DRGValidator";
@@ -513,7 +520,7 @@ function SecondOpinionTabbedBubble({
   const transcript =
     typeof buildAgentContext === "function"
       ? buildAgentContext()
-      : (useDosageStore.getState()?.transcript || "");
+      : useDosageStore.getState()?.transcript || "";
 
   const TABS = [
     { id: "opinion", label: "Second Opinion" },
@@ -560,7 +567,6 @@ function SecondOpinionTabbedBubble({
   );
 }
 
-
 const Chat = () => {
   const [chats, setChats] = useState([
     {
@@ -601,9 +607,13 @@ const Chat = () => {
   const drgAnchorRef = useRef(null);
   const drgBubbleRef = useRef(null);
   const [showHelperAgent, setShowHelperAgent] = useState(false);
+  const [showConsultantAgent, setShowConsultantAgent] = useState(false);
 
   const scrollToDrg = () =>
-    drgBubbleRef.current?.scrollIntoView({ behavior: "smooth", block: "center" });
+    drgBubbleRef.current?.scrollIntoView({
+      behavior: "smooth",
+      block: "center",
+    });
   // ✅ Fresh session per mount (no localStorage persistence)
   // ✅ persistent across reloads (same behavior as the old working file)
   const [sessionId, setSessionId] = useState(() => {
@@ -661,7 +671,10 @@ const Chat = () => {
   useEffect(() => {
     if (drgStore.open) {
       requestAnimationFrame(() => {
-        drgAnchorRef.current?.scrollIntoView({ behavior: "smooth", block: "center" });
+        drgAnchorRef.current?.scrollIntoView({
+          behavior: "smooth",
+          block: "center",
+        });
       });
     }
   }, [drgStore.open]);
@@ -1251,9 +1264,15 @@ const Chat = () => {
       return updated;
     });
     // keep store in sync (enables FAB logic, etc.)
-    try { drgStore.setSecondOpinion?.(ensureOpinionShape(tryParseJsonLoose(jsonRaw))); } catch { }
+    try {
+      drgStore.setSecondOpinion?.(
+        ensureOpinionShape(tryParseJsonLoose(jsonRaw))
+      );
+    } catch { }
     // run validation and scroll to the new bubble
-    try { drgStore.validateNow(BACKEND_BASE, sessionId); } catch { }
+    try {
+      drgStore.validateNow(BACKEND_BASE, sessionId);
+    } catch { }
     scrollToDrg();
     // 🔗 DRG validator wiring (the piece that was missing)
     if (shaped) {
@@ -1262,7 +1281,10 @@ const Chat = () => {
         drgStore.setSecondOpinion(shaped);
 
         // 2) Immediately run the validator once per generated opinion
-        if (!drgTriggeredRef.current && typeof drgStore.validateNow === "function") {
+        if (
+          !drgTriggeredRef.current &&
+          typeof drgStore.validateNow === "function"
+        ) {
           drgTriggeredRef.current = true;
           drgStore.validateNow(BACKEND_BASE, sessionId);
           // Optional: quick debug signal
@@ -1608,7 +1630,11 @@ const Chat = () => {
                     narrative={chat.narrative}
                     sessionId={sessionId}
                     handleAddLabToTable={handleAddLabToTable}
-                    buildAgentContext={typeof buildAgentContext === "function" ? buildAgentContext : null}
+                    buildAgentContext={
+                      typeof buildAgentContext === "function"
+                        ? buildAgentContext
+                        : null
+                    }
                   />
                 ) : isLabOrders ? (
                   <LabOrdersTable
@@ -1616,7 +1642,6 @@ const Chat = () => {
                     onSend={sendLabOrdersToBackend}
                     sending={sendingToLab}
                   />
-
                 ) : chat?.type === "chart_pie" && chat.highchartsConfig ? (
                   <ChatBubbleChart config={chat.highchartsConfig} />
                 ) : chat?.type === "chart_pie_loading" ? (
@@ -1759,71 +1784,17 @@ const Chat = () => {
         </div>
 
         <div className="tool-wrapper">
-          <div className="meds-uploader micro dense">
-            <MedicationChecker
-              ref={medUploaderRef}
-              autoSend={true}
-              ocrLanguage="eng"
-              engine="2"
-              onAIStreamToken={(chunk) => {
-                if (!medsStreamingRef.current) {
-                  medsStreamingRef.current = true;
-                  medsBufferRef.current = "";
-                  setChats((prev) => [
-                    ...prev,
-                    { msg: "", who: "bot", streaming: true },
-                  ]);
-                }
-                medsBufferRef.current += String(chunk || "");
-                setChats((prev) => {
-                  const updated = [...prev];
-                  const last = updated[updated.length - 1];
-                  if (last && last.streaming) last.msg = medsBufferRef.current;
-                  return updated;
-                });
-              }}
-              onBeforeSendToAI={(text, meta) =>
-                [
-                  "You are a clinical pharmacology assistant specializing in medication reconciliation and interaction checking.",
-                  "Input below contains OCR-extracted medication lists (may include free text, photos, or CCD text).",
-                  "Tasks:",
-                  "1) Normalize names to RxNorm ingredients/brands; include RxNorm CUIs where possible.",
-                  "2) Flag duplicates (same ingredient, class, or therapeutic overlap).",
-                  "3) Check adult dose ranges (typical) and highlight out-of-range doses.",
-                  "4) Interaction check (major/moderate/minor) with brief mechanisms and clinical actions.",
-                  "5) Black-box warnings and major contraindications (cross-check DailyMed).",
-                  "6) Output a concise, actionable summary with bullet points, and a table of findings.",
-                  `SOURCE FILE: ${meta?.filename || "Unknown"}`,
-                  "",
-                  "=== MED LIST (OCR) ===",
-                  text,
-                ].join("\n")
-              }
-              onAIResponse={(payload) => {
-                const full =
-                  payload?.text ??
-                  (typeof payload === "string"
-                    ? payload
-                    : JSON.stringify(payload));
-                setChats((prev) => {
-                  const updated = [...prev];
-                  if (medsStreamingRef.current) {
-                    medsStreamingRef.current = false;
-                    const last = updated[updated.length - 1];
-                    if (last && last.streaming) {
-                      last.streaming = false;
-                      last.msg = normalizeMarkdown(full || "");
-                      return updated;
-                    }
-                  }
-                  return [
-                    ...updated,
-                    { msg: normalizeMarkdown(full || ""), who: "bot" },
-                  ];
-                });
-              }}
-            />
-          </div>
+          <button
+            className="lab-agent-open-btn"
+            onClick={() => {
+              setShowConsultantAgent(true);
+              window.dispatchEvent(new CustomEvent("close-tools-drawer"));
+            }}
+            title="Open Consultant Agent"
+          >
+            <FaUserMd style={{ marginRight: 6 }} />
+            Consultant
+          </button>
         </div>
 
         <div className="tool-wrapper">
@@ -1885,8 +1856,13 @@ const Chat = () => {
       )}
       {/* DRG Validator FAB + overlay */}
       {/* Helper Agent FAB — identical style to validator FAB */}
-      
-     
+      <ConsultantAgent
+        isVisible={showConsultantAgent}
+        onClose={() => setShowConsultantAgent(false)}
+        sessionId={sessionId}
+        backendBase={VOICE_BASE}     // same host you use for Lab Agent RTC
+        context={useDosageStore.getState()?.transcript || ""}
+      />
 
     </div>
   );
@@ -1912,33 +1888,33 @@ const DrawComponent = ({ children }) => {
   }, []);
 
   return (
-  <div
-    className="DrawerRoot"
-    style={{ position: "fixed", bottom: "45px", left: "25px", zIndex: 100 }}
-  >
-    <AnimatePresence>
-      {isOpen && (
-        <motion.div
-          className="tools-grid"
-          initial={{ opacity: 0, y: 50, scale: 0.9 }}
-          animate={{ opacity: 1, y: 0, scale: 1 }}
-          exit={{ opacity: 0, y: 50, scale: 0.9 }}
-          transition={{ duration: 0.3, ease: "easeInOut" }}
-        >
-          {children}
-        </motion.div>
-      )}
-    </AnimatePresence>
-
-    <button
-      onClick={() => setIsOpen((prev) => !prev)}
-      className="drawer-toggle-btn"
-      title="Toggle Tools"
+    <div
+      className="DrawerRoot"
+      style={{ position: "fixed", bottom: "45px", left: "25px", zIndex: 100 }}
     >
-      {isOpen ? "✖" : "🛠️"}
-    </button>
-  </div>
-);
+      <AnimatePresence>
+        {isOpen && (
+          <motion.div
+            className="tools-grid"
+            initial={{ opacity: 0, y: 50, scale: 0.9 }}
+            animate={{ opacity: 1, y: 0, scale: 1 }}
+            exit={{ opacity: 0, y: 50, scale: 0.9 }}
+            transition={{ duration: 0.3, ease: "easeInOut" }}
+          >
+            {children}
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      <button
+        onClick={() => setIsOpen((prev) => !prev)}
+        className="drawer-toggle-btn"
+        title="Toggle Tools"
+      >
+        {isOpen ? "✖" : "🛠️"}
+      </button>
+    </div>
+  );
 };
 
 /* Mermaid collapsible */

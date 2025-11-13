@@ -710,3 +710,17 @@ html[data-theme="dark"] .pending-item .badge {
     display: none;
   }
 }
+/* === ConsultantAgent small additions (re-uses base .voice-assistant styles) === */
+
+.va-title svg { opacity: .9; }
+
+.pending-dock .badge {
+  display: inline-block;
+  font-size: 11px;
+  font-weight: 700;
+  padding: 2px 8px;
+  border-radius: 999px;
+  border: 1px solid var(--card-border, rgba(0,0,0,.1));
+  background: var(--badge-bg, rgba(57,81,218,.08));
+  color: var(--badge-ink, var(--brand-primary, #3951DA));
+}

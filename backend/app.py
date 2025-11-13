@@ -5377,6 +5377,7 @@ Patient transcript:
         d["questions"] = cleaned_questions
 
     return {"diagnoses": diags}
+#----Consultant agent endpoint (experimental)----
 consultant_context = {}   # session_id -> {"context": "..."}
 referrals_store    = {}   # session_id -> [ {...}, ... ]
 
@@ -5401,7 +5402,7 @@ def _options_ok():
         "Cache-Control": "no-cache",
     })
 
-# ---------- Tools schema (must match frontend) ----------
+# ---------- Tools schema ----------
 CONSULT_TOOLS = [
     {
         "name": "emit_assessment",
@@ -5521,8 +5522,8 @@ def consultant_context_set():
     consultant_context[session_id] = {"context": (data.get("context") or "").strip()}
     return jsonify({"ok": True, "session_id": session_id})
 
-# --- helper: create ephemeral with robust retries & clear errors
-def _create_realtime_session(instructions: str):
+# helper: create ephemeral session (mirror LabVoiceAgent; no 'metadata')
+def _create_realtime_session(instructions: str) -> str:
     if not OPENAI_API_KEY:
         raise RuntimeError("OPENAI_API_KEY is not set on the server")
 
@@ -5533,30 +5534,23 @@ def _create_realtime_session(instructions: str):
         "tool_choice": {"type": "auto"},
         "tools": CONSULT_TOOLS,
         "turn_detection": {"type": "server_vad"},
-        "metadata": {"consult_q_count": 6},
+        # NO 'metadata' here — it is not supported by /realtime/sessions
     }
 
-    # Try WITH Beta header first (some tenants/models require it)
-    headers_beta = {
+    headers = {
         "Authorization": f"Bearer {OPENAI_API_KEY}",
         "Content-Type": "application/json",
-        "OpenAI-Beta": "realtime=v1",
-    }
-    # Fallback WITHOUT Beta header (mirrors your LabVoiceAgent)
-    headers_plain = {
-        "Authorization": f"Bearer {OPENAI_API_KEY}",
-        "Content-Type": "application/json",
+        # (LabVoiceAgent works without OpenAI-Beta for sessions; keep identical)
     }
 
     try:
-        r = requests.post(OPENAI_SESSION_URL, headers=headers_beta, json=payload, timeout=(10, 30))
+        r = requests.post(OPENAI_SESSION_URL, headers=headers, json=payload, timeout=(10, 30))
         if not r.ok:
-            # Try again without Beta header
-            r2 = requests.post(OPENAI_SESSION_URL, headers=headers_plain, json=payload, timeout=(10, 30))
-            if not r2.ok:
-                raise RuntimeError(f"OpenAI sessions error: {r.status_code} {r.text or ''} | retry: {r2.status_code} {r2.text or ''}")
-            return (r2.json().get("client_secret") or {}).get("value")
-        return (r.json().get("client_secret") or {}).get("value")
+            raise RuntimeError(f"OpenAI sessions error: {r.status_code} {r.text or ''}")
+        eph = (r.json().get("client_secret") or {}).get("value")
+        if not eph:
+            raise RuntimeError("OpenAI returned empty ephemeral token")
+        return eph
     except requests.exceptions.RequestException as e:
         raise RuntimeError(f"OpenAI sessions request failed: {e}")
 
@@ -5574,7 +5568,7 @@ def consultant_rtc_connect():
     ctx = consultant_context.get(session_id, {})
     extra = (ctx.get("context") or "").strip()
 
-    base_instructions = (
+    instructions = (
         "You are a clinician-facing consultant-assistant that conducts a SHORT focused interview. "
         "Ask ONE concise question at a time (max ~6 by default). "
         "Stop early if sufficient info. "
@@ -5582,12 +5576,10 @@ def consultant_rtc_connect():
         "(array of {name, probability 0..1}). Also call emit_ddx with the same ddx."
     )
     if extra:
-        base_instructions += f"\n\nCase context:\n{extra}"
+        instructions += f"\n\nCase context:\n{extra}"
 
     try:
-        ephemeral = _create_realtime_session(base_instructions)
-        if not ephemeral:
-            return Response("OpenAI returned empty ephemeral token", status=502, mimetype="text/plain")
+        ephemeral = _create_realtime_session(instructions)
     except Exception as e:
         log.error("Realtime session create failed: %s", e)
         return Response(f"Failed to create realtime session: {e}", status=500, mimetype="text/plain")
@@ -5596,10 +5588,10 @@ def consultant_rtc_connect():
         sdp_headers = {
             "Authorization": f"Bearer {ephemeral}",
             "Content-Type": "application/sdp",
-            "OpenAI-Beta": "realtime=v1",
+            # LabVoiceAgent works without OpenAI-Beta here too; keep it identical.
         }
         r = requests.post(
-            OPENAI_REALTIME_URL,
+            OPENAI_RTC_URL,
             headers=sdp_headers,
             params={"model": REALTIME_MODEL, "voice": REALTIME_VOICE},
             data=client_sdp,
@@ -5622,7 +5614,6 @@ def consultant_rtc_connect():
 def consultant_referral():
     if request.method == "OPTIONS":
         return _options_ok()
-
     data = request.get_json(silent=True) or {}
     session_id = data.get("session_id") or str(uuid4())
     item = data.get("item") or {}

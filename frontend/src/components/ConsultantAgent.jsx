@@ -1,11 +1,9 @@
 /* eslint-disable no-useless-concat */
 /* eslint-disable react-hooks/exhaustive-deps */
 /* eslint-disable no-unused-vars */
-/* eslint-disable no-unused-vars */
-/* eslint-disable react-hooks/exhaustive-deps */
 import React, { useEffect, useImperativeHandle, useRef, useState, forwardRef } from "react";
 import { FaUserMd, FaTimes, FaBroom, FaPaperPlane, FaPhone } from "react-icons/fa";
-import "../styles/lab-voice-agent.css";                     // reuse same CSS
+import "../styles/lab-voice-agent.css";
 import Orb from "./Orb.jsx";
 import AudioWave from "./AudioWave.jsx";
 import useAudioForVisualizerStore from "../store/useAudioForVisualizerStore.js";
@@ -13,12 +11,12 @@ import useAudioStore from "../store/audioStore.js";
 import { startVolumeMonitoring } from "./audioLevelAnalyzer";
 
 /**
- * ConsultantAgent — with Orb + AudioWave UI (like Lab agent) but text Q/A lives in chat bubbles.
+ * ConsultantAgent — with Orb + AudioWave UI but text Q/A in chat bubbles.
  *
  * Props:
  *   active: boolean
  *   sessionId: string
- *   backendBase: string
+ *   backendBase: string (base URL of the service that hosts /consultant-agent/*)
  *   context: string
  *   onAgentMessage: ({ who:'bot'|'system', msg, type?, ddx? }) => void
  *   onDone: ({ assessment_md, plan_md, ddx }) => void
@@ -28,6 +26,11 @@ const ConsultantAgent = forwardRef(function ConsultantAgent(
   { active, sessionId, backendBase, context, onAgentMessage, onDone, onClose = () => {} },
   ref
 ) {
+  // ---------- constants ----------
+  const BACKEND = String("https://ai-doctor-assistant-backend-server.onrender.com").replace(/\/+$/,"");
+  const CONNECT_URL = `${BACKEND}/consultant-agent/rtc-connect?session_id=${encodeURIComponent(sessionId || "")}`;
+  const CONTEXT_URL = `${BACKEND}/consultant-agent/context`;
+
   // ---------- WebRTC refs ----------
   const pcRef = useRef(null);
   const dcRef = useRef(null);
@@ -38,26 +41,25 @@ const ConsultantAgent = forwardRef(function ConsultantAgent(
   // ---------- UI / state ----------
   const [status, setStatus] = useState("idle"); // idle | prepping | connected | error
   const [micActive, setMicActive] = useState(false);
-  const [questionCount, setQuestionCount] = useState(6);    // default
-  const [vizSource, setVizSource] = useState("mic");        // 'mic' | 'agent'
+  const [questionCount, setQuestionCount] = useState(6);
+  const [vizSource, setVizSource] = useState("mic");
   const connectedRef = useRef(false);
 
   // ---------- streaming parsers ----------
   const toolBuffersRef = useRef(new Map()); // id -> {name, argsText}
-  const outBufRef = useRef("");             // for response.output_text.delta
+  const outBufRef = useRef("");
 
   // ---------- visualizer stores ----------
   const { setAudioScale } = useAudioForVisualizerStore.getState();
   const { setAudioUrl } = useAudioStore();
 
-  // ---------- public API for Chat.jsx ----------
   useImperativeHandle(ref, () => ({
     async start() {
       if (connectedRef.current) return;
       await primeContext();
       await connectRTC();
       await sendSessionUpdate();
-      dcSend({ type: "response.create" }); // kick off first question
+      dcSend({ type: "response.create" });
     },
     async stop() { stopAll(); },
     setQuestionCount(n) {
@@ -70,7 +72,6 @@ const ConsultantAgent = forwardRef(function ConsultantAgent(
       if (!dcRef.current || !connectedRef.current) return;
       const t = String(text || "").trim();
       if (!t) return;
-      // forward the doctor's answer to the realtime session
       dcSend({
         type: "conversation.item.create",
         item: { type: "message", role: "user", content: [{ type: "input_text", text: t }] },
@@ -79,7 +80,6 @@ const ConsultantAgent = forwardRef(function ConsultantAgent(
     },
   }));
 
-  // ---------- lifecycle ----------
   useEffect(() => {
     if (!active) {
       stopAll();
@@ -94,7 +94,7 @@ const ConsultantAgent = forwardRef(function ConsultantAgent(
         dcSend({ type: "response.create" });
       } catch (e) {
         console.error("Consultant start failed:", e);
-        onAgentMessage?.({ who: "system", msg: "Consultant agent failed to start." });
+        onAgentMessage?.({ who: "system", msg: `Consultant agent failed to start (${e?.message || "unknown"}).` });
         setStatus("error");
       }
     })();
@@ -102,28 +102,42 @@ const ConsultantAgent = forwardRef(function ConsultantAgent(
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [active]);
 
-  // ---------- context seed ----------
   async function primeContext() {
     if (!context) return;
     try {
-      await fetch(`${backendBase}/consultant-agent/context`, {
+      await fetch(CONTEXT_URL, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ session_id: sessionId, context }),
+        mode: "cors",
       });
-    } catch (e) { console.warn("consultant context failed:", e); }
+    } catch (e) {
+      console.warn("consultant context failed:", e);
+    }
   }
 
-  // ---------- WebRTC connect ----------
+  // --- tiny manual probe to surface CORS issues clearly
+  async function preflightProbe(url) {
+    try {
+      const res = await fetch(url, { method: "OPTIONS", mode: "cors" });
+      // Some servers reply 204/200; some 405 but with CORS. We tolerate 200–405 if CORS header exists.
+      const okish = (res.status >= 200 && res.status < 300) || res.status === 204 || res.status === 405;
+      const acao = res.headers.get("access-control-allow-origin");
+      if (!okish || !acao) throw new Error(`Preflight missing ACAO (status ${res.status})`);
+    } catch (err) {
+      throw new Error(`CORS preflight failed at ${url}: ${err.message}`);
+    }
+  }
+
   async function connectRTC() {
+    // 1) mic
     const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
     localStreamRef.current = stream;
-
     try { startVolumeMonitoring(stream, setAudioScale); } catch {}
 
+    // 2) RTCPeerConnection + DataChannel
     const pc = new RTCPeerConnection({ iceServers: [{ urls: "stun:stun.l.google.com:19302" }] });
     pcRef.current = pc;
-
     const dc = pc.createDataChannel("oai-events");
     dcRef.current = dc;
     wireDC(dc);
@@ -162,6 +176,7 @@ const ConsultantAgent = forwardRef(function ConsultantAgent(
       }
     };
 
+    // 3) Offer
     let offer = await pc.createOffer({ offerToReceiveAudio: true });
     offer.sdp = offer.sdp.replace(
       /a=rtpmap:\d+ opus\/48000\/2/g,
@@ -169,16 +184,28 @@ const ConsultantAgent = forwardRef(function ConsultantAgent(
     );
     await pc.setLocalDescription(offer);
 
-    const res = await fetch(
-      `${backendBase}/consultant-agent/rtc-connect?session_id=${encodeURIComponent(sessionId)}`,
-      { method: "POST", headers: { "Content-Type": "application/sdp" }, body: offer.sdp }
-    );
-    if (!res.ok) throw new Error(`/consultant-agent/rtc-connect ${res.status}`);
+    // 4) CORS preflight probe (clear error if missing)
+    await preflightProbe(CONNECT_URL);
+
+    // 5) POST SDP → get answer
+    const res = await fetch(CONNECT_URL, {
+      method: "POST",
+      mode: "cors",
+      headers: {
+        "Content-Type": "application/sdp",
+        "X-Session-Id": sessionId || "",
+      },
+      body: offer.sdp
+    });
+
+    if (!res.ok) {
+      const text = await res.text().catch(() => "");
+      throw new Error(`/consultant-agent/rtc-connect ${res.status} ${text?.slice(0,120) || ""}`);
+    }
     const answer = await res.text();
     await pc.setRemoteDescription({ type: "answer", sdp: answer });
   }
 
-  // ---------- session.update (tools + rules) ----------
   async function sendSessionUpdate() {
     const instructions = [
       "You are a clinician-facing consultant-assistant that conducts a SHORT focused interview.",
@@ -194,7 +221,6 @@ const ConsultantAgent = forwardRef(function ConsultantAgent(
     ].join(" ");
 
     const TOOLS = [
-      // ---- Final payloads
       {
         name: "emit_assessment",
         description: "Emit final assessment & plan to UI.",
@@ -243,8 +269,6 @@ const ConsultantAgent = forwardRef(function ConsultantAgent(
           required: ["ddx"]
         }
       },
-
-      // ---- Controls / bridges (safe)
       {
         name: "consult_set_question_count",
         description: "Adjust how many total questions to ask (1-20).",
@@ -264,26 +288,10 @@ const ConsultantAgent = forwardRef(function ConsultantAgent(
           required: ["specialty"]
         }
       },
-      {
-        name: "share_open_widget",
-        description: "Open share widget (review before sending).",
-        parameters: { type: "object", additionalProperties: false, properties: { recipient_hint: { type: "string" } } }
-      },
-      {
-        name: "share_update_field",
-        description: "Update a share widget field.",
-        parameters: {
-          type: "object", additionalProperties: false,
-          properties: {
-            field: { type: "string", enum: ["to","subject","body"] },
-            value: { type: "string" },
-            append: { type: "boolean" }
-          },
-          required: ["field","value"]
-        }
-      },
-      { name: "share_send", description: "Send email after explicit confirmation.", parameters: { type: "object", additionalProperties: false, properties: {} } },
-      { name: "upload_lab_result", description: "Open lab-results uploader UI.", parameters: { type: "object", additionalProperties: false, properties: {} } },
+      { name: "share_open_widget",   description: "Open share widget (review before sending).", parameters: { type: "object", additionalProperties: false, properties: { recipient_hint: { type: "string" } } } },
+      { name: "share_update_field",  description: "Update a share widget field.", parameters: { type: "object", additionalProperties: false, properties: { field: { type: "string", enum: ["to","subject","body"] }, value: { type: "string" }, append: { type: "boolean" } }, required: ["field","value"] } },
+      { name: "share_send",          description: "Send email after explicit confirmation.", parameters: { type: "object", additionalProperties: false, properties: {} } },
+      { name: "upload_lab_result",   description: "Open lab-results uploader UI.", parameters: { type: "object", additionalProperties: false, properties: {} } },
     ];
 
     dcSend({
@@ -298,7 +306,6 @@ const ConsultantAgent = forwardRef(function ConsultantAgent(
     });
   }
 
-  // ---------- DataChannel wiring ----------
   function dcSend(obj) { try { dcRef.current?.send(JSON.stringify(obj)); } catch {} }
 
   function wireDC(ch) {
@@ -307,7 +314,6 @@ const ConsultantAgent = forwardRef(function ConsultantAgent(
       let msg = null;
       try { msg = JSON.parse(raw); } catch {}
 
-      // function-call stream collection
       if (msg?.type === "response.output_item.added" && msg?.item?.type === "function_call") {
         const id = msg.item.call_id || msg.item.id || "default";
         const prev = toolBuffersRef.current.get(id) || { name: "", argsText: "" };
@@ -340,7 +346,6 @@ const ConsultantAgent = forwardRef(function ConsultantAgent(
         return;
       }
 
-      // bot text (questions / prompts)
       if (msg?.type === "response.output_text.delta") {
         outBufRef.current += (msg.delta || "");
         return;
@@ -355,7 +360,6 @@ const ConsultantAgent = forwardRef(function ConsultantAgent(
     ch.onerror = (e) => console.error("Consultant DC error:", e);
   }
 
-  // ---------- Tool router ----------
   function routeTool(name, args) {
     if (!name) return;
 
@@ -363,7 +367,6 @@ const ConsultantAgent = forwardRef(function ConsultantAgent(
       const assessment_md = (args?.assessment_md || "").trim();
       const plan_md = (args?.plan_md || "").trim();
       const ddx = Array.isArray(args?.ddx) ? args.ddx : [];
-
       const md = [
         "### Assessment",
         assessment_md || "_(not provided)_",
@@ -401,15 +404,14 @@ const ConsultantAgent = forwardRef(function ConsultantAgent(
     }
 
     if (name === "referral_create") {
-      fetch(`${backendBase}/consultant-agent/referral`, {
+      fetch(`${BACKEND}/consultant-agent/referral`, {
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ session_id: sessionId, item: args || {} }),
+        mode: "cors",
       }).catch(() => {});
       onAgentMessage?.({
         who: "bot",
-        msg: `Referral created: ${args?.specialty || "Unknown"}${args?.urgency ? " • " + args.urgency : ""}${
-          args?.mode ? " • " + args.mode : ""
-        }${args?.reason ? " — " + args.reason : ""}`,
+        msg: `Referral created: ${args?.specialty || "Unknown"}${args?.urgency ? " • " + args.urgency : ""}${args?.mode ? " • " + args.mode : ""}${args?.reason ? " — " + args.reason : ""}`,
       });
       return;
     }
@@ -431,7 +433,6 @@ const ConsultantAgent = forwardRef(function ConsultantAgent(
     if (name === "upload_lab_result") { try { window.dispatchEvent(new Event("labs:upload:open")); } catch {} onAgentMessage?.({ who: "system", msg: "Opened lab results uploader." }); return; }
   }
 
-  // ---------- teardown ----------
   function stopAll() {
     try { dcRef.current?.close(); } catch {}
     dcRef.current = null;
@@ -460,13 +461,11 @@ const ConsultantAgent = forwardRef(function ConsultantAgent(
 
   if (!active) return null;
 
-  // pick the stream for the visualizer
   const waveStream =
     vizSource === "agent" && remoteStreamRef.current
       ? remoteStreamRef.current
       : (localStreamRef.current || null);
 
-  // ---------- UI (Orb + AudioWave + controls) ----------
   return (
     <>
       <div className="voice-assistant" style={{ zIndex: 1000 }}>

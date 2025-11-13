@@ -1,58 +1,56 @@
 // ChatBubbleChart.jsx
-import React, { useMemo } from 'react';
-import Highcharts from 'highcharts';
-import HighchartsReact from 'highcharts-react-official';
+import React, { useMemo } from "react";
+import Highcharts from "highcharts";
+import HighchartsReact from "highcharts-react-official";
 
-// ✅ Enable modules that many of your configs use
-import HighchartsMore from 'highcharts/highcharts-more';         // needed for 'bubble'
-import Exporting from 'highcharts/modules/exporting';            // optional but handy
-import Accessibility from 'highcharts/modules/accessibility';    // optional
+// --- Modules --------------------------------------------------------------
+// Highcharts v12: modules auto-initialize by just importing.
+// Highcharts v11 and below: the import returns a function and must be called.
+// The guard below supports both.
 
-HighchartsMore(Highcharts);
-Exporting(Highcharts);
-Accessibility(Highcharts);
+import HCMore from "highcharts/highcharts-more";            // bubble, polar, etc (safe even if unused)
+import Exporting from "highcharts/modules/exporting";
+import Accessibility from "highcharts/modules/accessibility";
+
+// Back-compat init (v11−) – no-op on v12 (where not a function)
+[HCMore, Exporting, Accessibility].forEach((m) => {
+  const fn =
+    typeof m === "function" ? m :
+    typeof m?.default === "function" ? m.default :
+    null;
+  if (fn) fn(Highcharts);
+});
 
 export default function ChatBubbleChart({ config }) {
-  // Defensive normalize → keep your pie defaults, but gracefully accept other types too
-  const merged = useMemo(() => {
-    const base = {
+  const merged = useMemo(
+    () => ({
       chart: {
-        backgroundColor: 'transparent',
-        height: 600,                    // tall chart
+        backgroundColor: "transparent",
+        height: 600,
         spacing: [16, 16, 16, 16],
+        ...(config?.chart || {}),
       },
       title: {
-        style: { fontSize: '18px', fontWeight: '700' },
+        style: { fontSize: "18px", fontWeight: 700 },
+        ...(config?.title || {}),
       },
       plotOptions: {
         pie: {
-          size: '100%',
+          size: "100%",
           dataLabels: {
             distance: 14,
-            style: { fontSize: '14px', fontWeight: '600' },
+            style: { fontSize: "14px", fontWeight: 600 },
           },
+          ...(config?.plotOptions?.pie || {}),
         },
+        ...(config?.plotOptions || {}),
       },
       credits: { enabled: false },
       exporting: { enabled: false },
-    };
-
-    // Merge user config last so your backend pie config wins,
-    // but bubble/others also work if intentionally passed.
-    const out = {
-      ...base,
-      ...(config || {}),
-      chart: { ...base.chart, ...(config?.chart || {}) },
-      title: { ...base.title, ...(config?.title || {}) },
-      plotOptions: {
-        ...base.plotOptions,
-        ...(config?.plotOptions || {}),
-        pie: { ...base.plotOptions.pie, ...(config?.plotOptions?.pie || {}) },
-      },
-    };
-
-    return out;
-  }, [config]);
+      ...config,
+    }),
+    [config]
+  );
 
   return (
     <div className="bubble-chart">

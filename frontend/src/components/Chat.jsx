@@ -84,6 +84,62 @@ async function requestPieFromDifferential({
 function wantsPieChart(text) {
   return /\b(pie\s*chart|piechart|byechart|byechat)\b/i.test(text || "");
 }
+// Convert {name, probability|probability_percent} -> {name, probability_percent}
+function ddxToDifferentialArray(ddx = []) {
+  return (Array.isArray(ddx) ? ddx : [])
+    .map(d => {
+      const pct = Number.isFinite(d?.probability_percent)
+        ? Math.round(d.probability_percent)
+        : Math.round((Number(d?.probability) || 0) * 100);
+      return { name: String(d?.name || "Unknown"), probability_percent: Math.max(0, Math.min(100, pct)) };
+    })
+    .filter(p => p.name && p.probability_percent > 0);
+}
+
+// Push a pie chart bubble using your /viz endpoints (with loader)
+async function renderPieBubbleFromDDX(ddx, { title = "Differential diagnosis", sessionId, setChats }) {
+  const placeholderId = crypto.randomUUID();
+  setChats(prev => [...prev, { who: "bot", type: "chart_pie_loading", id: placeholderId }]);
+
+  try {
+    const config = await requestPieFromDifferential({
+      sessionId,
+      differential: ddxToDifferentialArray(ddx),
+      title
+    });
+    // Small cosmetic tweaks (optional)
+    config.chart = { height: 420, spacing: [16,16,16,16], ...(config.chart || {}) };
+    config.plotOptions = { pie: { size: "85%", ...(config.plotOptions?.pie || {}) }, ...(config.plotOptions || {}) };
+
+    setChats(prev => prev.map(m => (
+      m.id === placeholderId ? { who: "bot", type: "chart_pie", highchartsConfig: config } : m
+    )));
+  } catch (e) {
+    setChats(prev => prev.map(m => (
+      m.id === placeholderId ? { who: "bot", msg: "Couldn't render the pie chart. Please try again." } : m
+    )));
+  }
+}
+
+// Fallback that asks backend to *derive* DDx from full context (RAG path)
+async function renderPieBubbleFromContext(context, { title = "Differential diagnosis", sessionId, setChats }) {
+  const placeholderId = crypto.randomUUID();
+  setChats(prev => [...prev, { who: "bot", type: "chart_pie_loading", id: placeholderId }]);
+
+  try {
+    const config = await requestPieFromDifferential({ sessionId, context, title });
+    config.chart = { height: 420, spacing: [16,16,16,16], ...(config.chart || {}) };
+    config.plotOptions = { pie: { size: "85%", ...(config.plotOptions?.pie || {}) }, ...(config.plotOptions || {}) };
+
+    setChats(prev => prev.map(m => (
+      m.id === placeholderId ? { who: "bot", type: "chart_pie", highchartsConfig: config } : m
+    )));
+  } catch (e) {
+    setChats(prev => prev.map(m => (
+      m.id === placeholderId ? { who: "bot", msg: "Couldn't render the pie chart. Please try again." } : m
+    )));
+  }
+}
 
 const pushContextToBackends = async (sessionId, text) => {
   if (!text || !text.trim()) return;
@@ -1497,6 +1553,19 @@ const Chat = () => {
     // 2) Store full CAS and DDx for the dedicated summary bubble
     setCas(payload);
     setCasDDX(payload.ddx);
+    // === Auto-render DDx pie chart as its own bubble ===
+(async () => {
+  if (payload.ddx && payload.ddx.length) {
+    await renderPieBubbleFromDDX(payload.ddx, { sessionId, setChats });
+  } else {
+    // no DDx array returned → derive from full context via /viz/pie-differential
+    const ctx = (typeof buildAgentContext === "function" ? buildAgentContext() : "") || "";
+    if (ctx) {
+      await renderPieBubbleFromContext(ctx, { sessionId, setChats });
+    }
+  }
+})();
+
   }
 
   /* ===================== Labs uploader integration ===================== */

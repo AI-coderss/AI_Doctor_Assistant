@@ -2042,16 +2042,7 @@ const Chat = () => {
           </ReactMarkdown>
         </div>
 
-        {Array.isArray(ddx) && ddx.length > 0 && (
-          <div
-            style={{
-              borderTop: "1px solid var(--card-border)",
-              paddingTop: 12,
-            }}
-          >
-            <ChatBubbleChart config={ddxToBubbleConfig(ddx)} />
-          </div>
-        )}
+        
       </div>
     );
   }

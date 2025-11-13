@@ -1951,7 +1951,7 @@ const Chat = () => {
           active={showConsultantAgent}                // ✅ FIX: required by component
           onClose={() => setShowConsultantAgent(false)}
           sessionId={sessionId}
-          backendBase={VOICE_BASE}
+          backendBase={BACKEND_BASE}
           context={buildAgentContext()}               // same as Lab Agent context helper
           onAgentMessage={handleConsultantAgentMessage}
           onDone={handleConsultantDone}

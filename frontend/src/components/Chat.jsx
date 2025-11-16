@@ -1529,7 +1529,6 @@ const Chat = () => {
       ]);
     }
 
-    // If the agent sends ddx directly in a message payload
     if (Array.isArray(ddx) && ddx.length) {
       setCasDDX(ddx);
     }
@@ -1542,7 +1541,7 @@ const Chat = () => {
       ddx: Array.isArray(ddx) ? ddx : [],
     };
 
-    // 1) Short notice in the chat stream
+    // 1) Append a short notice into the chat stream
     setChats((prev) => [
       ...prev,
       {
@@ -1553,36 +1552,27 @@ const Chat = () => {
       },
     ]);
 
-    // 2) Store full CAS + DDx for the dedicated summary bubble
+    // 2) Store full CAS and DDx for the dedicated summary bubble
     setCas(payload);
-    setCasDDX(payload.ddx || []);
+    setCasDDX(payload.ddx);
 
-    // 3) Also render a pie-chart bubble for the differential diagnosis
-    if (payload.ddx && payload.ddx.length) {
-      // use existing helper
-      requestPieFromDifferential({
-        sessionId,
-        context: buildAgentContext(),
-        differential: payload.ddx,
-        title: "Consultant differential diagnosis",
-      })
-        .then((config) => {
-          if (!config) return;
-          setChats((prev) => [
-            ...prev,
-            {
-              who: "bot",
-              msg: "",
-              chartConfig: config, // consumed by <ChatBubbleChart />
-            },
-          ]);
-        })
-        .catch((err) => {
-          console.error("pie from differential error:", err);
-        });
-    }
+    // === Auto-render DDx pie chart as its own bubble ===
+    (async () => {
+      if (payload.ddx && payload.ddx.length) {
+        await renderPieBubbleFromDDX(payload.ddx, { sessionId, setChats });
+      } else {
+        // no DDx array returned → derive from full context via /viz/pie-differential
+        const ctx =
+          (typeof buildAgentContext === "function"
+            ? buildAgentContext()
+            : "") || "";
+
+        if (ctx) {
+          await renderPieBubbleFromContext(ctx, { sessionId, setChats });
+        }
+      }
+    })();
   }
-
   /* ===================== Labs uploader integration ===================== */
   const uploaderRef = useRef(null);
   const labsStreamingRef = useRef(false);
@@ -2021,27 +2011,21 @@ const Chat = () => {
         />
       )}
       {/* ===== Consultant Assessment Summary (CAS) bubble (appears in the chat) ===== */}
-      {cas && (
-        <ConsultantAssessmentBubble
-          assessment={cas.assessment_md}
-          plan={cas.plan_md}
-          ddx={cas.ddx}
-        />
-      )}
+      
 
       {/* ===== Overlay: ConsultantAgent (WebRTC Realtime) ===== */}
       {showConsultantAgent && (
-        <ConsultantAgent
-          active={showConsultantAgent}
-          onClose={() => setShowConsultantAgent(false)}
-          sessionId={sessionId}
-          backendBase={BACKEND_BASE}
-          context={buildAgentContext()}      // ✅ full case context
-          onAgentMessage={handleConsultantAgentMessage}
-          onDone={handleConsultantDone}
-        />
-      )}
-
+          <ConsultantAgent
+            active={showConsultantAgent}             // ✅ FIX: required by component
+            onClose={() => setShowConsultantAgent(false)}
+            sessionId={sessionId}
+            backendBase={BACKEND_BASE}
+            context={buildAgentContext()}            // same as Lab Agent context helper
+            onAgentMessage={handleConsultantAgentMessage}
+            onDone={handleConsultantDone}
+          />
+        )
+      }
 
 
     </div>

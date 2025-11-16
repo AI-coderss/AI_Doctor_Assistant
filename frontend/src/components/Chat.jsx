@@ -108,7 +108,7 @@ async function renderPieBubbleFromDDX(ddx, { title = "Differential diagnosis", s
       title
     });
     // Small cosmetic tweaks (optional)
-    config.chart = { height: 420, spacing: [16,16,16,16], ...(config.chart || {}) };
+    config.chart = { height: 420, spacing: [16, 16, 16, 16], ...(config.chart || {}) };
     config.plotOptions = { pie: { size: "85%", ...(config.plotOptions?.pie || {}) }, ...(config.plotOptions || {}) };
 
     setChats(prev => prev.map(m => (
@@ -128,7 +128,7 @@ async function renderPieBubbleFromContext(context, { title = "Differential diagn
 
   try {
     const config = await requestPieFromDifferential({ sessionId, context, title });
-    config.chart = { height: 420, spacing: [16,16,16,16], ...(config.chart || {}) };
+    config.chart = { height: 420, spacing: [16, 16, 16, 16], ...(config.chart || {}) };
     config.plotOptions = { pie: { size: "85%", ...(config.plotOptions?.pie || {}) }, ...(config.plotOptions || {}) };
 
     setChats(prev => prev.map(m => (
@@ -1519,60 +1519,60 @@ const Chat = () => {
   };
   // Normalize markdown helper already exists in your file.
   // We'll reuse it for agent messages flowing into chat UI.
-function handleConsultantAgentMessage({ who, msg, type, ddx }) {
-  const safe = (msg || "").trim();
+  function handleConsultantAgentMessage({ who, msg, type, ddx }) {
+    const safe = (msg || "").trim();
 
-  if (safe) {
+    if (safe) {
+      setChats((prev) => [
+        ...prev,
+        { who: "bot", msg: normalizeMarkdown(safe) },
+      ]);
+    }
+
+    if (Array.isArray(ddx) && ddx.length) {
+      setCasDDX(ddx);
+    }
+  }
+
+  function handleConsultantDone({ assessment_md, plan_md, ddx }) {
+    const payload = {
+      assessment_md: (assessment_md || "").trim(),
+      plan_md: (plan_md || "").trim(),
+      ddx: Array.isArray(ddx) ? ddx : [],
+    };
+
+    // 1) Append a short notice into the chat stream
     setChats((prev) => [
       ...prev,
-      { who: "bot", msg: normalizeMarkdown(safe) },
+      {
+        who: "bot",
+        msg: normalizeMarkdown(
+          "**Consultant assessment is ready.** See the summary bubble below."
+        ),
+      },
     ]);
-  }
 
-  if (Array.isArray(ddx) && ddx.length) {
-    setCasDDX(ddx);
-  }
-}
+    // 2) Store full CAS and DDx for the dedicated summary bubble
+    setCas(payload);
+    setCasDDX(payload.ddx);
 
-function handleConsultantDone({ assessment_md, plan_md, ddx }) {
-  const payload = {
-    assessment_md: (assessment_md || "").trim(),
-    plan_md: (plan_md || "").trim(),
-    ddx: Array.isArray(ddx) ? ddx : [],
-  };
+    // === Auto-render DDx pie chart as its own bubble ===
+    (async () => {
+      if (payload.ddx && payload.ddx.length) {
+        await renderPieBubbleFromDDX(payload.ddx, { sessionId, setChats });
+      } else {
+        // no DDx array returned → derive from full context via /viz/pie-differential
+        const ctx =
+          (typeof buildAgentContext === "function"
+            ? buildAgentContext()
+            : "") || "";
 
-  // 1) Append a short notice into the chat stream
-  setChats((prev) => [
-    ...prev,
-    {
-      who: "bot",
-      msg: normalizeMarkdown(
-        "**Consultant assessment is ready.** See the summary bubble below."
-      ),
-    },
-  ]);
-
-  // 2) Store full CAS and DDx for the dedicated summary bubble
-  setCas(payload);
-  setCasDDX(payload.ddx);
-
-  // === Auto-render DDx pie chart as its own bubble ===
-  (async () => {
-    if (payload.ddx && payload.ddx.length) {
-      await renderPieBubbleFromDDX(payload.ddx, { sessionId, setChats });
-    } else {
-      // no DDx array returned → derive from full context via /viz/pie-differential
-      const ctx =
-        (typeof buildAgentContext === "function"
-          ? buildAgentContext()
-          : "") || "";
-
-      if (ctx) {
-        await renderPieBubbleFromContext(ctx, { sessionId, setChats });
+        if (ctx) {
+          await renderPieBubbleFromContext(ctx, { sessionId, setChats });
+        }
       }
-    }
-  })();
-}
+    })();
+  }
   /* ===================== Labs uploader integration ===================== */
   const uploaderRef = useRef(null);
   const labsStreamingRef = useRef(false);
@@ -2021,16 +2021,18 @@ function handleConsultantDone({ assessment_md, plan_md, ddx }) {
 
       {/* ===== Overlay: ConsultantAgent (WebRTC Realtime) ===== */}
       {showConsultantAgent && (
-        <ConsultantAgent
-          active={showConsultantAgent}                // ✅ FIX: required by component
-          onClose={() => setShowConsultantAgent(false)}
-          sessionId={sessionId}
-          backendBase={BACKEND_BASE}
-          context={buildAgentContext()}               // same as Lab Agent context helper
-          onAgentMessage={handleConsultantAgentMessage}
-          onDone={handleConsultantDone}
-        />
-      )}
+          <ConsultantAgent
+            active={showConsultantAgent}             // ✅ FIX: required by component
+            onClose={() => setShowConsultantAgent(false)}
+            sessionId={sessionId}
+            backendBase={BACKEND_BASE}
+            context={buildAgentContext()}            // same as Lab Agent context helper
+            onAgentMessage={handleConsultantAgentMessage}
+            onDone={handleConsultantDone}
+          />
+        )
+      }
+
 
     </div>
   );
@@ -2047,7 +2049,7 @@ function handleConsultantDone({ assessment_md, plan_md, ddx }) {
           </ReactMarkdown>
         </div>
 
-        
+
       </div>
     );
   }

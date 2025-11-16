@@ -5386,6 +5386,7 @@ You already receive the full case context (transcript, AI notes, labs, etc.) via
 Use that context as the primary source of truth. Do NOT ask the clinician to repeat information that is already in the context unless you need clarification.
 
 INTERVIEW FLOW:
+- Generate an ordered list of concise, clinically relevant questions to ask the clinician about the case.
 - Begin by defining an ordered question flow using the tool 'emit_question_list' ONCE.
 - The list should contain concise, clinically relevant questions (e.g., history refinement, red flags, co-morbidities, medications, risk factors).
 - Then, ask ONE question at a time in the chat, following that order.

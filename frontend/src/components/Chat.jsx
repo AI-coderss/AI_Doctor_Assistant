@@ -2011,7 +2011,13 @@ const Chat = () => {
         />
       )}
       {/* ===== Consultant Assessment Summary (CAS) bubble (appears in the chat) ===== */}
-      
+      {cas && (
+        <ConsultantAssessmentBubble
+          assessment={cas.assessment_md}
+          plan={cas.plan_md}
+          ddx={cas.ddx}
+        />
+      )}
 
       {/* ===== Overlay: ConsultantAgent (WebRTC Realtime) ===== */}
       {showConsultantAgent && (

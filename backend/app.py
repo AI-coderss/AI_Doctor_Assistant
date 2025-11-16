@@ -5379,17 +5379,41 @@ Patient transcript:
     return {"diagnoses": diags}
 # =======================consultation API =======================
 # -------------------- Assistant behavior instructions --------------------
-ASSISTANT_BEHAVIOR = (
-    "You are a clinician-facing consultant-assistant that conducts a SHORT focused interview.\n"
-    "- Ask ONE concise question at a time (target ≤ 6 total by default).\n"
-    "- Stop early if sufficient info.\n"
-    "- When finished, call emit_assessment with Assessment markdown, Plan markdown, and a ddx list.\n"
-    "- Also call emit_ddx with the same ddx.\n"
-    "- Only call referral_create if explicitly requested.\n"
-    "- Never call share_* or upload_* without explicit instruction.\n"
-    "- Reply \n"
-    "in English only."
-)
+ASSISTANT_BEHAVIOR = """
+You are a consultant physician reviewing a single clinical case inside a hospital AI platform.
+
+You already receive the full case context (transcript, AI notes, labs, etc.) via the 'context' field on the session.
+Use that context as the primary source of truth. Do NOT ask the clinician to repeat information that is already in the context unless you need clarification.
+
+INTERVIEW FLOW:
+- Begin by defining an ordered question flow using the tool 'emit_question_list' ONCE.
+- The list should contain concise, clinically relevant questions (e.g., history refinement, red flags, co-morbidities, medications, risk factors).
+- Then, ask ONE question at a time in the chat, following that order.
+- Wait for the clinician's answer before moving on to the next question.
+- Stop early if you already have sufficient information.
+
+SUMMARY / OUTPUT:
+- When you have finished the interview (or have enough information), you MUST:
+  1) Call 'emit_assessment' exactly once with:
+     - assessment_md: a clear markdown assessment (problem list, severity, key findings).
+     - plan_md: a structured plan (workup, treatment, follow-up).
+     - ddx: an array of differential diagnoses, each with 'name' and 'probability_percent'.
+  2) Then call 'emit_ddx' with the same ddx list so the UI can render a pie chart.
+
+REFERRALS:
+- Only call 'referral_create' if the case clearly needs a referral (e.g., cardiology, oncology).
+- If you are not sure, DO NOT call 'referral_create'.
+
+BANNED TOOLS:
+- NEVER call share_* tools.
+- NEVER call upload_lab_result.
+- Do not request external URLs or internet access.
+
+STYLE:
+- Use concise, clinically-oriented language.
+- Use markdown headings such as 'Assessment' and 'Plan'.
+"""
+
 
 # -------------------- Simple in-memory session store --------------------
 CONSULT_SESS: Dict[str, Dict[str, Any]] = {}  # { session_id: {"context": str} }
@@ -5437,63 +5461,93 @@ def _options_ok():
 CONSULT_TOOLS = [
     {
         "type": "function",
-        "name": "emit_assessment",
-        "description": "Emit final assessment & plan to UI.",
+        "name": "emit_question_list",
+        "description": "Define an ordered list of concise questions you will ask the clinician for this case.",
         "parameters": {
             "type": "object",
-            "additionalProperties": False,
             "properties": {
-                "assessment_md": {"type": "string"},
-                "plan_md": {"type": "string"},
+                "questions": {
+                    "type": "array",
+                    "description": "Ordered list of questions (first to last) to ask the clinician.",
+                    "items": {"type": "string"},
+                }
+            },
+            "required": ["questions"],
+            "additionalProperties": False,
+        },
+    },
+    {
+        "type": "function",
+        "name": "emit_assessment",
+        "description": "Emit a structured assessment and plan for the case, with a differential diagnosis list for charting.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "assessment_md": {
+                    "type": "string",
+                    "description": "Markdown-formatted clinical assessment.",
+                },
+                "plan_md": {
+                    "type": "string",
+                    "description": "Markdown-formatted clinical plan (workup, treatment, follow-up).",
+                },
                 "ddx": {
                     "type": "array",
+                    "description": "Differential diagnoses with approximate probabilities.",
                     "items": {
                         "type": "object",
-                        "additionalProperties": False,
                         "properties": {
                             "name": {"type": "string"},
-                            "probability": {"type": "number"},
+                            "probability_percent": {
+                                "type": "number",
+                                "description": "0–100 approximate probability.",
+                            },
                         },
-                        "required": ["name", "probability"],
+                        "required": ["name", "probability_percent"],
                     },
                 },
             },
-            "required": ["assessment_md", "ddx", "plan_md"],
+            "required": ["assessment_md", "plan_md", "ddx"],
+            "additionalProperties": False,
         },
     },
     {
         "type": "function",
         "name": "emit_ddx",
-        "description": "Emit a ddx list for the DDx UI.",
+        "description": "Emit only the differential diagnosis list, for visualization.",
         "parameters": {
             "type": "object",
-            "additionalProperties": False,
             "properties": {
                 "ddx": {
                     "type": "array",
                     "items": {
                         "type": "object",
-                        "additionalProperties": False,
                         "properties": {
                             "name": {"type": "string"},
-                            "probability": {"type": "number"},
+                            "probability_percent": {"type": "number"},
                         },
-                        "required": ["name", "probability"],
+                        "required": ["name", "probability_percent"],
                     },
                 }
             },
             "required": ["ddx"],
+            "additionalProperties": False,
         },
     },
     {
         "type": "function",
         "name": "consult_set_question_count",
-        "description": "Adjust how many total questions to ask (1-20).",
+        "description": "Adjust the approximate number of questions you intend to ask, based on context complexity.",
         "parameters": {
             "type": "object",
-            "additionalProperties": False,
-            "properties": {"count": {"type": "number"}},
+            "properties": {
+                "count": {
+                    "type": "integer",
+                    "description": "Approximate number of questions (3–20).",
+                }
+            },
             "required": ["count"],
+            "additionalProperties": False,
         },
     },
     {

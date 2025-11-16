@@ -1519,55 +1519,60 @@ const Chat = () => {
   };
   // Normalize markdown helper already exists in your file.
   // We'll reuse it for agent messages flowing into chat UI.
-  function handleConsultantAgentMessage({ who, msg, type, ddx }) {
-    const safe = (msg || "").trim();
-    if (safe) {
-      setChats((prev) => [
-        ...prev,
-        { who: "bot", msg: normalizeMarkdown(safe) },
-      ]);
-    }
-    if (Array.isArray(ddx) && ddx.length) {
-      setCasDDX(ddx);
-    }
-  }
+function handleConsultantAgentMessage({ who, msg, type, ddx }) {
+  const safe = (msg || "").trim();
 
-  function handleConsultantDone({ assessment_md, plan_md, ddx }) {
-    const payload = {
-      assessment_md: (assessment_md || "").trim(),
-      plan_md: (plan_md || "").trim(),
-      ddx: Array.isArray(ddx) ? ddx : [],
-    };
-
-    // 1) Append a short notice into the chat stream
+  if (safe) {
     setChats((prev) => [
       ...prev,
-      {
-        who: "bot",
-        msg: normalizeMarkdown(
-          "**Consultant assessment is ready.** See the summary bubble below."
-        ),
-      },
+      { who: "bot", msg: normalizeMarkdown(safe) },
     ]);
+  }
 
-    // 2) Store full CAS and DDx for the dedicated summary bubble
-    setCas(payload);
-    setCasDDX(payload.ddx);
-    // === Auto-render DDx pie chart as its own bubble ===
-(async () => {
-  if (payload.ddx && payload.ddx.length) {
-    await renderPieBubbleFromDDX(payload.ddx, { sessionId, setChats });
-  } else {
-    // no DDx array returned → derive from full context via /viz/pie-differential
-    const ctx = (typeof buildAgentContext === "function" ? buildAgentContext() : "") || "";
-    if (ctx) {
-      await renderPieBubbleFromContext(ctx, { sessionId, setChats });
+  if (Array.isArray(ddx) && ddx.length) {
+    setCasDDX(ddx);
+  }
+}
+
+function handleConsultantDone({ assessment_md, plan_md, ddx }) {
+  const payload = {
+    assessment_md: (assessment_md || "").trim(),
+    plan_md: (plan_md || "").trim(),
+    ddx: Array.isArray(ddx) ? ddx : [],
+  };
+
+  // 1) Append a short notice into the chat stream
+  setChats((prev) => [
+    ...prev,
+    {
+      who: "bot",
+      msg: normalizeMarkdown(
+        "**Consultant assessment is ready.** See the summary bubble below."
+      ),
+    },
+  ]);
+
+  // 2) Store full CAS and DDx for the dedicated summary bubble
+  setCas(payload);
+  setCasDDX(payload.ddx);
+
+  // === Auto-render DDx pie chart as its own bubble ===
+  (async () => {
+    if (payload.ddx && payload.ddx.length) {
+      await renderPieBubbleFromDDX(payload.ddx, { sessionId, setChats });
+    } else {
+      // no DDx array returned → derive from full context via /viz/pie-differential
+      const ctx =
+        (typeof buildAgentContext === "function"
+          ? buildAgentContext()
+          : "") || "";
+
+      if (ctx) {
+        await renderPieBubbleFromContext(ctx, { sessionId, setChats });
+      }
     }
-  }
-})();
-
-  }
-
+  })();
+}
   /* ===================== Labs uploader integration ===================== */
   const uploaderRef = useRef(null);
   const labsStreamingRef = useRef(false);

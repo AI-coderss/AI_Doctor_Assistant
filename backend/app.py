@@ -5387,7 +5387,8 @@ ASSISTANT_BEHAVIOR = (
     "- Also call emit_ddx with the same ddx.\n"
     "- Only call referral_create if explicitly requested.\n"
     "- Never call share_* or upload_* without explicit instruction.\n"
-    "- Reply in English only."
+    "- Reply \n"
+    "in English only."
 )
 
 # -------------------- Simple in-memory session store --------------------
@@ -5421,12 +5422,16 @@ def add_cors(resp):
     return resp
 
 def _options_ok():
-    return ("", 204, {
-        "Access-Control-Allow-Origin": request.headers.get("Origin") or "*",
-        "Access-Control-Allow-Methods": ALLOWED_METHODS,
-        "Access-Control-Allow-Headers": ALLOWED_HEADERS,
-        "Cache-Control": "no-cache",
-    })
+    return (
+        "",
+        204,
+        {
+            "Access-Control-Allow-Origin": request.headers.get("Origin") or "*",
+            "Access-Control-Allow-Methods": ALLOWED_METHODS,
+            "Access-Control-Allow-Headers": ALLOWED_HEADERS,
+            "Cache-Control": "no-cache",
+        },
+    )
 
 # -------------------- Tools (ALL include type='function') ---------------------
 CONSULT_TOOLS = [
@@ -5556,8 +5561,8 @@ def _create_realtime_session(instructions: str) -> str:
         "model": REALTIME_MODEL,
         "voice": REALTIME_VOICE,
         "instructions": instructions,
-        "tools": CONSULT_TOOLS,                 # IMPORTANT: each tool has type='function'
-        "turn_detection": {"type": "server_vad"}
+        "tools": CONSULT_TOOLS,  # IMPORTANT: each tool has type='function'
+        "turn_detection": {"type": "server_vad"},
     }
     headers = {
         "Authorization": f"Bearer {OPENAI_API_KEY}",
@@ -5593,7 +5598,11 @@ def consultant_rtc_connect():
         return Response("No SDP provided", status=400, mimetype="text/plain")
 
     # Accept session_id from query or header (CORS-friendly to rely on query only)
-    session_id = request.args.get("session_id") or request.headers.get("X-Session-Id") or "anon"
+    session_id = (
+        request.args.get("session_id")
+        or request.headers.get("X-Session-Id")
+        or "anon"
+    )
     st = _sess(session_id)
     instructions = _merged_instructions(st.get("context"))
 
@@ -5602,20 +5611,40 @@ def consultant_rtc_connect():
         ephemeral = _create_realtime_session(instructions)
     except Exception as e:
         log.error("Failed to create realtime session: %s", e)
-        return Response(f"Failed to create realtime session: {e}", status=500, mimetype="text/plain")
+        return Response(
+            f"Failed to create realtime session: {e}",
+            status=500,
+            mimetype="text/plain",
+        )
 
     # 2) Do SDP exchange (RTC API)
     try:
-        rtc_headers = {"Authorization": f"Bearer {ephemeral}", "Content-Type": "application/sdp"}
-        rtc_params  = {"model": REALTIME_MODEL, "voice": REALTIME_VOICE}
-        r = requests.post(OPENAI_RTC_URL, headers=rtc_headers, params=rtc_params, data=offer_sdp, timeout=60)
+        rtc_headers = {
+            "Authorization": f"Bearer {ephemeral}",
+            "Content-Type": "application/sdp",
+        }
+        rtc_params = {"model": REALTIME_MODEL, "voice": REALTIME_VOICE}
+        r = requests.post(
+            OPENAI_RTC_URL,
+            headers=rtc_headers,
+            params=rtc_params,
+            data=offer_sdp,
+            timeout=60,
+        )
         if not r.ok:
             log.error("RTC SDP exchange failed: %s %s", r.status_code, r.text)
-            return Response(f"SDP exchange error: {r.status_code} {r.text}", status=502, mimetype="text/plain")
+            return Response(
+                f"SDP exchange error: {r.status_code} {r.text}",
+                status=502,
+                mimetype="text/plain",
+            )
+
         answer = r.content
     except Exception as e:
         log.exception("RTC upstream error")
-        return Response(f"RTC upstream error: {e}", status=502, mimetype="text/plain")
+        return Response(
+            f"RTC upstream error: {e}", status=502, mimetype="text/plain"
+        )
 
     resp = Response(answer, status=200, mimetype="application/sdp")
     resp.headers["Cache-Control"] = "no-cache"
@@ -5625,13 +5654,13 @@ def consultant_rtc_connect():
 def consultant_referral():
     if request.method == "OPTIONS":
         return _options_ok()
+
     data = request.get_json(silent=True) or {}
     session_id = data.get("session_id") or str(uuid4())
     item = data.get("item") or {}
     arr = REFERRALS.setdefault(session_id, [])
     arr.append(item)
     return jsonify({"ok": True, "count": len(arr)})
-
 
 if __name__ == "__main__":
     app.run(host="127.0.0.1", port=5050, debug=True)

@@ -5,7 +5,6 @@ import Navbar from "./components/Navbar";
 import "./App.css";
 import ChatPage from "./pages/ChatPage";
 import MedicalImageAnalysisPage from "./pages/MedicalImageAnalysisPage";
-import AuthPage from "./pages/AuthPage"; // ⬅️ NEW
 import { ToastContainer } from "react-toastify";
 import "react-toastify/dist/ReactToastify.css";
 
@@ -30,8 +29,6 @@ function Layout({ children }) {
 function AppRoutes() {
   return (
     <Routes>
-      {/* Auth page */}
-      <Route path="/auth" element={<AuthPage />} />
 
       {/* Protected routes */}
       <Route

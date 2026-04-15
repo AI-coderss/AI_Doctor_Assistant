@@ -51,11 +51,7 @@ function AppRoutes() {
       {/* Legacy /chat -> / */}
       <Route path="/chat" element={<Navigate to="/" replace />} />
 
-      {/* Fallback */}
-      <Route
-        path="*"
-        element={<Navigate to={isAuthed() ? "/" : "/auth"} replace />}
-      />
+   
     </Routes>
   );
 }

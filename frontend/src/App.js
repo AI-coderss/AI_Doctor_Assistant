@@ -1,6 +1,6 @@
 // src/App.js
 import React from "react";
-import { BrowserRouter as Router, Routes, Route, Navigate, useLocation } from "react-router-dom";
+import { BrowserRouter as Router, Routes, Route, Navigate } from "react-router-dom";
 import Navbar from "./components/Navbar";
 import "./App.css";
 import ChatPage from "./pages/ChatPage";
@@ -8,19 +8,13 @@ import MedicalImageAnalysisPage from "./pages/MedicalImageAnalysisPage";
 import { ToastContainer } from "react-toastify";
 import "react-toastify/dist/ReactToastify.css";
 
-/** Simple auth helpers */
-const isAuthed = () => localStorage.getItem("auth") === "1";
 
-function ProtectedRoute({ children }) {
-  return isAuthed() ? children : <Navigate to="/auth" replace />;
-}
 
 function Layout({ children }) {
-  const location = useLocation();
-  const hideNavbar = location.pathname === "/auth";
+  
   return (
     <>
-      {!hideNavbar && <Navbar />}
+      <Navbar />
       {children}
     </>
   );
@@ -34,17 +28,17 @@ function AppRoutes() {
       <Route
         path="/"
         element={
-          <ProtectedRoute>
+        
             <ChatPage />
-          </ProtectedRoute>
+         
         }
       />
       <Route
         path="/medical-image-analysis"
         element={
-          <ProtectedRoute>
+      
             <MedicalImageAnalysisPage />
-          </ProtectedRoute>
+          
         }
       />
 

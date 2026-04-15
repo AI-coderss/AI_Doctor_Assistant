@@ -72,7 +72,7 @@ const Navbar = () => {
   const navItems = useMemo(
     () => [
       { to: "/", label: "Home 🏠" },
-      { to: "/medical-image-analysis", label: "Medical Image Analysis 🧠" },
+      
     ],
     []
   );

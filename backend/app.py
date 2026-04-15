@@ -2775,7 +2775,7 @@ def get_drug_rag_chain():
     retriever_chain = get_drug_context_retriever_chain()
     llm = ChatOpenAI(model=os.environ.get("DRUG_REASONING_MODEL", "gpt-4o"))
     prompt = ChatPromptTemplate.from_messages([
-        ("system", DRUG_SYSTEM_PROMPT),
+        ("system", SAFE_DRUG_SYSTEM_PROMPT),
         MessagesPlaceholder("chat_history"),
         ("user", "{input}"),
         ("system", "EVIDENCE EXCERPTS:\n{context}\n")
@@ -2853,6 +2853,19 @@ def _rag_narrative_summary(mapped: list[dict], interactions: list[dict], ocr_tex
     out = drug_rag_chain.invoke({"chat_history": [], "input": user})
     return (out.get("answer") or "").strip()
 
+def escape_prompt_braces(text: str) -> str:
+    # Escape all braces first
+    text = text.replace("{", "{{").replace("}", "}}")
+
+    # Restore real LangChain variables
+    vars_to_restore = ["context", "input", "chat_history"]
+
+    for var in vars_to_restore:
+        text = text.replace("{{" + var + "}}", "{" + var + "}")
+
+    return text
+
+SAFE_DRUG_SYSTEM_PROMPT = escape_prompt_braces(DRUG_SYSTEM_PROMPT)
 # ---------- ROUTES (POST + OPTIONS to satisfy preflight) ----------
 
 @app.route("/meds/parse", methods=["POST", "OPTIONS"])

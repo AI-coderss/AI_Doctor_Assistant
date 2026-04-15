@@ -23,7 +23,7 @@ from flask_cors import CORS, cross_origin
 import qdrant_client
 from openai import OpenAI
 from prompts.prompt import engineeredprompt
-from prompts.drug_system_prompt import DRUG_SYSTEM_PROMPT
+
 from langchain_openai import ChatOpenAI, OpenAIEmbeddings
 from langchain_qdrant import Qdrant
 from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
@@ -2771,101 +2771,6 @@ def get_drug_context_retriever_chain():
     ])
     return create_history_aware_retriever(llm, retriever, query_prompt)
 
-def get_drug_rag_chain():
-    retriever_chain = get_drug_context_retriever_chain()
-    llm = ChatOpenAI(model=os.environ.get("DRUG_REASONING_MODEL", "gpt-4o"))
-    prompt = ChatPromptTemplate.from_messages([
-        ("system", SAFE_DRUG_SYSTEM_PROMPT),
-        MessagesPlaceholder("chat_history"),
-        ("user", "{input}"),
-        ("system", "EVIDENCE EXCERPTS:\n{context}\n")
-    ])
-    stuff = create_stuff_documents_chain(llm, prompt)
-    return create_retrieval_chain(retriever_chain, stuff)
-
-drug_rag_chain = get_drug_rag_chain()
-
-def _rag_name_normalize(lines: list[str]) -> list[str]:
-    inputs = "\n".join([f"- {ln}" for ln in lines if ln.strip()])
-    user = (
-        "MODE: NAME NORMALIZATION\n"
-        "Input medication strings (one per line):\n"
-        f"{inputs}\n\n"
-        "Return STRICT JSON ONLY per schema."
-    )
-    out = drug_rag_chain.invoke({"chat_history": [], "input": user})
-    raw = (out.get("answer") or "").strip()
-    doc = _json_only(raw) or {}
-    arr = doc.get("normalized") or []
-    seen, norm = set(), []
-    for a in arr:
-        g = (a or "").strip().lower()
-        if g and g not in seen:
-            seen.add(g); norm.append(g)
-    return norm
-
-def _rag_interaction_discovery(generics: list[str]) -> dict:
-    if not generics:
-        return {"interactions": [], "citations": []}
-    bullets = "\n".join([f"- {g}" for g in generics])
-    user = (
-        "MODE: INTERACTION DISCOVERY\n"
-        "Drugs (generic, lowercase):\n"
-        f"{bullets}\n\n"
-        "Return STRICT JSON ONLY per schema."
-    )
-    out = drug_rag_chain.invoke({"chat_history": [], "input": user})
-    raw = (out.get("answer") or "").strip()
-    doc = _json_only(raw) or {}
-    inters = doc.get("interactions") or []
-    cits   = doc.get("citations") or []
-    for it in inters:
-        if isinstance(it.get("pair"), list):
-            it["pair"] = [(p or "").lower() for p in it["pair"]]
-    return {"interactions": inters, "citations": cits}
-
-def _rag_narrative_summary(mapped: list[dict], interactions: list[dict], ocr_text: str) -> str:
-    lines = []
-    for m in mapped or []:
-        parts = [
-            m.get("generic") or (m.get("name") or "unknown"),
-            f'{m.get("strength","")}{m.get("unit","")}'.strip(),
-            m.get("form") or "",
-            m.get("route") or "",
-            m.get("frequency") or "",
-            "PRN" if m.get("prn") else "",
-            "(dup)" if m.get("dup") else "",
-        ]
-        clean = " • ".join([p for p in parts if p]).strip(" •")
-        lines.append(f"- {clean}")
-    meds_block = "\n".join(lines) or "- (none parsed)"
-
-    user = (
-        "MODE: NARRATIVE SUMMARY\n"
-        "Produce a concise clinician-facing summary.\n\n"
-        "EXTRACTED MEDICATIONS:\n"
-        f"{meds_block}\n\n"
-        "INTERACTIONS JSON (truncated):\n"
-        f"{json.dumps(interactions, ensure_ascii=False)[:4000]}\n\n"
-        "OCR CONTEXT (truncated):\n"
-        f"{(ocr_text or '')[:2000]}\n"
-    )
-    out = drug_rag_chain.invoke({"chat_history": [], "input": user})
-    return (out.get("answer") or "").strip()
-
-def escape_prompt_braces(text: str) -> str:
-    # Escape all braces first
-    text = text.replace("{", "{{").replace("}", "}}")
-
-    # Restore real LangChain variables
-    vars_to_restore = ["context", "input", "chat_history"]
-
-    for var in vars_to_restore:
-        text = text.replace("{{" + var + "}}", "{" + var + "}")
-
-    return text
-
-SAFE_DRUG_SYSTEM_PROMPT = escape_prompt_braces(DRUG_SYSTEM_PROMPT)
 # ---------- ROUTES (POST + OPTIONS to satisfy preflight) ----------
 
 @app.route("/meds/parse", methods=["POST", "OPTIONS"])
@@ -3022,64 +2927,6 @@ def meds_map():
 
     return jsonify({"mapped": merged}), 200
 
-@app.route("/meds/check", methods=["POST", "OPTIONS"])
-def meds_check():
-    if request.method == "OPTIONS":
-        return ("", 204)
-
-    data = request.get_json(silent=True) or {}
-    # Accept any of the following payload styles:
-    # 1) {"drugs": ["amoxicillin","lisinopril", ...]}
-    # 2) {"mapped": [ {...,"generic":"amoxicillin"}, ... ]}
-    # 3) {"rxcuis": ["amoxicillin","lisinopril"]}  # treated as generics (BWC)
-    drugs = data.get("drugs") or []
-    if not drugs:
-        mapped = data.get("mapped") or []
-        if mapped:
-            drugs = [ (m.get("generic") or "").strip().lower()
-                      for m in mapped if (m.get("generic") or "").strip() ]
-    if not drugs:
-        # Back-compat with frontends sending rxcuis (we treat them as generics here)
-        drugs = [ (x or "").strip().lower() for x in (data.get("rxcuis") or []) ]
-
-    # unique, ordered
-    seen, generics = set(), []
-    for d in drugs:
-        d = (d or "").strip().lower()
-        if d and d not in seen:
-            seen.add(d); generics.append(d)
-
-    res = _rag_interaction_discovery(generics)
-    return jsonify(res)
-
-@app.route("/meds/analyze-stream", methods=["POST", "OPTIONS"])
-def meds_analyze_stream():
-    if request.method == "OPTIONS":
-        return ("", 204)
-
-    data = request.get_json(silent=True) or {}
-    text = data.get("text") or ""
-    mapped = data.get("mapped") or []
-    interactions_obj = data.get("interactions")
-
-    if not interactions_obj:
-        generics, seen = [], set()
-        for m in mapped:
-            g = (m.get("generic") or "").strip().lower()
-            if g and g not in seen:
-                seen.add(g); generics.append(g)
-        interactions_obj = _rag_interaction_discovery(generics)
-
-    try:
-        narrative_text = _rag_narrative_summary(mapped, interactions_obj.get("interactions") or [], text)
-    except Exception as e:
-        narrative_text = f"[Error generating narrative: {e}]"
-
-    def generate():
-        for chunk in re.findall(r".{1,600}", narrative_text, flags=re.S):
-            yield chunk
-
-    return Response(stream_with_context(generate()), content_type="text/plain")
 # ============================== Medical Vision ==============================
 # In-memory caches (swap to Redis/DB in production)
 VISION_CACHE = {}        # image_id -> {"data_url": ..., "meta": {...}, "session_id": ...}

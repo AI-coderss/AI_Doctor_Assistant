@@ -4,6 +4,7 @@ langchain-classic
 langchain-community
 langchain-core
 langchain-qdrant
+qdrant_client
 langchain-openai
 openai
 tiktoken

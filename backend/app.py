@@ -20,7 +20,8 @@ from collections import defaultdict
 from dotenv import load_dotenv
 from flask import Flask, request, jsonify, Response, stream_with_context, make_response
 from flask_cors import CORS, cross_origin
-import qdrant_client
+from langchain_qdrant import QdrantVectorStore
+from qdrant_client import QdrantClient
 from openai import OpenAI
 from prompts.prompt import engineeredprompt
 
@@ -503,15 +504,19 @@ client = OpenAI()
 
 # === VECTOR STORE ===
 def get_vector_store():
-    qdrant = qdrant_client.QdrantClient(
+    client = QdrantClient(
         url=os.getenv("QDRANT_HOST"),
         api_key=os.getenv("QDRANT_API_KEY"),
         timeout=60.0
     )
     embeddings = OpenAIEmbeddings()
-    return Qdrant(client=qdrant, collection_name=collection_name, embeddings=embeddings)
 
-vector_store = get_vector_store()
+    # Use QdrantVectorStore instead of the legacy Qdrant class
+    return QdrantVectorStore(
+        client=client, 
+        collection_name=collection_name, 
+        embedding=embeddings # Note: parameter name is 'embedding' (singular)
+    )
 
 # === RAG Chain ===
 def get_context_retriever_chain():

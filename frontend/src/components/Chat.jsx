@@ -1227,38 +1227,47 @@ const Chat = () => {
       const reader = res.body.getReader();
       const decoder = new TextDecoder();
       let message = "";
-      let isFirstChunk = true;
+      let botMessageId = null;
 
       while (true) {
         const { value, done } = await reader.read();
         if (done) break;
         const chunk = decoder.decode(value, { stream: true });
 
-        if (isFirstChunk) {
-          setChats((prev) => [
-            ...prev,
-            { msg: "", who: "bot", streaming: true },
-          ]);
-          isFirstChunk = false;
-        }
+        if (!botMessageId) {
+          botMessageId = crypto.randomUUID();
 
+          setChats(prev => [
+            ...prev,
+            {
+              id: botMessageId,
+              msg: "",
+              who: "bot",
+              streaming: true
+            }
+          ]);
+        }
         message += chunk;
-        setChats((prev) => {
-          const updated = [...prev];
-          updated[updated.length - 1].msg = message;
-          return updated;
-        });
+        setChats(prev =>
+          prev.map(m =>
+            m.id === botMessageId
+              ? { ...m, msg: message }
+              : m
+          )
+        );
       }
 
-      setChats((prev) => {
-        const updated = [...prev];
-        const last = updated[updated.length - 1];
-        if (last && last.streaming) {
-          last.streaming = false;
-          last.msg = normalizeMarkdown(last.msg);
-        }
-        return updated;
-      });
+      setChats(prev =>
+        prev.map(m =>
+          m.id === botMessageId
+            ? {
+              ...m,
+              streaming: false,
+              msg: normalizeMarkdown(m.msg),
+            }
+            : m
+        )
+      );
     },
     [sessionId, setChats]
   );
@@ -2021,16 +2030,16 @@ const Chat = () => {
 
       {/* ===== Overlay: ConsultantAgent (WebRTC Realtime) ===== */}
       {showConsultantAgent && (
-          <ConsultantAgent
-            active={showConsultantAgent}             // ✅ FIX: required by component
-            onClose={() => setShowConsultantAgent(false)}
-            sessionId={sessionId}
-            backendBase={BACKEND_BASE}
-            context={buildAgentContext()}            // same as Lab Agent context helper
-            onAgentMessage={handleConsultantAgentMessage}
-            onDone={handleConsultantDone}
-          />
-        )
+        <ConsultantAgent
+          active={showConsultantAgent}             // ✅ FIX: required by component
+          onClose={() => setShowConsultantAgent(false)}
+          sessionId={sessionId}
+          backendBase={BACKEND_BASE}
+          context={buildAgentContext()}            // same as Lab Agent context helper
+          onAgentMessage={handleConsultantAgentMessage}
+          onDone={handleConsultantDone}
+        />
+      )
       }
 
 

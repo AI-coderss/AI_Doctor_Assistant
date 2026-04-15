@@ -511,23 +511,31 @@ def get_vector_store():
     )
     embeddings = OpenAIEmbeddings()
 
-    # Use QdrantVectorStore instead of the legacy Qdrant class
+    # Fixed: Uses QdrantVectorStore from langchain_qdrant
+    # Fixed: Uses 'embedding=' instead of 'embeddings='
     return QdrantVectorStore(
         client=client, 
-        collection_name=collection_name, 
-        embedding=embeddings # Note: parameter name is 'embedding' (singular)
+        collection_name=os.getenv("QDRANT_COLLECTION_NAME", "your_collection"), 
+        embedding=embeddings
     )
 
+# Initialize the vector_store globally so the chain can access it
+vector_store = get_vector_store()
+
 # === RAG Chain ===
-def get_context_retriever_chain():
-  llm = ChatOpenAI(model="gpt-4o")
-  retriever = vector_store.as_retriever()
-  prompt = ChatPromptTemplate.from_messages([
-      MessagesPlaceholder("chat_history"),
-      ("user", "{input}"),
-      ("user", "Given the above conversation, generate a search query to look up in order to get information relevant to the conversation"),
-  ])
-  return create_history_aware_retriever(llm, retriever, prompt)
+def get_context_retriever_chain(vector_store=vector_store):
+    llm = ChatOpenAI(model="gpt-4o")
+    
+    # This now works because QdrantVectorStore is compatible with qdrant-client 1.16+
+    retriever = vector_store.as_retriever()
+    
+    prompt = ChatPromptTemplate.from_messages([
+        MessagesPlaceholder("chat_history"),
+        ("user", "{input}"),
+        ("user", "Given the above conversation, generate a search query to look up in order to get information relevant to the conversation"),
+    ])
+    
+    return create_history_aware_retriever(llm, retriever, prompt)
 
 def get_conversational_rag_chain():
   retriever_chain = get_context_retriever_chain()

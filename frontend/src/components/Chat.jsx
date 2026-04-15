@@ -29,6 +29,7 @@ import VoiceRecorderPanel from "./VoiceRecorderPanel";
 import useLiveTranscriptStore from "../store/useLiveTranscriptStore";
 import LabResultsUploader from "./LabResultsUploader";
 import MedicationChecker from "./MedicationChecker";
+import DrawComponent from "./drawer.jsx";
 import useDosageStore from "../store/dosageStore";
 import CalculateDosageButton from "./CalculateDosageButton";
 import MedicalImageAnalyzer from "./MedicalImageAnalyzer";
@@ -2066,52 +2067,7 @@ const Chat = () => {
 
 export default Chat;
 
-/* Drawer wrapper */
-const DrawComponent = ({ children }) => {
-  const [isOpen, setIsOpen] = useState(false);
-  // close the tools drawer when anyone dispatches `tools:close`
-  useEffect(() => {
-    const handleToolsClose = () => setIsOpen(false);
-    window.addEventListener("tools:close", handleToolsClose);
-    return () => window.removeEventListener("tools:close", handleToolsClose);
-  }, []);
 
-  // ✅ Listen for Lab Agent’s “close” event only
-  useEffect(() => {
-    const onClose = () => setIsOpen(false);
-    window.addEventListener("close-tools-drawer", onClose);
-    return () => window.removeEventListener("close-tools-drawer", onClose);
-  }, []);
-
-  return (
-    <div
-      className="DrawerRoot"
-      style={{ position: "fixed", bottom: "45px", left: "25px", zIndex: 100 }}
-    >
-      <AnimatePresence>
-        {isOpen && (
-          <motion.div
-            className="tools-grid"
-            initial={{ opacity: 0, y: 50, scale: 0.9 }}
-            animate={{ opacity: 1, y: 0, scale: 1 }}
-            exit={{ opacity: 0, y: 50, scale: 0.9 }}
-            transition={{ duration: 0.3, ease: "easeInOut" }}
-          >
-            {children}
-          </motion.div>
-        )}
-      </AnimatePresence>
-
-      <button
-        onClick={() => setIsOpen((prev) => !prev)}
-        className="drawer-toggle-btn"
-        title="Toggle Tools"
-      >
-        {isOpen ? "✖" : "🛠️"}
-      </button>
-    </div>
-  );
-};
 
 /* Mermaid collapsible */
 const CollapsibleDiagram = ({ chart }) => {

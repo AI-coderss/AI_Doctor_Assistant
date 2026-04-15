@@ -33,7 +33,7 @@ from langchain_classic.chains import (
     create_retrieval_chain
 )
 
-from langchain.chains.combine_documents import create_stuff_documents_chain
+from langchain_classic.chains.combine_documents import create_stuff_documents_chain
 # Load env vars
 load_dotenv()
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")

@@ -27,7 +27,12 @@ from prompts.drug_system_prompt import DRUG_SYSTEM_PROMPT
 from langchain_openai import ChatOpenAI, OpenAIEmbeddings
 from langchain_qdrant import Qdrant
 from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
-from langchain.chains import create_history_aware_retriever, create_retrieval_chain
+# NEW IMPORTS
+from langchain_classic.chains import (
+    create_history_aware_retriever,
+    create_retrieval_chain
+)
+
 from langchain.chains.combine_documents import create_stuff_documents_chain
 # Load env vars
 load_dotenv()

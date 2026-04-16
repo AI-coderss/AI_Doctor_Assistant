@@ -17,6 +17,16 @@ import * as d3 from "d3";
 import { motion, AnimatePresence } from "framer-motion";
 import "../styles/symptoms-checker.css";
 
+/**
+ * Streaming Symptoms Checker - Now uses token-by-token symptom analysis
+ * 
+ * Changes from non-streaming version:
+ * - Calls /api/symptoms/triage-stream instead of /api/symptoms/triage
+ * - Calls /api/symptoms/refine-stream instead of /api/symptoms/refine
+ * - Streams JSON response and parses at completion
+ * - Better perceived performance and real-time feedback
+ */
+
 export default function SymptomsChecker({ sessionId, transcript, backendBase }) {
   const [loading, setLoading] = useState(false);
   const [diagnoses, setDiagnoses] = useState([]);
@@ -46,13 +56,35 @@ export default function SymptomsChecker({ sessionId, transcript, backendBase }) 
     setLoading(true);
     setError("");
     try {
-      const res = await fetch(`${backendBase}/api/symptoms/triage`, {
+      // Use streaming endpoint
+      const res = await fetch(`${backendBase}/api/symptoms/triage-stream`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ session_id: sessionId, transcript }),
       });
-      const data = await res.json();
-      if (!data.ok) throw new Error(data.error || "Fetch failed");
+
+      if (!res.ok || !res.body) {
+        throw new Error("Stream failed");
+      }
+
+      // Stream and accumulate response
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+      let fullText = "";
+
+      while (true) {
+        const { value, done } = await reader.read();
+        if (done) break;
+        const chunk = decoder.decode(value, { stream: true });
+        fullText += chunk;
+      }
+
+      // Parse accumulated JSON
+      const jsonMatch = fullText.match(/\{[\s\S]*\}/);
+      const jsonStr = jsonMatch ? jsonMatch[0] : "{}";
+      const data = JSON.parse(jsonStr);
+
+      if (!data.ok) throw new Error(data.error || "Triage failed");
       const diags = data.diagnoses || [];
       setDiagnoses(diags);
       setOpenId(diags[0]?.id || null);
@@ -78,16 +110,38 @@ export default function SymptomsChecker({ sessionId, transcript, backendBase }) 
     );
 
     try {
-      const res = await fetch(`${backendBase}/api/symptoms/refine`, {
+      // Use streaming endpoint for refinement
+      const res = await fetch(`${backendBase}/api/symptoms/refine-stream`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           session_id: sessionId,
           transcript,
-          answers: flatAnswers,
+          followup_answers: flatAnswers,
         }),
       });
-      const data = await res.json();
+
+      if (!res.ok || !res.body) {
+        throw new Error("Stream failed");
+      }
+
+      // Stream and accumulate response
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+      let fullText = "";
+
+      while (true) {
+        const { value, done } = await reader.read();
+        if (done) break;
+        const chunk = decoder.decode(value, { stream: true });
+        fullText += chunk;
+      }
+
+      // Parse accumulated JSON
+      const jsonMatch = fullText.match(/\{[\s\S]*\}/);
+      const jsonStr = jsonMatch ? jsonMatch[0] : "{}";
+      const data = JSON.parse(jsonStr);
+
       if (!data.ok) throw new Error(data.error || "Refine failed");
       const diags = data.diagnoses || [];
       setDiagnoses(diags);

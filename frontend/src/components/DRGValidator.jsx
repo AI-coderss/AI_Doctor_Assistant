@@ -68,6 +68,7 @@ export default function DRGValidator({ backendBase, sessionId }) {
 
   const [hoverIdx, setHoverIdx] = useState(null);
   const [q, setQ] = useState("");
+  const [streamingFix, setStreamingFix] = useState(null);
 
   // mount-time effect for body right-margin when panel is open (no Chat.jsx change needed)
   useEffect(() => {
@@ -85,16 +86,33 @@ export default function DRGValidator({ backendBase, sessionId }) {
 
   const callFix = async (row) => {
     try {
-      const res = await fetch(`${backendBase}/drg/fix`, {
+      setStreamingFix({ rowIdx: row.patient_id, text: "", loading: true });
+      const res = await fetch(`${backendBase}/drg/fix-stream`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ session_id: sessionId, row }),
         credentials: "include",
       });
-      const j = await res.json();
-      alert((j?.suggested_fixes_md || []).join("\n• "));
+
+      if (!res.ok || !res.body) {
+        setStreamingFix({ rowIdx: row.patient_id, text: "Error: Could not get fix suggestions.", loading: false });
+        return;
+      }
+
+      // Stream the fix suggestions
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+      let fullText = "";
+
+      while (true) {
+        const { value, done } = await reader.read();
+        if (done) break;
+        const chunk = decoder.decode(value, { stream: true });
+        fullText += chunk;
+        setStreamingFix({ rowIdx: row.patient_id, text: fullText, loading: false });
+      }
     } catch (e) {
-      alert("Fix action failed. Please try again.");
+      setStreamingFix({ rowIdx: row.patient_id, text: "Fix action failed. Please try again.", loading: false });
     }
   };
 

@@ -3,6 +3,43 @@
 /* eslint-disable no-useless-concat */
 /* eslint-disable no-loop-func */
 /* eslint-disable react-hooks/exhaustive-deps */
+
+/**
+ * ============================================================================
+ * 🚀 STREAMING IMPLEMENTATION GUIDE - Chat Component
+ * ============================================================================
+ * 
+ * This component implements token-by-token streaming for all text responses
+ * similar to ChatGPT, providing real-time feedback to users.
+ *
+ * STREAMING FLOW:
+ * 1. User sends message via ChatInputWidget
+ * 2. handleNewMessage() is called with the user's text
+ * 3. Uses streamToReactState() from ../utils/streamingHelper
+ * 4. Backend streams response tokens one-by-one
+ * 5. UI updates in real-time for each token
+ * 6. Final message is normalized and marked as complete
+ *
+ * KEY STREAMING OPERATIONS:
+ * - Main chat: /stream endpoint (token-by-token text)
+ * - Second opinion: /case_second_opinion_stream endpoint (JSON + narrative)
+ * - DRG validation: /drg/validate-stream endpoint (handled by DRGValidator store)
+ * - DRG fixes: /drg/fix-stream endpoint (handled by DRGValidator component)
+ *
+ * ERROR HANDLING:
+ * - Streaming errors caught in onError callback
+ * - User sees "Sorry, I encountered an error: [message]"
+ * - Console logs detailed error information
+ *
+ * UTILITIES USED:
+ * - streamToReactState(): Main streaming function for text responses
+ * - streamFetch(): Low-level streaming with callbacks (if needed)
+ * - extractJSON(): Parse JSON from streamed responses
+ * - formatStreamedText(): Normalize and clean streamed text
+ *
+ * ============================================================================
+ */
+
 import React, { useState, useEffect, useRef, useCallback } from "react";
 import { useLayoutEffect } from "react";
 import ChatInputWidget from "./ChatInputWidget.jsx";
@@ -10,6 +47,7 @@ import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import Mermaid from "./Mermaid.jsx";
 import BaseOrb from "./BaseOrb.jsx";
+import { streamToReactState, extractJSON, formatStreamedText } from "../utils/streamingHelper";
 import {
   FaMicrophoneAlt,
   FaFlask,
@@ -1211,63 +1249,77 @@ const Chat = () => {
       }
 
       // --- normal streaming call (no second user echo) ---
-      const res = await fetch(`${BACKEND_BASE}/stream`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ message: trimmed, session_id: sessionId }),
-      });
-
-      if (!res.ok || !res.body) {
-        setChats((prev) => [
-          ...prev,
-          { msg: "Something went wrong.", who: "bot" },
-        ]);
-        return;
-      }
-
-      const reader = res.body.getReader();
-      const decoder = new TextDecoder();
-      let message = "";
       let botMessageId = null;
-
-      while (true) {
-        const { value, done } = await reader.read();
-        if (done) break;
-        const chunk = decoder.decode(value, { stream: true });
-
-        if (!botMessageId) {
-          botMessageId = crypto.randomUUID();
-
-          setChats(prev => [
-            ...prev,
-            {
-              id: botMessageId,
-              msg: "",
-              who: "bot",
-              streaming: true
+      
+      await streamToReactState(
+        `${BACKEND_BASE}/stream`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ message: trimmed, session_id: sessionId }),
+        },
+        (accumulatedText) => {
+          // Called on each chunk
+          if (!botMessageId) {
+            botMessageId = crypto.randomUUID();
+            setChats(prev => [
+              ...prev,
+              {
+                id: botMessageId,
+                msg: "",
+                who: "bot",
+                streaming: true
+              }
+            ]);
+          }
+          setChats(prev =>
+            prev.map(m =>
+              m.id === botMessageId
+                ? { ...m, msg: accumulatedText }
+                : m
+            )
+          );
+        },
+        {
+          onComplete: (fullText) => {
+            // Stream completed successfully
+            if (botMessageId) {
+              setChats(prev =>
+                prev.map(m =>
+                  m.id === botMessageId
+                    ? {
+                      ...m,
+                      streaming: false,
+                      msg: normalizeMarkdown(fullText),
+                    }
+                    : m
+                )
+              );
             }
-          ]);
+          },
+          onError: (error) => {
+            // Handle streaming error gracefully
+            console.error("Stream error:", error);
+            if (botMessageId) {
+              setChats(prev =>
+                prev.map(m =>
+                  m.id === botMessageId
+                    ? {
+                      ...m,
+                      streaming: false,
+                      msg: `Sorry, I encountered an error: ${error.message}`,
+                    }
+                    : m
+                )
+              );
+            } else {
+              setChats(prev => [
+                ...prev,
+                { msg: `Error: ${error.message}`, who: "bot" }
+              ]);
+            }
+          }
         }
-        message += chunk;
-        setChats(prev =>
-          prev.map(m =>
-            m.id === botMessageId
-              ? { ...m, msg: message }
-              : m
-          )
-        );
-      }
-
-      setChats(prev =>
-        prev.map(m =>
-          m.id === botMessageId
-            ? {
-              ...m,
-              streaming: false,
-              msg: normalizeMarkdown(m.msg),
-            }
-            : m
-        )
       );
     },
     [sessionId, setChats]

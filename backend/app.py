@@ -306,7 +306,62 @@ CORS(
             "supports_credentials": True,
             "max_age": 86400,
         },
+        r"/drg/validate-stream": {
+            "origins": [
+                "https://ai-doctor-assistant-app-dev.onrender.com",
+                "http://localhost:3000",
+            ],
+            "methods": ["POST", "OPTIONS"],
+            "allow_headers": ["Content-Type", "Authorization", "Accept", "X-Requested-With", "X-Session-Id"],
+            "expose_headers": ["Content-Type"],
+            "supports_credentials": True,
+            "max_age": 86400,
+        },
+        r"/drg/fix-stream": {
+            "origins": [
+                "https://ai-doctor-assistant-app-dev.onrender.com",
+                "http://localhost:3000",
+            ],
+            "methods": ["POST", "OPTIONS"],
+            "allow_headers": ["Content-Type", "Authorization", "Accept", "X-Requested-With", "X-Session-Id"],
+            "expose_headers": ["Content-Type"],
+            "supports_credentials": True,
+            "max_age": 86400,
+        },
         r"/clinical-notes/soap-stream": {
+            "origins": [
+                "https://ai-doctor-assistant-app-dev.onrender.com",
+                "http://localhost:3000",
+            ],
+            "methods": ["POST", "OPTIONS"],
+            "allow_headers": ["Content-Type", "Authorization", "Accept", "X-Requested-With", "X-Session-Id"],
+            "expose_headers": ["Content-Type"],
+            "supports_credentials": True,
+            "max_age": 86400,
+        },
+        r"/meds/analyze-stream": {
+            "origins": [
+                "https://ai-doctor-assistant-app-dev.onrender.com",
+                "http://localhost:3000",
+            ],
+            "methods": ["POST", "OPTIONS"],
+            "allow_headers": ["Content-Type", "Authorization", "Accept", "X-Requested-With", "X-Session-Id"],
+            "expose_headers": ["Content-Type"],
+            "supports_credentials": True,
+            "max_age": 86400,
+        },
+        r"/api/symptoms/triage-stream": {
+            "origins": [
+                "https://ai-doctor-assistant-app-dev.onrender.com",
+                "http://localhost:3000",
+            ],
+            "methods": ["POST", "OPTIONS"],
+            "allow_headers": ["Content-Type", "Authorization", "Accept", "X-Requested-With", "X-Session-Id"],
+            "expose_headers": ["Content-Type"],
+            "supports_credentials": True,
+            "max_age": 86400,
+        },
+        r"/api/symptoms/refine-stream": {
             "origins": [
                 "https://ai-doctor-assistant-app-dev.onrender.com",
                 "http://localhost:3000",
@@ -2940,6 +2995,268 @@ def meds_map():
 
     return jsonify({"mapped": merged}), 200
 
+
+# ========================= /meds/analyze-stream (NEW) ==========================
+@app.post("/meds/analyze-stream")
+def meds_analyze_stream():
+    """
+    Stream a narrative analysis of medication interactions and recommendations.
+    Request: {
+      "session_id": "...",
+      "text": "...",
+      "meds": [...],
+      "mapped": [...],
+      "interactions": [...]
+    }
+    Response: text/plain stream with token-by-token analysis
+    """
+    data = request.get_json(silent=True) or {}
+    session_id = data.get("session_id", str(uuid4()))
+    text = (data.get("text") or "").strip()
+    meds = data.get("meds") or []
+    mapped = data.get("mapped") or []
+    interactions = data.get("interactions") or []
+
+    if not meds:
+        return Response("No medications provided", status=400, mimetype="text/plain")
+
+    # Build analysis prompt
+    med_list = "\n".join([f"- {m.get('name', 'Unknown')}" for m in meds])
+    interactions_str = "\n".join([str(i) for i in interactions]) if interactions else "None detected"
+
+    prompt = f"""
+Provide a concise clinical analysis of the following medications and their interactions:
+
+Medications:
+{med_list}
+
+Clinical Text Context:
+{text}
+
+Medication Interactions Detected:
+{interactions_str}
+
+Please provide:
+1. Summary of the medication regimen
+2. Key interaction warnings (if any)
+3. Recommendations for safe use or monitoring
+4. Any dose or timing adjustments to consider
+
+Be brief and clinician-focused. Use professional medical language.
+"""
+
+    def generate():
+        try:
+            acc = ""
+            for chunk in conversation_rag_chain.stream({
+                "chat_history": chat_sessions.get(session_id, []),
+                "input": prompt
+            }):
+                token = chunk.get("answer", "")
+                if token:
+                    acc += token
+                    yield token
+            # Store in session history
+            chat_sessions.setdefault(session_id, [])
+            chat_sessions[session_id].append({"role": "user", "content": "[Medication Analysis]"})
+            chat_sessions[session_id].append({"role": "assistant", "content": acc})
+        except Exception as e:
+            yield f"\n[Error: {str(e)}]"
+
+    resp = Response(stream_with_context(generate()), mimetype="text/plain; charset=utf-8")
+    resp.headers["X-Accel-Buffering"] = "no"
+    resp.headers["Cache-Control"] = "no-store"
+    return resp
+
+
+# ===================== Streaming Symptom Analysis (NEW) ========================
+
+@app.post("/api/symptoms/triage-stream")
+def symptoms_triage_stream():
+    """
+    Stream symptom triage analysis token-by-token, but return valid JSON at the end.
+    Same response structure as /api/symptoms/triage, but streamed.
+    """
+    data = request.get_json(silent=True) or {}
+    session_id = data.get("session_id") or str(uuid4())
+    transcript = (data.get("transcript") or "").strip()
+    if not transcript:
+        return Response("No transcript provided", status=400, mimetype="text/plain")
+
+    prompt = f"""
+You are a medical diagnostic reasoning assistant.
+
+Your task:
+1. Analyze the patient's transcript.
+2. Produce a JSON object with likely differential diagnoses, how symptoms support each diagnosis, and clarifying questions.
+
+Return STRICT JSON ONLY with this structure:
+
+{{
+  "ok": true,
+  "session_id": "{session_id}",
+  "diagnoses": [
+    {{
+      "id": "string_identifier",
+      "name": "Disease or condition name",
+      "likelihood_score": 0.0–1.0,
+      "likelihood_text": "short sentence about likelihood",
+      "short_description": "concise description of the disease",
+      "long_description": "detailed overview of the disease",
+      "source": {{
+        "title": "Guideline or source title",
+        "url": "https://..."
+      }},
+      "symptoms": [
+        {{
+          "name": "symptom name",
+          "weight": 0.0–1.0
+        }}
+      ],
+      "questions": [
+        {{
+          "id": "q1",
+          "text": "Clinically relevant clarifying question",
+          "type": "boolean"
+        }}
+      ]
+    }}
+  ]
+}}
+
+Strict rules:
+- Always include at least 3 diagnoses when possible.
+- Use concise, clinician-facing medical language.
+- Order the "questions" array in sequence the clinician should ask them.
+- Ask at least 5-7 questions for each diagnosis.
+- Use type "boolean" for all questions.
+- Never include Markdown, commentary, or text outside the JSON.
+
+Patient transcript:
+{transcript}
+"""
+
+    def generate():
+        try:
+            acc = ""
+            for chunk in conversation_rag_chain.stream({
+                "chat_history": chat_sessions.get(session_id, []),
+                "input": prompt
+            }):
+                token = chunk.get("answer", "")
+                if token:
+                    acc += token
+                    yield token
+            # Store in session history
+            chat_sessions.setdefault(session_id, [])
+            chat_sessions[session_id].append({"role": "user", "content": "[Symptoms triage]"})
+            chat_sessions[session_id].append({"role": "assistant", "content": acc})
+        except Exception as e:
+            yield f"\n[Error: {str(e)}]"
+
+    resp = Response(stream_with_context(generate()), mimetype="text/plain; charset=utf-8")
+    resp.headers["X-Accel-Buffering"] = "no"
+    resp.headers["Cache-Control"] = "no-store"
+    return resp
+
+
+@app.post("/api/symptoms/refine-stream")
+def symptoms_refine_stream():
+    """
+    Stream refined symptom analysis token-by-token, returning JSON.
+    Same response structure as /api/symptoms/refine, but streamed.
+    """
+    data = request.get_json(silent=True) or {}
+    session_id = data.get("session_id") or str(uuid4())
+    transcript = (data.get("transcript") or "").strip()
+    followup_answers = data.get("followup_answers") or []
+
+    if not transcript:
+        return Response("No transcript provided", status=400, mimetype="text/plain")
+
+    followup_txt = ""
+    if followup_answers:
+        followup_txt = "\nFollow-up answers so far:\n" + "\n".join(
+            [f"- {a.get('question_id', '')}: {a.get('answer', '')}" for a in followup_answers]
+        )
+
+    prompt = f"""
+You are a medical diagnostic reasoning assistant. Re-analyze with new information.
+
+Your task:
+1. Analyze the patient's transcript and follow-up answers.
+2. Re-weight diagnosis probabilities.
+3. Produce updated JSON with refined differential diagnoses.
+
+Return STRICT JSON ONLY with this structure:
+
+{{
+  "ok": true,
+  "session_id": "{session_id}",
+  "diagnoses": [
+    {{
+      "id": "string_identifier",
+      "name": "Disease or condition name",
+      "likelihood_score": 0.0–1.0,
+      "likelihood_text": "updated likelihood sentence",
+      "short_description": "concise description of the disease",
+      "long_description": "detailed overview of the disease",
+      "source": {{
+        "title": "Guideline or source title",
+        "url": "https://..."
+      }},
+      "symptoms": [
+        {{
+          "name": "symptom name",
+          "weight": 0.0–1.0
+        }}
+      ],
+      "questions": [
+        {{
+          "id": "q1",
+          "text": "Next clarifying question",
+          "type": "boolean"
+        }}
+      ]
+    }}
+  ]
+}}
+
+Strict rules:
+- Re-order diagnoses by updated likelihood scores.
+- Adjust questions based on previous answers.
+- Use concise, clinician-facing medical language.
+- Never include Markdown or text outside the JSON.
+
+Patient transcript:
+{transcript}
+
+{followup_txt}
+"""
+
+    def generate():
+        try:
+            acc = ""
+            for chunk in conversation_rag_chain.stream({
+                "chat_history": chat_sessions.get(session_id, []),
+                "input": prompt
+            }):
+                token = chunk.get("answer", "")
+                if token:
+                    acc += token
+                    yield token
+            # Store in session history
+            chat_sessions.setdefault(session_id, [])
+            chat_sessions[session_id].append({"role": "user", "content": "[Symptoms refine]"})
+            chat_sessions[session_id].append({"role": "assistant", "content": acc})
+        except Exception as e:
+            yield f"\n[Error: {str(e)}]"
+
+    resp = Response(stream_with_context(generate()), mimetype="text/plain; charset=utf-8")
+    resp.headers["X-Accel-Buffering"] = "no"
+    resp.headers["Cache-Control"] = "no-store"
+    return resp
+
 # ============================== Medical Vision ==============================
 # In-memory caches (swap to Redis/DB in production)
 VISION_CACHE = {}        # image_id -> {"data_url": ..., "meta": {...}, "session_id": ...}
@@ -4092,6 +4409,85 @@ def drg_fix():
         return jsonify(parsed), 200
     except Exception as e:
         return jsonify({"error": f"Server error: {str(e)}"}), 500
+
+
+# ===== STREAMING ENDPOINTS FOR DRG VALIDATION =====
+@app.route("/drg/validate-stream", methods=["POST", "OPTIONS"])
+def drg_validate_stream():
+    """Streaming version of DRG validation for token-by-token feedback."""
+    if request.method == "OPTIONS":
+        return make_response(("", 204))
+    
+    data = request.get_json(silent=True) or {}
+    session_id = data.get("session_id", str(uuid4()))
+    patient_id = (data.get("patient_id") or "").strip()
+    second = data.get("second_opinion_json") or data.get("second_opinion_text")
+    
+    if not (patient_id and second):
+        return jsonify({"error": "Missing patient_id or second opinion"}), 400
+
+    if isinstance(second, str):
+        second_json = _json_or_first_block(second)
+    else:
+        second_json = second
+    
+    if not isinstance(second_json, dict):
+        return jsonify({"error": "Invalid second_opinion_json"}), 400
+
+    prompt = _build_drg_validation_prompt(second_json, patient_id)
+
+    def generate():
+        try:
+            for chunk in conversation_rag_chain.stream({
+                "chat_history": chat_sessions.get(session_id, []),
+                "input": prompt
+            }):
+                token = chunk.get("answer", "")
+                if token:
+                    yield token
+        except Exception as e:
+            yield f"\n[Error: {str(e)}]"
+
+    resp = Response(stream_with_context(generate()), mimetype="text/plain; charset=utf-8")
+    resp.headers["X-Accel-Buffering"] = "no"
+    resp.headers["Cache-Control"] = "no-store"
+    return resp
+
+
+@app.route("/drg/fix-stream", methods=["POST", "OPTIONS"])
+def drg_fix_stream():
+    """Streaming version of DRG fix suggestions for token-by-token feedback."""
+    if request.method == "OPTIONS":
+        return make_response(("", 204))
+    
+    data = request.get_json(silent=True) or {}
+    session_id = data.get("session_id", str(uuid4()))
+    row = data.get("row")
+    transcript = (data.get("transcript") or (session_context.get(session_id, {}) or {}).get("transcript") or "").strip()
+
+    if not isinstance(row, dict):
+        return jsonify({"error": "Invalid row"}), 400
+
+    prompt = _build_drg_fix_prompt(row, transcript)
+
+    def generate():
+        try:
+            for chunk in conversation_rag_chain.stream({
+                "chat_history": [],
+                "input": prompt
+            }):
+                token = chunk.get("answer", "")
+                if token:
+                    yield token
+        except Exception as e:
+            yield f"\n[Error: {str(e)}]"
+
+    resp = Response(stream_with_context(generate()), mimetype="text/plain; charset=utf-8")
+    resp.headers["X-Accel-Buffering"] = "no"
+    resp.headers["Cache-Control"] = "no-store"
+    return resp
+
+
 # Defensive access to existing globals (won't overwrite if already defined)
 try:
     chat_sessions

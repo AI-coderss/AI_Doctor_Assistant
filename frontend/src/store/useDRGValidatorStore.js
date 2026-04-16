@@ -20,7 +20,7 @@ const useDRGValidatorStore = create((set, get) => ({
     if (!patientId || !secondOpinion) return;
     set({ loading: true, error: null });
     try {
-      const res = await fetch(`${backendBase}/drg/validate`, {
+      const res = await fetch(`${backendBase}/drg/validate-stream`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -30,9 +30,33 @@ const useDRGValidatorStore = create((set, get) => ({
         }),
         credentials: "include",
       });
-      const j = await res.json();
-      if (!res.ok) throw new Error(j?.error || "Validation failed");
-      set({ rows: j.rows || [], summary: j.summary || { validated: 0, review: 0, flagged: 0 }, open: true });
+
+      if (!res.ok) throw new Error("Validation failed");
+
+      // Stream the response and accumulate full text
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+      let fullText = "";
+
+      while (true) {
+        const { value, done } = await reader.read();
+        if (done) break;
+        const chunk = decoder.decode(value, { stream: true });
+        fullText += chunk;
+      }
+
+      // Parse the accumulated JSON response
+      const jsonMatch = fullText.match(/\{[\s\S]*\}/);
+      const jsonStr = jsonMatch ? jsonMatch[0] : "{}";
+      const j = JSON.parse(jsonStr);
+
+      if (!j || typeof j !== "object") throw new Error("Invalid response format");
+      
+      set({ 
+        rows: j.rows || [], 
+        summary: j.summary || { validated: 0, review: 0, flagged: 0 }, 
+        open: true 
+      });
     } catch (e) {
       set({ error: String(e?.message || e) });
     } finally {

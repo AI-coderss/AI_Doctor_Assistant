@@ -1,0 +1,209 @@
+/* StreamingDisplay.css - Styling for token-by-token streaming responses */
+
+.streaming-display {
+  position: relative;
+  padding: 1rem;
+  border-radius: 8px;
+  background-color: var(--bg-secondary, #f5f5f5);
+  color: var(--text-primary, #333);
+  transition: background-color 0.3s ease;
+}
+
+.streaming-display.streaming {
+  animation: streamingPulse 2s ease-in-out infinite;
+}
+
+@keyframes streamingPulse {
+  0%, 100% {
+    background-color: var(--bg-secondary, #f5f5f5);
+  }
+  50% {
+    background-color: var(--bg-tertiary, #f0f0f0);
+  }
+}
+
+/* Loading indicator */
+.streaming-indicator {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  margin-bottom: 1rem;
+  padding: 0.75rem;
+  background: var(--accent-light, rgba(59, 130, 246, 0.1));
+  border-left: 3px solid var(--accent, #3b82f6);
+  border-radius: 4px;
+  font-size: 0.875rem;
+  color: var(--accent, #3b82f6);
+}
+
+.streaming-indicator .spinner {
+  width: 16px;
+  height: 16px;
+  border: 2px solid rgba(59, 130, 246, 0.2);
+  border-top-color: var(--accent, #3b82f6);
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* Content area */
+.streaming-content {
+  line-height: 1.6;
+  word-break: break-word;
+}
+
+.streaming-content p {
+  margin: 0.5rem 0;
+}
+
+.streaming-content ul,
+.streaming-content ol {
+  margin: 0.5rem 0 0.5rem 1.5rem;
+}
+
+.streaming-content li {
+  margin: 0.25rem 0;
+}
+
+.streaming-content code {
+  background-color: var(--bg-code, #f0f0f0);
+  padding: 2px 6px;
+  border-radius: 3px;
+  font-family: "Consolas", "Monaco", "Courier New", monospace;
+  font-size: 0.85em;
+}
+
+.streaming-content pre {
+  background-color: var(--bg-code, #f0f0f0);
+  padding: 1rem;
+  border-radius: 4px;
+  overflow-x: auto;
+  margin: 0.5rem 0;
+}
+
+.streaming-content blockquote {
+  border-left: 3px solid var(--accent, #3b82f6);
+  padding-left: 1rem;
+  margin-left: 0;
+  opacity: 0.8;
+  font-style: italic;
+}
+
+/* Blinking cursor for streaming text */
+.streaming-content .cursor {
+  display: inline-block;
+  width: 2px;
+  background-color: var(--text-primary, #333);
+  margin-left: 2px;
+  animation: blink 1s infinite;
+}
+
+@keyframes blink {
+  0%, 49% {
+    opacity: 1;
+  }
+  50%, 100% {
+    opacity: 0;
+  }
+}
+
+/* Completion indicator */
+.streaming-complete-indicator {
+  margin-top: 0.75rem;
+  padding: 0.5rem;
+  font-size: 0.75rem;
+  color: var(--success, #10b981);
+  text-align: right;
+  opacity: 0.7;
+  animation: fadeIn 0.3s ease;
+}
+
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
+  to {
+    opacity: 0.7;
+    transform: translateY(0);
+  }
+}
+
+/* Error state */
+.streaming-display.error {
+  border: 1px solid var(--error, #ef4444);
+  background-color: var(--error-light, rgba(239, 68, 68, 0.1));
+}
+
+.streaming-display.error .streaming-content {
+  color: var(--error, #ef4444);
+}
+
+/* Dark mode support */
+@media (prefers-color-scheme: dark) {
+  .streaming-display {
+    background-color: var(--bg-secondary, #1f2937);
+    color: var(--text-primary, #e5e7eb);
+  }
+
+  .streaming-display.streaming {
+    animation: streamingPulseDark 2s ease-in-out infinite;
+  }
+
+  @keyframes streamingPulseDark {
+    0%, 100% {
+      background-color: var(--bg-secondary, #1f2937);
+    }
+    50% {
+      background-color: var(--bg-tertiary, #111827);
+    }
+  }
+
+  .streaming-indicator {
+    background: rgba(59, 130, 246, 0.15);
+  }
+
+  .streaming-content code {
+    background-color: var(--bg-code, #111827);
+    color: #e5e7eb;
+  }
+
+  .streaming-content pre {
+    background-color: var(--bg-code, #111827);
+  }
+}
+
+/* Responsive design */
+@media (max-width: 640px) {
+  .streaming-display {
+    padding: 0.75rem;
+  }
+
+  .streaming-indicator {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .streaming-content {
+    font-size: 0.95rem;
+  }
+}
+
+/* Animation for content appearing */
+.streaming-display .streaming-content {
+  animation: contentSlideIn 0.3s ease;
+}
+
+@keyframes contentSlideIn {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}

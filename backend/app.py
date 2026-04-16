@@ -911,15 +911,26 @@ def stream():
                 {"chat_history": chat_sessions[session_id], "input": user_input}
             ):
                 token = chunk.get("answer", "")
-                answer += token
-                yield token
+                if token:
+                    answer += token
+                    # Yield each token for immediate streaming
+                    yield token
         except Exception as e:
             yield f"\n[Vector error: {str(e)}]"
 
+        # Store in history after complete stream
         chat_sessions[session_id].append({"role": "user", "content": user_input})
         chat_sessions[session_id].append({"role": "assistant", "content": answer})
 
-    return Response(stream_with_context(generate()), content_type="text/plain")
+    resp = Response(stream_with_context(generate()), mimetype="text/plain; charset=utf-8")
+    resp.headers["X-Accel-Buffering"] = "no"
+    resp.headers["Cache-Control"] = "no-store"
+    resp.headers["Connection"] = "keep-alive"
+    resp.headers["Transfer-Encoding"] = "chunked"
+    resp.headers["Pragma"] = "no-cache"
+    # Disable response buffering at all levels
+    resp.direct_passthrough = True
+    return resp
 
 @app.route("/generate", methods=["POST"])
 def generate():

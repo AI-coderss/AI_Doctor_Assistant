@@ -4,6 +4,8 @@
 /* eslint-disable no-loop-func */
 /* eslint-disable react-hooks/exhaustive-deps */
 
+import { flushSync } from "react-dom";
+
 /**
  * ============================================================================
  * 🚀 STREAMING IMPLEMENTATION GUIDE - Chat Component
@@ -17,7 +19,7 @@
  * 2. handleNewMessage() is called with the user's text
  * 3. Uses streamToReactState() from ../utils/streamingHelper
  * 4. Backend streams response tokens one-by-one
- * 5. UI updates in real-time for each token
+ * 5. UI updates in real-time for each token (using flushSync for immediate updates)
  * 6. Final message is normalized and marked as complete
  *
  * KEY STREAMING OPERATIONS:
@@ -1259,64 +1261,75 @@ const Chat = () => {
           body: JSON.stringify({ message: trimmed, session_id: sessionId }),
         },
         (accumulatedText) => {
-          // Called on each chunk
+          // Called on each chunk - use flushSync for immediate visual update
           if (!botMessageId) {
             botMessageId = crypto.randomUUID();
-            setChats(prev => [
-              ...prev,
-              {
-                id: botMessageId,
-                msg: "",
-                who: "bot",
-                streaming: true
-              }
-            ]);
+            flushSync(() => {
+              setChats(prev => [
+                ...prev,
+                {
+                  id: botMessageId,
+                  msg: "",
+                  who: "bot",
+                  streaming: true
+                }
+              ]);
+            });
           }
-          setChats(prev =>
-            prev.map(m =>
-              m.id === botMessageId
-                ? { ...m, msg: accumulatedText }
-                : m
-            )
-          );
+          // Force synchronous update to show each token immediately
+          flushSync(() => {
+            setChats(prev =>
+              prev.map(m =>
+                m.id === botMessageId
+                  ? { ...m, msg: accumulatedText }
+                  : m
+              )
+            );
+          });
         },
         {
           onComplete: (fullText) => {
-            // Stream completed successfully
+            // Stream completed successfully - finalize the message
             if (botMessageId) {
-              setChats(prev =>
-                prev.map(m =>
-                  m.id === botMessageId
-                    ? {
-                      ...m,
-                      streaming: false,
-                      msg: normalizeMarkdown(fullText),
-                    }
-                    : m
-                )
-              );
+              flushSync(() => {
+                setChats(prev =>
+                  prev.map(m =>
+                    m.id === botMessageId
+                      ? {
+                        ...m,
+                        streaming: false,
+                        msg: normalizeMarkdown(fullText),
+                      }
+                      : m
+                  )
+                );
+              });
             }
           },
           onError: (error) => {
             // Handle streaming error gracefully
             console.error("Stream error:", error);
             if (botMessageId) {
-              setChats(prev =>
-                prev.map(m =>
-                  m.id === botMessageId
-                    ? {
-                      ...m,
-                      streaming: false,
-                      msg: `Sorry, I encountered an error: ${error.message}`,
-                    }
-                    : m
-                )
-              );
+              flushSync(() => {
+                setChats(prev =>
+                  prev.map(m =>
+                    m.id === botMessageId
+                      ? {
+                        ...m,
+                        streaming: false,
+                        msg: `Sorry, I encountered an error: ${error.message}`,
+                      }
+                      : m
+                  )
+                );
+              });
             } else {
-              setChats(prev => [
-                ...prev,
-                { msg: `Error: ${error.message}`, who: "bot" }
-              ]);
+              flushSync(() => {
+                setChats(prev => [
+                  ...prev,
+                  { msg: `Error: ${error.message}`, who: "bot" }
+                ]);
+              });
             }
           }
         }

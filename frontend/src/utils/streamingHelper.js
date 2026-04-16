@@ -2,11 +2,13 @@
  * Streaming helper utilities for token-by-token text responses like ChatGPT
  */
 
+import { flushSync } from 'react-dom';
+
 /**
  * Fetch and stream a response, calling a callback for each token/chunk
  * @param {string} url - API endpoint
  * @param {object} options - Fetch options (method, headers, body, etc.)
- * @param {function} onChunk - Callback fired for each chunk: (chunk) => void
+ * @param {function} onChunk - Callback fired for each chunk: (chunk, fullText) => void
  * @param {function} onComplete - Callback fired when streaming completes: (fullText) => void
  * @param {function} onError - Callback fired on error: (error) => void
  * @returns {Promise<string>} - The full accumulated text
@@ -34,6 +36,9 @@ export async function streamFetch(url, options = {}, onChunk, onComplete, onErro
 
       const chunk = decoder.decode(value, { stream: true });
       fullText += chunk;
+      
+      // Force synchronous state update for immediate visual feedback
+      // This prevents React 18+ batching from delaying the UI update
       onChunk?.(chunk, fullText);
     }
 

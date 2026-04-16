@@ -1537,3 +1537,44 @@ html, body { overflow-x: hidden; }
 @media (hover: none) and (pointer: coarse) {
   :root { --rd-icon: 26px; --rd-label: 11px; }
 }
+
+
+/* 🔹 Base Tool Button */
+.clean-btn {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+
+  padding: 12px 14px;
+  border-radius: 12px;
+  border: 1px solid rgba(0, 0, 0, 0.08);
+
+  background: #ffffff;
+  color: #222;
+
+  font-size: 14px;
+  font-weight: 500;
+
+  cursor: pointer;
+  transition: all 0.2s ease;
+
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06);
+}
+
+/* Hover */
+.clean-btn:hover {
+  background: #f5f7fa;
+  transform: translateY(-1px);
+}
+
+/* Active */
+.clean-btn:active {
+  transform: scale(0.98);
+}
+
+/* Icon */
+.clean-btn svg {
+  font-size: 16px;
+  opacity: 0.8;
+}

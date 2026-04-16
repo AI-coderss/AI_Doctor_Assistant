@@ -878,9 +878,9 @@ def case_second_opinion_stream():
                 if not token:
                     continue
                 answer_acc += token
-                yield token  # small/frequent chunks keep the connection alive
+                yield token.encode('utf-8')  # small/frequent chunks keep the connection alive
         except Exception as e:
-            yield f"\n[Vector error: {str(e)}]"
+            yield f"\n[Vector error: {str(e)}]".encode('utf-8')
 
         # Save to chat history after stream ends
         chat_sessions.setdefault(session_id, [])
@@ -913,10 +913,10 @@ def stream():
                 token = chunk.get("answer", "")
                 if token:
                     answer += token
-                    # Yield each token for immediate streaming
-                    yield token
+                    # Yield each token as bytes for gunicorn compatibility
+                    yield token.encode('utf-8')
         except Exception as e:
-            yield f"\n[Vector error: {str(e)}]"
+            yield f"\n[Vector error: {str(e)}]".encode('utf-8')
 
         # Store in history after complete stream
         chat_sessions[session_id].append({"role": "user", "content": user_input})
@@ -1051,9 +1051,9 @@ def calculate_dosage_stream():
             ):
                 token = chunk.get("answer", "")
                 acc += token
-                yield token
+                yield token.encode('utf-8')
         except Exception as e:
-            yield f'\n{{"error":"Vector error: {str(e)}"}}'
+            yield f'{{"error":"Vector error: {str(e)}"}}'.encode('utf-8')
 
         chat_sessions[session_id].append({
             "role": "user",
@@ -1515,9 +1515,9 @@ def calculate_dosage_stream_with_context():
             ):
                 token = chunk.get("answer", "")
                 acc += token
-                yield token
+                yield token.encode('utf-8')
         except Exception as e:
-            yield f'\n{{"error":"Vector error: {str(e)}"}}'
+            yield f'{{"error":"Vector error: {str(e)}"}}'.encode('utf-8')
 
         chat_sessions[session_id].append({"role": "user", "content": f"[Dosage+Ctx] {merged}"})
         chat_sessions[session_id].append({"role": "assistant", "content": acc})
@@ -1769,9 +1769,9 @@ def stream_with_template():
             ):
                 token = chunk.get("answer", "")
                 answer += token
-                yield token
+                yield token.encode('utf-8')
         except Exception as e:
-            yield f"\n[Vector error: {str(e)}]"
+            yield f"\n[Vector error: {str(e)}]".encode('utf-8')
 
         chat_sessions[session_id].append({"role": "user", "content": f"[TemplateMode] {user_input}"})
         chat_sessions[session_id].append({"role": "assistant", "content": answer})

@@ -9,9 +9,11 @@ import logging
 from uuid import uuid4
 from dotenv import load_dotenv
 from openai import OpenAI
+
 # ===== Optional RAG bits (kept from your original) =====
 from langchain_openai import OpenAIEmbeddings
-from langchain_qdrant import Qdrant
+# FIX: Use QdrantVectorStore instead of the deprecated Qdrant wrapper
+from langchain_qdrant import QdrantVectorStore 
 import qdrant_client
 
 # ===== Boot =====
@@ -72,10 +74,12 @@ OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 if not OPENAI_API_KEY:
     raise EnvironmentError("OPENAI_API_KEY not set")
 
-OPENAI_SESSION_URL = "https://api.openai.com/v1/realtime/sessions"
+# FIX: Updated to the new General Availability endpoint for ephemeral tokens
+OPENAI_SESSION_URL = "https://api.openai.com/v1/realtime/client_secrets"
 OPENAI_API_URL     = "https://api.openai.com/v1/realtime"
 CHAT_API_URL       = "https://api.openai.com/v1/chat/completions"
 oai_client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+
 # Realtime config
 MODEL_ID = "gpt-4o-realtime-preview-2024-12-17"
 VOICE    = "ballad"  # client can override to "alloy" via session.update
@@ -96,10 +100,11 @@ try:
     ast.expr_context
 except NameError:
     helper_context = {} 
+
 # Your global system prompt
 from prompts.system_prompt import SYSTEM_PROMPT as DEFAULT_INSTRUCTIONS
 
-# ===== RAG store (unchanged) =====
+# ===== RAG store =====
 def get_vector_store():
     try:
         client = qdrant_client.QdrantClient(
@@ -107,10 +112,11 @@ def get_vector_store():
             api_key=os.getenv("QDRANT_API_KEY"),
         )
         embeddings = OpenAIEmbeddings()
-        return Qdrant(
+        # FIX: Replaced Qdrant with QdrantVectorStore and changed `embeddings` to `embedding`
+        return QdrantVectorStore(
             client=client,
             collection_name=os.getenv("QDRANT_COLLECTION_NAME"),
-            embeddings=embeddings,
+            embedding=embeddings,
         )
     except Exception as e:
         logger.warning(f"RAG init failed: {e}")
@@ -170,18 +176,29 @@ def _create_realtime_session(merged_instructions: str) -> str:
     Tools are registered later by the browser via datachannel session.update.
     """
     headers = {"Authorization": f"Bearer {OPENAI_API_KEY}", "Content-Type": "application/json"}
+    
+    # FIX: Nest the Realtime parameters inside a "session" object for the GA endpoint
     payload = {
-        "model": MODEL_ID,
-        "voice": VOICE,
-        "instructions": merged_instructions or DEFAULT_INSTRUCTIONS
-        # (You *can* also pass 'turn_detection' or 'tools' here if you want the server to own it.)
+        "session": {
+            "model": MODEL_ID,
+            "voice": VOICE,
+            "instructions": merged_instructions or DEFAULT_INSTRUCTIONS
+        }
     }
+    
     r = requests.post(OPENAI_SESSION_URL, headers=headers, json=payload, timeout=30)
     if not r.ok:
         logger.error(f"Realtime session create failed: {r.text}")
         return ""
+    
     data = r.json()
-    return data.get("client_secret", {}).get("value", "")
+    
+    # FIX: Parse the new GA response structure to get the ephemeral token
+    client_secret = data.get("client_secret", {})
+    if isinstance(client_secret, dict) and "value" in client_secret:
+        return client_secret.get("value", "")
+    
+    return data.get("value", "")
 
 def _exchange_sdp(ephemeral_token: str, client_sdp: str) -> requests.Response:
     """
@@ -509,6 +526,7 @@ def clinical_notes_save():
         "updated_at": __import__("datetime").datetime.utcnow().isoformat() + "Z"
     }
     return jsonify({"ok": True})
+
 @app.post("/api/clinical-notes/suggest-section")
 def clinical_notes_suggest_section():
     """
